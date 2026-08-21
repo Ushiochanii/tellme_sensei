@@ -44,9 +44,9 @@ class ProcessingWorker(QObject):
 
         logger.info("Worker.run entered [%s]", current_thread_info())
         try:
-            logger.info("OCR started [%s]", current_thread_info())
-            self.ocr_started.emit()
             if self._ocr_text is None:
+                logger.info("OCR started [%s]", current_thread_info())
+                self.ocr_started.emit()
                 if self.image is None:
                     raise PipelineError("没有可处理的截图。")
                 logger.info("before OCRService.recognize [%s]", current_thread_info())

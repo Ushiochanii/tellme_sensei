@@ -1,4 +1,4 @@
-"""Small Phase 4-6 launcher window and GUI pipeline coordinator."""
+"""GUI pipeline coordinator used by both tray mode and the dev window."""
 
 from __future__ import annotations
 
@@ -7,12 +7,13 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal, Slot
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.capture.overlay import CaptureOverlay
 from app.config import ConfigError, ConfigManager
 from app.services.deepseek_service import DeepSeekService
 from app.services.ocr_service import OCRService
+from app.state import AppState
 from app.thread_info import current_thread_info
 from app.ui.answer_window import AnswerWindow
 from app.workers.processing_worker import ProcessingWorker
@@ -21,13 +22,16 @@ logger = logging.getLogger(__name__)
 
 
 class MainWindow(QWidget):
-    """Minimal launcher; business work stays in services and the worker."""
+    """Keep GUI state and route work to the existing services/worker."""
 
     processing_finished = Signal()
 
-    def __init__(self, debug_capture_path: Path | None = None) -> None:
+    def __init__(self, debug_capture_path: Path | None = None, tray_mode: bool = False) -> None:
         super().__init__()
         self.debug_capture_path = debug_capture_path
+        self.tray_mode = tray_mode
+        self.state = AppState.IDLE
+        self._shutting_down = False
         self._overlay: CaptureOverlay | None = None
         self._answer_window: AnswerWindow | None = None
         self.processing_thread: QThread | None = None
@@ -39,7 +43,7 @@ class MainWindow(QWidget):
         self.setFixedSize(260, 140)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
-        label = QLabel("Phase 4–6 调试入口")
+        label = QLabel("Phase 4–7 调试入口")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.capture_button = QPushButton("截图识别")
         self.capture_button.setMinimumHeight(38)
@@ -48,21 +52,35 @@ class MainWindow(QWidget):
         layout.addWidget(self.capture_button)
 
     @Slot()
-    def start_capture(self) -> None:
-        if self._busy or self._overlay is not None:
-            return
-        self.hide()
+    def start_capture(self) -> bool:
+        """Start one capture unless the application is already busy."""
+
+        if self._shutting_down or self.state is not AppState.IDLE or self._busy or self._overlay is not None:
+            logger.info("capture ignored: application busy")
+            return False
+
+        logger.info("capture requested")
+        self.state = AppState.CAPTURING
+        self._busy = True
+        self.capture_button.setEnabled(False)
+        if not self.tray_mode:
+            self.hide()
         try:
             self._overlay = CaptureOverlay(debug_path=self.debug_capture_path)
         except Exception as exc:
             logger.exception("创建截图 Overlay 失败")
-            self.show()
+            self._restore_idle()
+            if not self.tray_mode:
+                self.show()
             self._show_or_create_answer()
+            self._answer_window.show_at_current_screen()
             self._answer_window.show_error(f"无法开始截图：{exc}")
-            return
+            return False
+
         self._overlay.captured.connect(self._on_capture)
         self._overlay.cancelled.connect(self._on_capture_cancelled)
         self._overlay.begin()
+        return True
 
     @Slot(QImage)
     def _on_capture(self, image: QImage) -> None:
@@ -74,6 +92,7 @@ class MainWindow(QWidget):
         )
         self._overlay = None
         self._busy = True
+        self.state = AppState.OCR_PROCESSING
         self.capture_button.setEnabled(False)
         self._last_ocr_text = ""
         self._show_or_create_answer()
@@ -83,9 +102,11 @@ class MainWindow(QWidget):
     @Slot()
     def _on_capture_cancelled(self) -> None:
         self._overlay = None
-        self.capture_button.setEnabled(True)
-        self.show()
-        self.raise_()
+        self._restore_idle()
+        if not self.tray_mode:
+            self.show()
+            self.raise_()
+            self.activateWindow()
 
     def _show_or_create_answer(self) -> None:
         if self._answer_window is not None:
@@ -104,8 +125,8 @@ class MainWindow(QWidget):
             config = ConfigManager().load(require_api_key=False)
         except ConfigError as exc:
             self._answer_window.show_error(str(exc))
-            self._busy = False
-            self.capture_button.setEnabled(True)
+            self._restore_idle()
+            self.processing_finished.emit()
             return
 
         ocr_service = OCRService(language=config.ocr_language)
@@ -116,7 +137,7 @@ class MainWindow(QWidget):
         worker = ProcessingWorker(image, ocr_service, deepseek_service, ocr_text=ocr_text)
         logger.info("Worker created [%s]", current_thread_info())
         worker.moveToThread(thread)
-        # QObject-worker pattern: the run slot must be connected before start().
+
         thread.started.connect(self._on_thread_started)
         thread.started.connect(worker.run)
         worker.ocr_started.connect(self._on_ocr_started)
@@ -129,6 +150,9 @@ class MainWindow(QWidget):
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._on_thread_finished)
+
+        # These are intentionally long-lived Python references. The worker must
+        # remain alive until QThread.finished has run.
         self.processing_thread = thread
         self.processing_worker = worker
         thread.start()
@@ -140,6 +164,7 @@ class MainWindow(QWidget):
 
     @Slot()
     def _on_ocr_started(self) -> None:
+        self.state = AppState.OCR_PROCESSING
         if self._answer_window is not None:
             self._answer_window.set_status("正在识别题目...")
 
@@ -151,6 +176,7 @@ class MainWindow(QWidget):
 
     @Slot()
     def _on_ai_started(self) -> None:
+        self.state = AppState.AI_PROCESSING
         if self._answer_window is not None:
             self._answer_window.set_ai_processing()
 
@@ -162,13 +188,13 @@ class MainWindow(QWidget):
 
     @Slot(str)
     def _on_error(self, message: str) -> None:
+        self.state = AppState.ERROR
         if self._answer_window is not None:
             self._answer_window.show_error(message)
 
     @Slot()
     def _on_worker_finished(self) -> None:
-        # The thread's finished signal performs final cleanup and re-enables retry.
-        pass
+        logger.info("Worker finished signal received [%s]", current_thread_info())
 
     @Slot()
     def _on_thread_finished(self) -> None:
@@ -176,6 +202,7 @@ class MainWindow(QWidget):
         self.processing_thread = None
         self.processing_worker = None
         self._busy = False
+        self.state = AppState.IDLE
         self.capture_button.setEnabled(True)
         if self._answer_window is not None:
             self._answer_window.set_retry_enabled(bool(self._last_ocr_text))
@@ -183,9 +210,11 @@ class MainWindow(QWidget):
 
     @Slot()
     def _retry_analysis(self) -> None:
-        if self._busy or not self._last_ocr_text:
+        if self._busy or self.state is not AppState.IDLE or not self._last_ocr_text:
+            logger.info("capture ignored: application busy")
             return
         self._busy = True
+        self.state = AppState.AI_PROCESSING
         if self._answer_window is not None:
             self._answer_window.set_ai_processing()
         self._launch_worker(None, ocr_text=self._last_ocr_text)
@@ -196,6 +225,45 @@ class MainWindow(QWidget):
         self._answer_window = None
         if answer is not None:
             answer.deleteLater()
+        if not self.tray_mode and not self._shutting_down:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+    def show_launcher(self) -> None:
+        """Show the small development window from the tray Settings action."""
+
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def _restore_idle(self) -> None:
+        self._busy = False
+        self.state = AppState.IDLE
+        self.capture_button.setEnabled(True)
+
+    def shutdown(self) -> None:
+        """Stop accepting work and synchronously clean up GUI-owned resources."""
+
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        self._restore_idle()
+        if self._overlay is not None:
+            self._overlay.close()
+            self._overlay = None
+
+        thread = self.processing_thread
+        if thread is not None and thread.isRunning():
+            logger.info("waiting for processing worker during shutdown")
+            thread.requestInterruption()
+            thread.quit()
+            if not thread.wait(8000):
+                logger.warning("processing worker did not stop in time; terminating thread")
+                thread.terminate()
+                thread.wait(2000)
+        self.processing_thread = None
+        self.processing_worker = None
+        if self._answer_window is not None:
+            self._answer_window.close()
+            self._answer_window = None
