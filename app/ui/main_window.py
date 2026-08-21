@@ -140,12 +140,13 @@ class MainWindow(QWidget):
         deepseek_service = DeepSeekService(config)
         thread = QThread(self)
         thread.setObjectName("StudyAssistantProcessingThread")
+        thread.setProperty("processing_job_id", job_id)
         logger.info("QThread created job_id=%s [%s]", job_id, current_thread_info())
         worker = ProcessingWorker(image, ocr_service, deepseek_service, ocr_text=ocr_text, job_id=job_id)
         logger.info("Worker created job_id=%s [%s]", job_id, current_thread_info())
         worker.moveToThread(thread)
 
-        thread.started.connect(lambda: self._on_thread_started(job_id))
+        thread.started.connect(self._on_thread_started)
         thread.started.connect(worker.run)
         worker.job_ocr_started.connect(self._on_ocr_started)
         worker.job_ocr_finished.connect(self._on_ocr_finished)
@@ -157,7 +158,7 @@ class MainWindow(QWidget):
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda: self._on_thread_finished(job_id))
+        thread.finished.connect(self._on_thread_finished)
 
         self._active_job_id = job_id
         self._cancelled_job_id = None
@@ -166,8 +167,11 @@ class MainWindow(QWidget):
         thread.start()
         logger.info("QThread.start called job_id=%s [%s]", job_id, current_thread_info())
 
-    @Slot(str)
-    def _on_thread_started(self, job_id: str) -> None:
+    @Slot()
+    def _on_thread_started(self, job_id: str | None = None) -> None:
+        if job_id is None:
+            sender = self.sender()
+            job_id = sender.property("processing_job_id") if sender is not None else self._active_job_id
         logger.info("QThread.started emitted job_id=%s [%s]", job_id, current_thread_info())
 
     def _is_active_job(self, job_id: str, signal_name: str) -> bool:
@@ -238,10 +242,11 @@ class MainWindow(QWidget):
         if self._is_active_job(job_id, "worker_finished"):
             logger.info("Worker finished signal received job_id=%s [%s]", job_id, current_thread_info())
 
-    @Slot(str)
+    @Slot()
     def _on_thread_finished(self, job_id: str | None = None) -> None:
         if job_id is None:
-            job_id = self._active_job_id
+            sender = self.sender()
+            job_id = sender.property("processing_job_id") if sender is not None else self._active_job_id
         if not self._is_active_job(job_id, "thread_finished"):
             return
         logger.info("QThread finished job_id=%s [%s]", job_id, current_thread_info())
