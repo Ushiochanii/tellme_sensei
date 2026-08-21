@@ -42,7 +42,8 @@ class ApplicationController(QObject):
 
     def start(self, show_window: bool = False) -> None:
         self.tray.show()
-        self.hotkey.register()
+        if not self.hotkey.register():
+            logger.warning("global hotkey registration failed; open Settings to change it")
         if show_window:
             self.window.show()
         else:

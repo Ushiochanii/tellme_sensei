@@ -25,3 +25,12 @@ class GlobalHotkeyManager(QObject):
     def unregister(self) -> None:
         """Release the hotkey and any platform event hooks."""
         raise NotImplementedError
+
+    @property
+    def shortcut(self) -> str:
+        """Return the canonical configured shortcut string."""
+        raise NotImplementedError
+
+    def rebind(self, shortcut: str) -> bool:
+        """Atomically replace the configured shortcut when supported."""
+        raise NotImplementedError

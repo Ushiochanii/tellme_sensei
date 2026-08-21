@@ -5,6 +5,7 @@ import threading
 import time
 
 from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtGui import QKeySequence
 
 from app.config import AppConfig, ConfigManager
 from app.services.deepseek_service import DeepSeekError
@@ -45,6 +46,19 @@ class FakeKeyring:
 
     def delete_password(self, service: str, account: str) -> None:
         self.values.pop((service, account), None)
+
+
+class FakeHotkeyManager:
+    def __init__(self, shortcut: str = "Ctrl+Shift+Q", rebind_result: bool = True) -> None:
+        self.shortcut = shortcut
+        self.rebind_result = rebind_result
+        self.rebind_calls: list[str] = []
+
+    def rebind(self, shortcut: str) -> bool:
+        self.rebind_calls.append(shortcut)
+        if self.rebind_result:
+            self.shortcut = shortcut
+        return self.rebind_result
 
 
 def make_manager(tmp_path, secret_store=None) -> ConfigManager:
@@ -111,6 +125,22 @@ def test_dotenv_api_key_is_used_when_secret_store_is_empty(tmp_path, monkeypatch
     assert config.api_key == "dotenv-key"
 
 
+def test_saved_shortcut_is_restored_on_startup(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GLOBAL_SHORTCUT", raising=False)
+    SettingsRepository(tmp_path / "settings.json").update(
+        {"global_shortcut": "Ctrl+Alt+A"}
+    )
+    assert make_manager(tmp_path).load(False).global_shortcut == "Ctrl+Alt+A"
+
+
+def test_invalid_saved_shortcut_falls_back_to_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GLOBAL_SHORTCUT", raising=False)
+    SettingsRepository(tmp_path / "settings.json").update(
+        {"global_shortcut": "Ctrl+Win+Q"}
+    )
+    assert make_manager(tmp_path).load(False).global_shortcut == "Ctrl+Shift+Q"
+
+
 def test_saved_model_and_timeout_override_dotenv(tmp_path, monkeypatch) -> None:
     write_dotenv(tmp_path, DEEPSEEK_MODEL="dotenv-model", DEEPSEEK_TIMEOUT="15")
     repository = SettingsRepository(tmp_path / "settings.json")
@@ -157,6 +187,88 @@ def test_secret_store_uses_injected_keyring_only() -> None:
     assert store.get_api_key() == ""
 
 
+def test_repository_partial_update_preserves_existing_settings(tmp_path) -> None:
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.update(
+        {
+            "model": "model-a",
+            "request_timeout": 12,
+            "global_shortcut": "Ctrl+Alt+A",
+            "answer_window_geometry": {"x": -1200, "y": 80, "width": 450, "height": 600},
+        }
+    )
+    repository.update({"model": "model-b"})
+    saved = repository.load()
+    assert saved["model"] == "model-b"
+    assert saved["request_timeout"] == 12.0
+    assert saved["global_shortcut"] == "Ctrl+Alt+A"
+    assert saved["answer_window_geometry"]["x"] == -1200
+
+
+def test_geometry_round_trip_and_offscreen_fallback(qt_app, tmp_path) -> None:
+    from app.ui.answer_window import AnswerWindow
+
+    repository = SettingsRepository(tmp_path / "settings.json")
+    window = AnswerWindow(settings_repository=repository)
+    window.setGeometry(20, 30, 500, 550)
+    window.close()
+    qt_app.processEvents()
+    assert repository.load()["answer_window_geometry"] == {
+        "x": 20,
+        "y": 30,
+        "width": 500,
+        "height": 550,
+    }
+
+    repository.update(
+        {"answer_window_geometry": {"x": 100000, "y": 100000, "width": 500, "height": 550}}
+    )
+    restored = AnswerWindow(settings_repository=repository)
+    assert restored._geometry_restored is False
+    restored.show_at_current_screen()
+    restored.close()
+    qt_app.processEvents()
+
+
+def test_settings_save_applies_shortcut_immediately(qt_app, tmp_path) -> None:
+    hotkey = FakeHotkeyManager()
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")), hotkey_manager=hotkey)
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+A"))
+    window.save()
+    assert hotkey.rebind_calls == ["Ctrl+Alt+A"]
+    assert window.config_manager.settings_repository.load()["global_shortcut"] == "Ctrl+Alt+A"
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_failed_shortcut_rebind_does_not_persist_new_value(qt_app, tmp_path) -> None:
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.update({"global_shortcut": "Ctrl+Shift+Q"})
+    hotkey = FakeHotkeyManager(rebind_result=False)
+    manager = make_manager(tmp_path, FakeSecretStore("key"))
+    window = SettingsWindow(manager, hotkey_manager=hotkey)
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+A"))
+    window.save()
+    assert repository.load()["global_shortcut"] == "Ctrl+Shift+Q"
+    assert "注册失败" in window.status_label.text()
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_settings_cancel_discards_edits_and_reopen_reloads_saved_values(qt_app, tmp_path) -> None:
+    manager = make_manager(tmp_path, FakeSecretStore("key"))
+    window = MainWindow(tray_mode=True, config_manager=manager)
+    window.show_settings()
+    settings = window._settings_window
+    settings.model_edit.setText("unsaved-model")
+    settings.close()
+    window.show_settings()
+    assert window._settings_window.model_edit.text() == "deepseek-chat"
+    window.shutdown()
+    window.close()
+    qt_app.processEvents()
+
+
 def test_api_key_never_appears_in_settings_json(tmp_path) -> None:
     path = tmp_path / "settings.json"
     SettingsRepository(path).save({"model": "deepseek-chat", "request_timeout": 60})
@@ -186,7 +298,11 @@ def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
     window.save()
 
     assert secret_store.set_values == ["new-key"]
-    assert manager.settings_repository.load() == {"model": "new-model", "request_timeout": 33.0}
+    assert manager.settings_repository.load() == {
+        "model": "new-model",
+        "request_timeout": 33.0,
+        "global_shortcut": "Ctrl+Shift+Q",
+    }
     window.deleteLater()
     qt_app.processEvents()
 

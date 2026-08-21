@@ -14,15 +14,24 @@ logger = logging.getLogger(__name__)
 class UnsupportedGlobalHotkey(GlobalHotkeyManager):
     """Safe fallback when a platform hotkey implementation is unavailable."""
 
-    def __init__(self, parent: QObject | None = None, platform_name: str = "unknown") -> None:
+    def __init__(self, parent: QObject | None = None, platform_name: str = "unknown", shortcut: str = "Ctrl+Shift+Q") -> None:
         super().__init__(parent)
         self.platform_name = platform_name
+        self._shortcut = shortcut
 
     @property
     def registered(self) -> bool:
         return False
 
+    @property
+    def shortcut(self) -> str:
+        return self._shortcut
+
     def register(self) -> bool:
+        logger.warning("global hotkey unsupported on platform: %s", self.platform_name)
+        return False
+
+    def rebind(self, shortcut: str) -> bool:
         logger.warning("global hotkey unsupported on platform: %s", self.platform_name)
         return False
 

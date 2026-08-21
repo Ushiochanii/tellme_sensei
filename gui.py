@@ -9,8 +9,10 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
+from app.config import ConfigError, ConfigManager
 from app.logging_config import configure_logging
 from app.platform.factory import create_global_hotkey_manager
+from app.platform.hotkey import DEFAULT_SHORTCUT
 from app.ui.application_controller import ApplicationController
 from app.ui.main_window import MainWindow
 from app.ui.tray import SystemTrayController
@@ -38,9 +40,21 @@ def main(argv: list[str] | None = None) -> int:
     app.setQuitOnLastWindowClosed(False)
     logger.info("GUI 程序启动")
 
-    window = MainWindow(debug_capture_path=args.debug_capture, tray_mode=not args.show_window)
+    config_manager = ConfigManager()
+    try:
+        startup_config = config_manager.load(require_api_key=False)
+        startup_shortcut = startup_config.global_shortcut
+    except ConfigError as exc:
+        logger.warning("invalid startup settings; using default shortcut: %s", exc)
+        startup_shortcut = DEFAULT_SHORTCUT
     tray = SystemTrayController(parent=app)
-    hotkey = create_global_hotkey_manager(parent=app)
+    hotkey = create_global_hotkey_manager(parent=app, shortcut=startup_shortcut)
+    window = MainWindow(
+        debug_capture_path=args.debug_capture,
+        tray_mode=not args.show_window,
+        config_manager=config_manager,
+        hotkey_manager=hotkey,
+    )
     controller = ApplicationController(app, window, tray, hotkey)
     app.aboutToQuit.connect(controller.cleanup)
     controller.start(show_window=args.show_window)
