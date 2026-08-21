@@ -19,11 +19,14 @@ class ApplicationController(QObject):
         self.tray = tray
         self.hotkey = hotkey
         self._shutting_down = False
+        self._quit_called = False
 
         self.tray.capture_requested.connect(self.window.start_capture)
         self.tray.settings_requested.connect(self.window.show_launcher)
         self.hotkey.triggered.connect(self.window.start_capture)
         self.tray.exit_requested.connect(self.request_exit)
+        if hasattr(self.window, "shutdown_ready"):
+            self.window.shutdown_ready.connect(self._on_shutdown_ready)
 
     def start(self, show_window: bool = False) -> None:
         self.tray.show()
@@ -34,14 +37,34 @@ class ApplicationController(QObject):
             self.window.hide()
 
     def request_exit(self) -> None:
-        self.cleanup()
-        self.app.quit()
+        """Begin shutdown; QApplication.quit waits for shutdown_ready."""
 
-    def cleanup(self) -> None:
         if self._shutting_down:
             return
         self._shutting_down = True
-        self.window.shutdown()
         self.hotkey.unregister()
+        request_shutdown = getattr(self.window, "request_shutdown", None)
+        if callable(request_shutdown):
+            request_shutdown()
+        else:
+            self.window.shutdown()
+
+    def _on_shutdown_ready(self) -> None:
+        if self._quit_called:
+            return
+        self._quit_called = True
         self.tray.hide()
         logger.info("application exiting")
+        self.app.quit()
+
+    def cleanup(self) -> None:
+        """Final idempotent cleanup for QApplication.aboutToQuit."""
+
+        if self._quit_called:
+            return
+        self._shutting_down = True
+        if not hasattr(self.window, "shutdown_ready"):
+            self.window.shutdown()
+        self.hotkey.unregister()
+        self.tray.hide()
+        self._quit_called = True
