@@ -101,3 +101,20 @@ GUI 的 OCR 与 DeepSeek 请求运行在 `QThread` 中，主线程只负责界�
 ## 日志和隐私
 
 运行日志写入 `logs/app.log`，只记录阶段、状态和文本长度，不记录 API Key 或完整题目。当前阶段不会上传截图，只会把本地 OCR 文本发送到 DeepSeek；截图不会由程序永久保存。
+
+## Phase 7: tray mode and global hotkey
+
+The default GUI entry point runs as a Windows tray application:
+
+```powershell
+python gui.py
+```
+
+Use `Ctrl+Shift+Q`, the tray menu, or a double-click on the tray icon to
+start screenshot recognition. `Esc` and right-click cancel capture. The
+development launcher remains available with `python gui.py --show-window`.
+The tray exit action unregisters the Win32 hotkey and stops the application.
+
+During OCR or AI processing, use `停止` or press `Esc` in the answer window to
+request a cooperative cancellation. After the worker exits, `重新分析` keeps
+the existing OCR text, while `重新截图` starts a fresh capture job.

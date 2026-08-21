@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.capture.overlay import CaptureOverlay
 from app.config import AppConfig
+from app.state import AppState
 from app.services.deepseek_service import DeepSeekService
 from app.services.ocr_service import OCRLine, OCRResult, OCRService
 from app.ui import main_window as main_window_module
@@ -179,6 +180,8 @@ def test_main_window_runs_worker_through_real_qthread(qt_app, monkeypatch) -> No
     assert window._last_ocr_text == "真实 QThread OCR"
     assert window._answer_window is not None
     assert "真实 QThread OCR" in window._answer_window.answer_edit.toPlainText()
+    assert window.state is AppState.IDLE
+    assert window._busy is False
     window._answer_window.close()
     window.close()
     qt_app.processEvents()

@@ -1,4 +1,4 @@
-"""Frameless, always-on-top answer window."""
+"""Frameless, always-on-top answer window with cancellable-job controls."""
 
 from __future__ import annotations
 
@@ -55,9 +55,11 @@ class _TitleBar(QWidget):
 
 
 class AnswerWindow(QWidget):
-    """Display OCR text, AI output, status, retry and clipboard actions."""
+    """Display OCR/AI output and control the active processing job."""
 
     reanalyze_requested = Signal()
+    stop_requested = Signal()
+    recapture_requested = Signal()
     closed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -110,14 +112,22 @@ class AnswerWindow(QWidget):
         footer_layout.setContentsMargins(14, 8, 6, 8)
         self.copy_button = QPushButton("复制答案")
         self.retry_button = QPushButton("重新分析")
+        self.stop_button = QPushButton("停止")
+        self.recapture_button = QPushButton("重新截图")
         close_button = QPushButton("关闭")
         self.copy_button.clicked.connect(self.copy_answer)
         self.retry_button.clicked.connect(self.reanalyze_requested.emit)
+        self.stop_button.clicked.connect(self.stop_requested.emit)
+        self.recapture_button.clicked.connect(self.recapture_requested.emit)
         close_button.clicked.connect(self.close)
         self.copy_button.setEnabled(False)
         self.retry_button.setEnabled(False)
+        self.stop_button.setVisible(False)
+        self.recapture_button.setVisible(False)
         footer_layout.addWidget(self.copy_button)
         footer_layout.addWidget(self.retry_button)
+        footer_layout.addWidget(self.stop_button)
+        footer_layout.addWidget(self.recapture_button)
         footer_layout.addWidget(close_button)
         footer_layout.addStretch(1)
         footer_layout.addWidget(QSizeGrip(footer))
@@ -143,8 +153,20 @@ class AnswerWindow(QWidget):
         return label
 
     def show_processing(self) -> None:
+        self._answer_text = ""
+        self.answer_edit.clear()
+        self.copy_button.setEnabled(False)
+        self.retry_button.setEnabled(False)
+        self.recapture_button.setVisible(False)
+        self.stop_button.setVisible(True)
+        self.stop_button.setEnabled(True)
         self.set_status("正在识别题目...")
         self.show_at_current_screen()
+
+    def set_ocr_processing(self) -> None:
+        self.set_status("正在识别题目...")
+        self.stop_button.setVisible(True)
+        self.stop_button.setEnabled(True)
 
     def show_at_current_screen(self) -> None:
         screen = QGuiApplication.screenAt(QCursor.pos())
@@ -166,19 +188,43 @@ class AnswerWindow(QWidget):
 
     def set_ai_processing(self) -> None:
         self.set_status("正在请求 AI...")
-        self.answer_edit.setPlainText("")
+        self.answer_edit.clear()
         self.copy_button.setEnabled(False)
         self.retry_button.setEnabled(False)
+        self.recapture_button.setVisible(False)
+        self.stop_button.setVisible(True)
+        self.stop_button.setEnabled(True)
+
+    def set_cancelling(self) -> None:
+        self.set_status("正在取消...")
+        self.stop_button.setEnabled(False)
+        self.retry_button.setEnabled(False)
+        self.recapture_button.setVisible(False)
+
+    def show_cancelled(self) -> None:
+        self.set_status("已取消")
+        self.stop_button.setVisible(False)
+        self.stop_button.setEnabled(False)
+        self.copy_button.setEnabled(False)
+        self.retry_button.setEnabled(bool(self._ocr_text))
+        self.recapture_button.setVisible(True)
+        self.recapture_button.setEnabled(True)
 
     def set_result(self, answer: str) -> None:
         self._answer_text = answer
         self.answer_edit.setPlainText(answer)
         self.set_status("完成")
+        self.stop_button.setVisible(False)
+        self.stop_button.setEnabled(False)
+        self.recapture_button.setVisible(False)
         self.copy_button.setEnabled(bool(answer))
         self.retry_button.setEnabled(bool(self._ocr_text))
 
     def show_error(self, message: str) -> None:
         self.set_status(f"失败：{message}")
+        self.stop_button.setVisible(False)
+        self.stop_button.setEnabled(False)
+        self.recapture_button.setVisible(False)
         self.retry_button.setEnabled(bool(self._ocr_text))
 
     def set_retry_enabled(self, enabled: bool) -> None:
@@ -189,6 +235,13 @@ class AnswerWindow(QWidget):
             return
         QApplication.clipboard().setText(self._answer_text)
         self.set_status("答案已复制")
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt API name
+        if event.key() == Qt.Key.Key_Escape and self.stop_button.isVisible() and self.stop_button.isEnabled():
+            self.stop_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
         if not self._closed_emitted:
