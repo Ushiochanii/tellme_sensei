@@ -187,6 +187,7 @@ class AnswerWindow(QWidget):
         self.ocr_edit.setPlainText(text)
 
     def set_ai_processing(self) -> None:
+        self._answer_text = ""
         self.set_status("正在请求 AI...")
         self.answer_edit.clear()
         self.copy_button.setEnabled(False)
@@ -202,6 +203,8 @@ class AnswerWindow(QWidget):
         self.recapture_button.setVisible(False)
 
     def show_cancelled(self) -> None:
+        self._answer_text = ""
+        self.answer_edit.setPlainText("已取消，未生成 AI 答案。")
         self.set_status("已取消")
         self.stop_button.setVisible(False)
         self.stop_button.setEnabled(False)
@@ -221,9 +224,12 @@ class AnswerWindow(QWidget):
         self.retry_button.setEnabled(bool(self._ocr_text))
 
     def show_error(self, message: str) -> None:
+        self._answer_text = ""
+        self.answer_edit.setPlainText(f"AI 解析失败。\n{message}")
         self.set_status(f"失败：{message}")
         self.stop_button.setVisible(False)
         self.stop_button.setEnabled(False)
+        self.copy_button.setEnabled(False)
         self.recapture_button.setVisible(False)
         self.retry_button.setEnabled(bool(self._ocr_text))
 
