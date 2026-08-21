@@ -124,6 +124,25 @@ Future macOS work will require Screen Recording permission handling and a
 platform-specific global hotkey implementation. The application and service
 layers remain independent of those platform details.
 
+## Windows portable build
+
+Build prerequisites: Windows, Python 3.12, and the project `.venv` with
+`requirements-dev.txt` installed. From the repository root, run:
+
+```powershell
+.\scripts\build_windows.ps1
+```
+
+The onedir output is `dist\TellMeSensei\TellMeSensei.exe`. The portable build
+does not require Python, a virtual environment, the repository, or a `.env`
+file at runtime. Save the DeepSeek API key from Settings; it remains in the
+Windows Credential Manager and is never placed in `settings.json`.
+
+On first OCR use, PaddleOCR may download its model files to Paddle's normal
+per-user cache. The packaged application does not bundle those models and does
+not depend on the current working directory. Runtime logs are stored in the
+Qt user data directory, normally `%LOCALAPPDATA%\TellMeSensei\logs\app.log`.
+
 During OCR or AI processing, use `停止` or press `Esc` in the answer window to
 request a cooperative cancellation. After the worker exits, `重新分析` keeps
 the existing OCR text, while `重新截图` starts a fresh capture job.

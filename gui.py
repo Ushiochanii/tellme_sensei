@@ -16,6 +16,7 @@ from app.platform.hotkey import DEFAULT_SHORTCUT
 from app.ui.application_controller import ApplicationController
 from app.ui.main_window import MainWindow
 from app.ui.tray import SystemTrayController
+from app.version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +35,10 @@ def main(argv: list[str] | None = None) -> int:
         help="可选：将本次框选结果保存到指定 PNG，用于确认截图区域。",
     )
     args = parser.parse_args(argv)
-    configure_logging()
-
     app = QApplication.instance() or QApplication(sys.argv)
+    configure_logging()
     app.setQuitOnLastWindowClosed(False)
+    logger.info("TellMeSensei version=%s", __version__)
     logger.info("GUI 程序启动")
 
     config_manager = ConfigManager()
