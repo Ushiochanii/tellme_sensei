@@ -10,4 +10,5 @@ class AppState(Enum):
     CAPTURING = auto()
     OCR_PROCESSING = auto()
     AI_PROCESSING = auto()
+    CANCELLING = auto()
     ERROR = auto()

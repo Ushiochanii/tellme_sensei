@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal, Slot
@@ -36,6 +37,8 @@ class MainWindow(QWidget):
         self._answer_window: AnswerWindow | None = None
         self.processing_thread: QThread | None = None
         self.processing_worker: ProcessingWorker | None = None
+        self._active_job_id: str | None = None
+        self._cancelled_job_id: str | None = None
         self._busy = False
         self._last_ocr_text = ""
 
@@ -43,7 +46,7 @@ class MainWindow(QWidget):
         self.setFixedSize(260, 140)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
-        label = QLabel("Phase 4–7 调试入口")
+        label = QLabel("Phase 4-7 调试入口")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.capture_button = QPushButton("截图识别")
         self.capture_button.setMinimumHeight(38)
@@ -114,10 +117,14 @@ class MainWindow(QWidget):
         self._answer_window = AnswerWindow()
         self._answer_window.closed.connect(self._on_answer_closed)
         self._answer_window.reanalyze_requested.connect(self._retry_analysis)
+        self._answer_window.stop_requested.connect(self.cancel_processing)
+        self._answer_window.recapture_requested.connect(self._recapture_requested)
 
     def _launch_worker(self, image: QImage | None, ocr_text: str | None) -> None:
+        job_id = uuid.uuid4().hex
         logger.info(
-            "start_processing called retry=%s [%s]",
+            "start_processing called job_id=%s retry=%s [%s]",
+            job_id,
             ocr_text is not None,
             current_thread_info(),
         )
@@ -133,80 +140,141 @@ class MainWindow(QWidget):
         deepseek_service = DeepSeekService(config)
         thread = QThread(self)
         thread.setObjectName("StudyAssistantProcessingThread")
-        logger.info("QThread created [%s]", current_thread_info())
-        worker = ProcessingWorker(image, ocr_service, deepseek_service, ocr_text=ocr_text)
-        logger.info("Worker created [%s]", current_thread_info())
+        logger.info("QThread created job_id=%s [%s]", job_id, current_thread_info())
+        worker = ProcessingWorker(image, ocr_service, deepseek_service, ocr_text=ocr_text, job_id=job_id)
+        logger.info("Worker created job_id=%s [%s]", job_id, current_thread_info())
         worker.moveToThread(thread)
 
-        thread.started.connect(self._on_thread_started)
+        thread.started.connect(lambda: self._on_thread_started(job_id))
         thread.started.connect(worker.run)
-        worker.ocr_started.connect(self._on_ocr_started)
-        worker.ocr_finished.connect(self._on_ocr_finished)
-        worker.ai_started.connect(self._on_ai_started)
-        worker.result_ready.connect(self._on_result)
-        worker.error_occurred.connect(self._on_error)
-        worker.finished.connect(self._on_worker_finished)
+        worker.job_ocr_started.connect(self._on_ocr_started)
+        worker.job_ocr_finished.connect(self._on_ocr_finished)
+        worker.job_ai_started.connect(self._on_ai_started)
+        worker.job_result_ready.connect(self._on_result)
+        worker.job_error_occurred.connect(self._on_error)
+        worker.cancelled.connect(self._on_cancelled)
+        worker.job_finished.connect(self._on_worker_finished)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_thread_finished)
+        thread.finished.connect(lambda: self._on_thread_finished(job_id))
 
-        # These are intentionally long-lived Python references. The worker must
-        # remain alive until QThread.finished has run.
+        self._active_job_id = job_id
+        self._cancelled_job_id = None
         self.processing_thread = thread
         self.processing_worker = worker
         thread.start()
-        logger.info("QThread.start called [%s]", current_thread_info())
-
-    @Slot()
-    def _on_thread_started(self) -> None:
-        logger.info("QThread.started emitted [%s]", current_thread_info())
-
-    @Slot()
-    def _on_ocr_started(self) -> None:
-        self.state = AppState.OCR_PROCESSING
-        if self._answer_window is not None:
-            self._answer_window.set_status("正在识别题目...")
+        logger.info("QThread.start called job_id=%s [%s]", job_id, current_thread_info())
 
     @Slot(str)
-    def _on_ocr_finished(self, text: str) -> None:
+    def _on_thread_started(self, job_id: str) -> None:
+        logger.info("QThread.started emitted job_id=%s [%s]", job_id, current_thread_info())
+
+    def _is_active_job(self, job_id: str, signal_name: str) -> bool:
+        if job_id != self._active_job_id:
+            logger.info("ignored stale %s job_id=%s active_job_id=%s", signal_name, job_id, self._active_job_id)
+            return False
+        return True
+
+    @Slot(str)
+    def _on_ocr_started(self, job_id: str) -> None:
+        if not self._is_active_job(job_id, "ocr_started"):
+            return
+        self.state = AppState.OCR_PROCESSING
+        if self._answer_window is not None:
+            self._answer_window.set_ocr_processing()
+
+    @Slot(str, str)
+    def _on_ocr_finished(self, job_id: str, text: str) -> None:
+        if not self._is_active_job(job_id, "ocr_finished"):
+            return
         self._last_ocr_text = text
         if self._answer_window is not None:
             self._answer_window.set_ocr_text(text)
 
-    @Slot()
-    def _on_ai_started(self) -> None:
+    @Slot(str)
+    def _on_ai_started(self, job_id: str) -> None:
+        if not self._is_active_job(job_id, "ai_started"):
+            return
         self.state = AppState.AI_PROCESSING
         if self._answer_window is not None:
             self._answer_window.set_ai_processing()
 
-    @Slot(object)
-    def _on_result(self, result) -> None:
+    @Slot(str, object)
+    def _on_result(self, job_id: str, result) -> None:
+        if not self._is_active_job(job_id, "result_ready"):
+            return
         if self._answer_window is not None:
             self._answer_window.set_ocr_text(result.ocr.text)
             self._answer_window.set_result(result.answer)
 
-    @Slot(str)
-    def _on_error(self, message: str) -> None:
+    @Slot(str, str)
+    def _on_error(self, job_id: str, message: str | None = None) -> None:
+        if message is None:
+            message = job_id
+            job_id = self._active_job_id
+            if job_id is None:
+                self.state = AppState.ERROR
+                if self._answer_window is not None:
+                    self._answer_window.show_error(message)
+                return
+        if not self._is_active_job(job_id, "error"):
+            return
         self.state = AppState.ERROR
         if self._answer_window is not None:
             self._answer_window.show_error(message)
 
-    @Slot()
-    def _on_worker_finished(self) -> None:
-        logger.info("Worker finished signal received [%s]", current_thread_info())
+    @Slot(str)
+    def _on_cancelled(self, job_id: str) -> None:
+        if not self._is_active_job(job_id, "cancelled"):
+            return
+        self._cancelled_job_id = job_id
+        self.state = AppState.CANCELLING
+        if self._answer_window is not None:
+            self._answer_window.show_cancelled()
 
-    @Slot()
-    def _on_thread_finished(self) -> None:
-        logger.info("QThread finished [%s]", current_thread_info())
+    @Slot(str)
+    def _on_worker_finished(self, job_id: str) -> None:
+        if self._is_active_job(job_id, "worker_finished"):
+            logger.info("Worker finished signal received job_id=%s [%s]", job_id, current_thread_info())
+
+    @Slot(str)
+    def _on_thread_finished(self, job_id: str | None = None) -> None:
+        if job_id is None:
+            job_id = self._active_job_id
+        if not self._is_active_job(job_id, "thread_finished"):
+            return
+        logger.info("QThread finished job_id=%s [%s]", job_id, current_thread_info())
         self.processing_thread = None
         self.processing_worker = None
+        self._active_job_id = None
         self._busy = False
         self.state = AppState.IDLE
         self.capture_button.setEnabled(True)
         if self._answer_window is not None:
+            if self._cancelled_job_id == job_id:
+                self._answer_window.show_cancelled()
             self._answer_window.set_retry_enabled(bool(self._last_ocr_text))
+        self._cancelled_job_id = None
         self.processing_finished.emit()
+
+    @Slot()
+    def cancel_processing(self) -> None:
+        """Request a cooperative stop for the active OCR/AI job."""
+
+        if self.state is AppState.CANCELLING:
+            logger.info("cancel ignored: already cancelling")
+            return
+        if self.state not in (AppState.OCR_PROCESSING, AppState.AI_PROCESSING):
+            logger.info("cancel ignored: no processing job")
+            return
+        if self.processing_worker is None or self._active_job_id is None:
+            logger.info("cancel ignored: processing worker unavailable")
+            return
+        self.state = AppState.CANCELLING
+        if self._answer_window is not None:
+            self._answer_window.set_cancelling()
+        self.processing_worker.request_cancel()
 
     @Slot()
     def _retry_analysis(self) -> None:
@@ -218,6 +286,18 @@ class MainWindow(QWidget):
         if self._answer_window is not None:
             self._answer_window.set_ai_processing()
         self._launch_worker(None, ocr_text=self._last_ocr_text)
+
+    @Slot()
+    def _recapture_requested(self) -> None:
+        if self._busy or self.state is not AppState.IDLE:
+            logger.info("capture ignored: application busy")
+            return
+        answer = self._answer_window
+        self._answer_window = None
+        if answer is not None:
+            answer.close()
+            answer.deleteLater()
+        self.start_capture()
 
     @Slot()
     def _on_answer_closed(self) -> None:
@@ -243,7 +323,7 @@ class MainWindow(QWidget):
         self.capture_button.setEnabled(True)
 
     def shutdown(self) -> None:
-        """Stop accepting work and synchronously clean up GUI-owned resources."""
+        """Stop accepting work and request safe GUI-owned resource cleanup."""
 
         if self._shutting_down:
             return
@@ -255,15 +335,16 @@ class MainWindow(QWidget):
 
         thread = self.processing_thread
         if thread is not None and thread.isRunning():
-            logger.info("waiting for processing worker during shutdown")
+            logger.info("waiting for processing worker cancellation during shutdown")
+            if self.processing_worker is not None:
+                self.processing_worker.request_cancel()
             thread.requestInterruption()
-            thread.quit()
-            if not thread.wait(8000):
-                logger.warning("processing worker did not stop in time; terminating thread")
-                thread.terminate()
-                thread.wait(2000)
-        self.processing_thread = None
-        self.processing_worker = None
+            if not thread.wait(10000):
+                logger.warning("processing worker is still stopping; no forced thread termination will be used")
+        if thread is None or not thread.isRunning():
+            self.processing_thread = None
+            self.processing_worker = None
+            self._active_job_id = None
         if self._answer_window is not None:
             self._answer_window.close()
             self._answer_window = None

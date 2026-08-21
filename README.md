@@ -114,3 +114,7 @@ Use `Ctrl+Shift+Q`, the tray menu, or a double-click on the tray icon to
 start screenshot recognition. `Esc` and right-click cancel capture. The
 development launcher remains available with `python gui.py --show-window`.
 The tray exit action unregisters the Win32 hotkey and stops the application.
+
+During OCR or AI processing, use `停止` or press `Esc` in the answer window to
+request a cooperative cancellation. After the worker exits, `重新分析` keeps
+the existing OCR text, while `重新截图` starts a fresh capture job.
