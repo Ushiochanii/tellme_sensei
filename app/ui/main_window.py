@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.capture.overlay import CaptureOverlay
 from app.config import ConfigError, ConfigManager
+from app.platform.base import GlobalHotkeyManager
 from app.services.deepseek_service import DeepSeekService
 from app.services.ocr_service import OCRService
 from app.state import AppState
@@ -34,11 +35,13 @@ class MainWindow(QWidget):
         debug_capture_path: Path | None = None,
         tray_mode: bool = False,
         config_manager: ConfigManager | None = None,
+        hotkey_manager: GlobalHotkeyManager | None = None,
     ) -> None:
         super().__init__()
         self.debug_capture_path = debug_capture_path
         self.tray_mode = tray_mode
         self.config_manager = config_manager or ConfigManager()
+        self.hotkey_manager = hotkey_manager
         self.state = AppState.IDLE
         self._shutting_down = False
         self._overlay: CaptureOverlay | None = None
@@ -112,6 +115,9 @@ class MainWindow(QWidget):
         if self._settings_window is not None:
             self._settings_window.request_shutdown()
 
+        if self._answer_window is not None:
+            self._answer_window.close()
+
         thread = self.processing_thread
         if thread is not None and thread.isRunning():
             self.state = AppState.CANCELLING
@@ -164,7 +170,9 @@ class MainWindow(QWidget):
     def _show_or_create_answer(self) -> None:
         if self._answer_window is not None:
             return
-        self._answer_window = AnswerWindow()
+        self._answer_window = AnswerWindow(
+            settings_repository=self.config_manager.settings_repository
+        )
         self._answer_window.closed.connect(self._on_answer_closed)
         self._answer_window.reanalyze_requested.connect(self._retry_analysis)
         self._answer_window.stop_requested.connect(self.cancel_processing)
@@ -390,8 +398,12 @@ class MainWindow(QWidget):
         """Show one reusable SettingsWindow from the system tray."""
 
         if self._settings_window is None:
-            self._settings_window = SettingsWindow(config_manager=self.config_manager)
+            self._settings_window = SettingsWindow(
+                config_manager=self.config_manager,
+                hotkey_manager=self.hotkey_manager,
+            )
             self._settings_window.shutdown_ready.connect(self._on_settings_shutdown_ready)
+        self._settings_window.reload_values()
         self._settings_window.show()
         self._settings_window.raise_()
         self._settings_window.activateWindow()

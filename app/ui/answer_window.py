@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, Signal
+import logging
+
+from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -15,6 +17,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from app.settings.repository import SettingsRepository
+
+logger = logging.getLogger(__name__)
 
 
 class _TitleBar(QWidget):
@@ -62,8 +68,14 @@ class AnswerWindow(QWidget):
     recapture_requested = Signal()
     closed = Signal()
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        settings_repository: SettingsRepository | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._settings_repository = settings_repository or SettingsRepository()
+        self._geometry_restored = False
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -72,6 +84,7 @@ class AnswerWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setMinimumSize(360, 420)
         self.resize(450, 600)
+        self._restore_saved_geometry()
         self._ocr_text = ""
         self._answer_text = ""
         self._closed_emitted = False
@@ -173,11 +186,43 @@ class AnswerWindow(QWidget):
         if screen is None:
             screen = QGuiApplication.primaryScreen()
         self.show()
-        if screen is not None:
+        if screen is not None and not self._geometry_restored:
             available = screen.availableGeometry()
             self.move(available.right() - self.width() - 18, available.top() + 40)
         self.raise_()
         self.activateWindow()
+
+    def _restore_saved_geometry(self) -> None:
+        geometry = self._settings_repository.load().get("answer_window_geometry")
+        if not isinstance(geometry, dict):
+            return
+        rect = QRect(
+            geometry["x"],
+            geometry["y"],
+            max(360, geometry["width"]),
+            max(420, geometry["height"]),
+        )
+        screens = QGuiApplication.screens()
+        if screens and not any(rect.intersects(screen.availableGeometry()) for screen in screens):
+            return
+        self.setGeometry(rect)
+        self._geometry_restored = True
+
+    def _save_geometry(self) -> None:
+        rect = self.geometry()
+        try:
+            self._settings_repository.update(
+                {
+                    "answer_window_geometry": {
+                        "x": rect.x(),
+                        "y": rect.y(),
+                        "width": rect.width(),
+                        "height": rect.height(),
+                    }
+                }
+            )
+        except (OSError, ValueError):
+            logger.exception("failed to save answer window geometry")
 
     def set_status(self, status: str) -> None:
         self.status_label.setText(f"状态：{status}")
@@ -250,6 +295,7 @@ class AnswerWindow(QWidget):
         super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
+        self._save_geometry()
         if not self._closed_emitted:
             self._closed_emitted = True
             self.closed.emit()

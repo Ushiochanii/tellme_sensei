@@ -7,10 +7,12 @@ import threading
 from dataclasses import replace
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QKeySequenceEdit,
     QLineEdit,
     QPushButton,
     QVBoxLayout,
@@ -18,6 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.config import AppConfig, ConfigError, ConfigManager
+from app.platform.base import GlobalHotkeyManager
+from app.platform.hotkey import DEFAULT_SHORTCUT, HotkeySpec, HotkeySpecError
 from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
 from app.settings.secret_store import SecretStoreError
 
@@ -71,10 +75,12 @@ class SettingsWindow(QWidget):
     def __init__(
         self,
         config_manager: ConfigManager | None = None,
+        hotkey_manager: GlobalHotkeyManager | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.config_manager = config_manager or ConfigManager()
+        self.hotkey_manager = hotkey_manager
         self._connection_thread: QThread | None = None
         self._connection_worker: ConnectionTestWorker | None = None
         self._connection_cancel_event: threading.Event | None = None
@@ -93,9 +99,12 @@ class SettingsWindow(QWidget):
         self.api_key_edit.setPlaceholderText("输入 DeepSeek API Key")
         self.model_edit = QLineEdit()
         self.timeout_edit = QLineEdit()
+        self.shortcut_edit = QKeySequenceEdit()
+        self.shortcut_edit.setMaximumSequenceLength(1)
         form.addRow("DeepSeek API Key", self.api_key_edit)
         form.addRow("Model", self.model_edit)
         form.addRow("Request timeout", self.timeout_edit)
+        form.addRow("Global shortcut", self.shortcut_edit)
         root.addLayout(form)
 
         self.status_label = QLabel()
@@ -125,8 +134,15 @@ class SettingsWindow(QWidget):
         self.api_key_edit.setText(config.api_key)
         self.model_edit.setText(config.model)
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
+        self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
         if self.config_manager.has_explicit_api_key():
             self._set_status(API_KEY_ENV_OVERRIDE_MESSAGE)
+
+    def reload_values(self) -> None:
+        """Reload persisted values when the window is shown again."""
+
+        if not self.is_connection_running():
+            self._load_current_values()
 
     def _read_config_from_fields(self) -> AppConfig:
         model = self.model_edit.text().strip()
@@ -138,6 +154,15 @@ class SettingsWindow(QWidget):
             raise ValueError("Request timeout 必须是正数") from exc
         if request_timeout <= 0:
             raise ValueError("Request timeout 必须是正数")
+        sequence = self.shortcut_edit.keySequence()
+        if sequence.count() != 1:
+            raise ValueError("快捷键只能包含一个组合")
+        try:
+            global_shortcut = HotkeySpec.parse(
+                sequence.toString(QKeySequence.SequenceFormat.PortableText)
+            ).canonical
+        except HotkeySpecError as exc:
+            raise ValueError(str(exc)) from exc
         current = self.config_manager.load(require_api_key=False)
         return AppConfig(
             api_key=self.api_key_edit.text().strip(),
@@ -145,6 +170,7 @@ class SettingsWindow(QWidget):
             base_url=current.base_url,
             request_timeout=request_timeout,
             ocr_language=current.ocr_language,
+            global_shortcut=global_shortcut,
         )
 
     @Slot()
@@ -203,14 +229,29 @@ class SettingsWindow(QWidget):
 
     @Slot()
     def save(self) -> None:
+        old_shortcut = self.hotkey_manager.shortcut if self.hotkey_manager is not None else None
+        rebound = False
         try:
             config = self._read_config_from_fields()
+            if (
+                self.hotkey_manager is not None
+                and old_shortcut is not None
+                and config.global_shortcut != old_shortcut
+            ):
+                if not self.hotkey_manager.rebind(config.global_shortcut):
+                    self._set_status("快捷键注册失败，可能已被其他程序占用。")
+                    return
+                rebound = True
             self.config_manager.save_settings(
                 config.api_key,
                 config.model,
                 config.request_timeout,
+                config.global_shortcut,
             )
         except (ConfigError, SecretStoreError, ValueError) as exc:
+            if rebound and self.hotkey_manager is not None and old_shortcut is not None:
+                if not self.hotkey_manager.rebind(old_shortcut):
+                    logger.error("failed to rollback shortcut after settings save failure")
             self._set_status(str(exc))
             return
         self._set_status("设置已保存")

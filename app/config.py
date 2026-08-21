@@ -8,6 +8,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from app.platform.hotkey import DEFAULT_SHORTCUT, HotkeySpec, HotkeySpecError
 from app.settings.repository import SettingsRepository
 from app.settings.secret_store import SecretStore
 
@@ -25,6 +26,7 @@ class AppConfig:
     base_url: str = "https://api.deepseek.com"
     request_timeout: float = 60.0
     ocr_language: str = "japan"
+    global_shortcut: str = DEFAULT_SHORTCUT
 
 
 class ConfigManager:
@@ -100,7 +102,21 @@ class ConfigManager:
                     self._file_value(dotenv_config, "OCR_LANGUAGE") or "japan",
                 )
             ),
+            global_shortcut=self._normalized_shortcut(
+                self._os_value("GLOBAL_SHORTCUT")
+                or saved_settings.get(
+                    "global_shortcut",
+                    self._file_value(dotenv_config, "GLOBAL_SHORTCUT") or DEFAULT_SHORTCUT,
+                )
+            ),
         )
+
+    @staticmethod
+    def _normalized_shortcut(value: str) -> str:
+        try:
+            return HotkeySpec.parse(value).canonical
+        except (HotkeySpecError, TypeError):
+            return DEFAULT_SHORTCUT
 
     def _read_dotenv_values(self) -> dict[str, str]:
         try:
@@ -123,13 +139,20 @@ class ConfigManager:
         value = values.get(name)
         return value.strip() if isinstance(value, str) and value.strip() else None
 
-    def save_settings(self, api_key: str, model: str, request_timeout: float) -> None:
+    def save_settings(
+        self,
+        api_key: str,
+        model: str,
+        request_timeout: float,
+        global_shortcut: str | None = None,
+    ) -> None:
         """Save API key and normal settings through their dedicated stores."""
 
         if api_key.strip():
             self.secret_store.set_api_key(api_key)
         else:
             self.secret_store.delete_api_key()
-        self.settings_repository.save(
-            {"model": model, "request_timeout": request_timeout}
-        )
+        settings = {"model": model, "request_timeout": request_timeout}
+        if global_shortcut is not None:
+            settings["global_shortcut"] = self._normalized_shortcut(global_shortcut)
+        self.settings_repository.update(settings)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -53,25 +55,76 @@ class SettingsRepository:
             value = raw.get(key)
             if isinstance(value, str) and value.strip():
                 settings[key] = value.strip()
+        shortcut = raw.get("global_shortcut")
+        if isinstance(shortcut, str) and shortcut.strip():
+            settings["global_shortcut"] = shortcut.strip()
+        geometry = self._normalize_geometry(raw.get("answer_window_geometry"))
+        if geometry is not None:
+            settings["answer_window_geometry"] = geometry
         return settings
 
     def save(self, settings: Mapping[str, Any]) -> None:
-        """Persist only the allow-listed non-sensitive settings."""
+        """Backward-compatible alias for an allow-listed partial update."""
 
-        model = str(settings.get("model", DEFAULT_MODEL)).strip()
-        if not model:
-            raise ValueError("model 不能为空")
-        try:
-            request_timeout = float(settings.get("request_timeout", DEFAULT_REQUEST_TIMEOUT))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("request_timeout 必须是正数") from exc
-        if request_timeout <= 0:
-            raise ValueError("request_timeout 必须是正数")
+        self.update(settings)
 
-        payload = {"model": model, "request_timeout": request_timeout}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+    def update(self, settings: Mapping[str, Any]) -> None:
+        """Merge supported values without deleting unrelated saved settings."""
+
+        payload = self.load()
+        if "model" in settings:
+            model = str(settings["model"]).strip()
+            if not model:
+                raise ValueError("model 不能为空")
+            payload["model"] = model
+        if "request_timeout" in settings:
+            try:
+                request_timeout = float(settings["request_timeout"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("request_timeout 必须是正数") from exc
+            if request_timeout <= 0:
+                raise ValueError("request_timeout 必须是正数")
+            payload["request_timeout"] = request_timeout
+        if "global_shortcut" in settings:
+            shortcut = str(settings["global_shortcut"]).strip()
+            if not shortcut:
+                raise ValueError("global_shortcut 不能为空")
+            payload["global_shortcut"] = shortcut
+        if "answer_window_geometry" in settings:
+            geometry = self._normalize_geometry(settings["answer_window_geometry"])
+            if geometry is None:
+                raise ValueError("answer_window_geometry 无效")
+            payload["answer_window_geometry"] = geometry
+
+        self._atomic_write(payload)
         logger.info("settings saved")
+
+    @staticmethod
+    def _normalize_geometry(value: Any) -> dict[str, int] | None:
+        if not isinstance(value, Mapping):
+            return None
+        result: dict[str, int] = {}
+        for key in ("x", "y", "width", "height"):
+            item = value.get(key)
+            if not isinstance(item, int) or isinstance(item, bool):
+                return None
+            result[key] = item
+        if result["width"] <= 0 or result["height"] <= 0:
+            return None
+        return result
+
+    def _atomic_write(self, payload: Mapping[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = self.path.with_name(
+            f".{self.path.name}.{uuid.uuid4().hex}.tmp"
+        )
+        try:
+            with temporary_path.open("w", encoding="utf-8") as temporary:
+                json.dump(payload, temporary, ensure_ascii=False, indent=2)
+                temporary.write("\n")
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            temporary_path.replace(self.path)
+        finally:
+            if temporary_path.exists():
+                temporary_path.unlink()
