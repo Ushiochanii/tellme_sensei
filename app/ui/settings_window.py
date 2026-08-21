@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import replace
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
@@ -21,6 +22,11 @@ from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, Deep
 from app.settings.secret_store import SecretStoreError
 
 logger = logging.getLogger(__name__)
+CONNECTION_TEST_TIMEOUT = 10.0
+API_KEY_ENV_OVERRIDE_MESSAGE = (
+    "当前 API Key 由环境变量 DEEPSEEK_API_KEY 覆盖。"
+    "在设置中保存新的 API Key 不会改变当前实际使用的 Key。"
+)
 
 
 class ConnectionTestWorker(QObject):
@@ -119,6 +125,8 @@ class SettingsWindow(QWidget):
         self.api_key_edit.setText(config.api_key)
         self.model_edit.setText(config.model)
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
+        if self.config_manager.has_explicit_api_key():
+            self._set_status(API_KEY_ENV_OVERRIDE_MESSAGE)
 
     def _read_config_from_fields(self) -> AppConfig:
         model = self.model_edit.text().strip()
@@ -152,6 +160,7 @@ class SettingsWindow(QWidget):
             self._set_status("请输入 API Key 后再测试连接")
             return
 
+        config = replace(config, request_timeout=min(config.request_timeout, CONNECTION_TEST_TIMEOUT))
         self._close_requested = False
         self._connection_cancel_event = threading.Event()
         worker = ConnectionTestWorker(config, self._connection_cancel_event)
@@ -205,6 +214,8 @@ class SettingsWindow(QWidget):
             self._set_status(str(exc))
             return
         self._set_status("设置已保存")
+        if self.config_manager.has_explicit_api_key():
+            self._set_status(API_KEY_ENV_OVERRIDE_MESSAGE)
         self.settings_saved.emit()
         self.close()
 

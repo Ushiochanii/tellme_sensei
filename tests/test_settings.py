@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import os
 import threading
 import time
 
@@ -55,6 +55,13 @@ def make_manager(tmp_path, secret_store=None) -> ConfigManager:
     )
 
 
+def write_dotenv(tmp_path, **values: str) -> None:
+    (tmp_path / ".env").write_text(
+        "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+        encoding="utf-8",
+    )
+
+
 def wait_for_connection(window: SettingsWindow, qt_app) -> None:
     loop = QEventLoop()
     timer = QTimer()
@@ -70,6 +77,7 @@ def wait_for_connection(window: SettingsWindow, qt_app) -> None:
 def test_env_overrides_saved_model_and_timeout(tmp_path, monkeypatch) -> None:
     repository = SettingsRepository(tmp_path / "settings.json")
     repository.save({"model": "saved-model", "request_timeout": 10})
+    write_dotenv(tmp_path, DEEPSEEK_MODEL="dotenv-model", DEEPSEEK_TIMEOUT="15")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.setenv("DEEPSEEK_MODEL", "env-model")
     monkeypatch.setenv("DEEPSEEK_TIMEOUT", "25")
@@ -80,18 +88,64 @@ def test_env_overrides_saved_model_and_timeout(tmp_path, monkeypatch) -> None:
     assert config.request_timeout == 25.0
 
 
-def test_env_api_key_overrides_secret_store(tmp_path, monkeypatch) -> None:
+def test_secret_store_api_key_overrides_dotenv_api_key(tmp_path, monkeypatch) -> None:
+    write_dotenv(tmp_path, DEEPSEEK_API_KEY="dotenv-key")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    config = make_manager(tmp_path, FakeSecretStore("stored-key")).load(False)
+    assert config.api_key == "stored-key"
+
+
+def test_explicit_os_api_key_overrides_secret_store(tmp_path, monkeypatch) -> None:
+    write_dotenv(tmp_path, DEEPSEEK_API_KEY="dotenv-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
     config = make_manager(tmp_path, FakeSecretStore("stored-key")).load(False)
     assert config.api_key == "env-key"
 
 
-def test_secret_store_is_used_when_env_absent(tmp_path, monkeypatch) -> None:
+def test_dotenv_api_key_is_used_when_secret_store_is_empty(tmp_path, monkeypatch) -> None:
+    write_dotenv(tmp_path, DEEPSEEK_API_KEY="dotenv-key")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
     monkeypatch.delenv("DEEPSEEK_TIMEOUT", raising=False)
-    config = make_manager(tmp_path, FakeSecretStore("stored-key")).load(False)
-    assert config.api_key == "stored-key"
+    config = make_manager(tmp_path, FakeSecretStore()).load(False)
+    assert config.api_key == "dotenv-key"
+
+
+def test_saved_model_and_timeout_override_dotenv(tmp_path, monkeypatch) -> None:
+    write_dotenv(tmp_path, DEEPSEEK_MODEL="dotenv-model", DEEPSEEK_TIMEOUT="15")
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.save({"model": "saved-model", "request_timeout": 20})
+    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+    monkeypatch.delenv("DEEPSEEK_TIMEOUT", raising=False)
+
+    config = make_manager(tmp_path).load(False)
+
+    assert config.model == "saved-model"
+    assert config.request_timeout == 20.0
+
+
+def test_explicit_os_model_and_timeout_override_saved_settings(tmp_path, monkeypatch) -> None:
+    SettingsRepository(tmp_path / "settings.json").save(
+        {"model": "saved-model", "request_timeout": 20}
+    )
+    monkeypatch.setenv("DEEPSEEK_MODEL", "env-model")
+    monkeypatch.setenv("DEEPSEEK_TIMEOUT", "25")
+
+    config = make_manager(tmp_path).load(False)
+
+    assert config.model == "env-model"
+    assert config.request_timeout == 25.0
+
+
+def test_config_manager_does_not_inject_dotenv_into_os_environment(tmp_path, monkeypatch) -> None:
+    write_dotenv(tmp_path, DEEPSEEK_API_KEY="dotenv-key")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    assert "DEEPSEEK_API_KEY" not in os.environ
+    config = make_manager(tmp_path, FakeSecretStore()).load(False)
+
+    assert config.api_key == "dotenv-key"
+    assert "DEEPSEEK_API_KEY" not in os.environ
 
 
 def test_secret_store_uses_injected_keyring_only() -> None:
@@ -137,6 +191,21 @@ def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
     qt_app.processEvents()
 
 
+def test_settings_warns_when_os_api_key_overrides_saved_key(qt_app, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "environment-key")
+    secret_store = FakeSecretStore("stored-key")
+    window = SettingsWindow(make_manager(tmp_path, secret_store))
+
+    assert "DEEPSEEK_API_KEY" in window.status_label.text()
+    window.api_key_edit.setText("new-saved-key")
+    window.save()
+
+    assert secret_store.set_values == ["new-saved-key"]
+    assert "不会改变当前实际使用" in window.status_label.text()
+    window.deleteLater()
+    qt_app.processEvents()
+
+
 def test_connection_success_runs_off_gui_thread(qt_app, tmp_path, monkeypatch) -> None:
     main_thread = threading.get_ident()
     worker_threads: list[int] = []
@@ -158,6 +227,30 @@ def test_connection_success_runs_off_gui_thread(qt_app, tmp_path, monkeypatch) -
     wait_for_connection(window, qt_app)
     assert window.status_label.text() == "连接成功"
     assert worker_threads and worker_threads[0] != main_thread
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_connection_uses_current_input_key_and_bounded_timeout(qt_app, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "environment-key")
+    received: list[AppConfig] = []
+
+    class FakeService:
+        def __init__(self, config: AppConfig) -> None:
+            received.append(config)
+
+        def test_connection(self, _cancel_event) -> bool:
+            return True
+
+    monkeypatch.setattr(settings_window_module, "DeepSeekService", FakeService)
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("stored-key")))
+    window.api_key_edit.setText("input-key")
+    window.timeout_edit.setText("60")
+    window.test_connection()
+    wait_for_connection(window, qt_app)
+
+    assert received and received[0].api_key == "input-key"
+    assert received[0].request_timeout == 10.0
     window.deleteLater()
     qt_app.processEvents()
 

@@ -95,7 +95,7 @@ class DeepSeekService:
 
         self._raise_if_cancelled(cancel_event)
         if not self.config.api_key:
-            raise DeepSeekError("未配置 DeepSeek API Key。")
+            raise DeepSeekError("未配置 DeepSeek API Key，请在设置中保存 API Key。")
 
         client = self._get_client()
         response = None
@@ -149,7 +149,7 @@ class DeepSeekService:
             return self._client
         if not self.config.api_key:
             raise DeepSeekError(
-                "未配置 DeepSeek API Key。请复制 .env.example 为 .env，并填写 DEEPSEEK_API_KEY。"
+                "未配置 DeepSeek API Key，请在设置中保存 API Key，或检查 .env 配置。"
             )
         try:
             from openai import OpenAI
@@ -169,7 +169,7 @@ class DeepSeekService:
     def _format_error(exc: Exception) -> str:
         status_code = getattr(exc, "status_code", None)
         if status_code == 401:
-            return "DeepSeek API Key 无效（401）。请检查 .env 中的 DEEPSEEK_API_KEY。"
+            return "DeepSeek API Key 无效（401）。请前往设置检查 API Key。"
         if status_code == 403:
             return "DeepSeek API 访问被拒绝（403）。请检查账户权限或 API Key。"
         if status_code == 429:

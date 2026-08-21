@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 from app.settings.repository import SettingsRepository
 from app.settings.secret_store import SecretStore
@@ -41,15 +41,22 @@ class ConfigManager:
         self.settings_repository = settings_repository or SettingsRepository(config_path)
         self.secret_store = secret_store or SecretStore()
 
+    def has_explicit_api_key(self) -> bool:
+        """Return whether a real OS environment variable overrides stored settings."""
+
+        return bool(os.environ.get("DEEPSEEK_API_KEY", "").strip())
+
     def load(self, require_api_key: bool = True) -> AppConfig:
         """Return one immutable runtime configuration without logging secrets."""
 
-        load_dotenv(self.project_root / ".env", override=False)
+        dotenv_config = self._read_dotenv_values()
         saved_settings = self.settings_repository.load()
 
-        api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
-        if not api_key:
+        api_key = self._os_value("DEEPSEEK_API_KEY")
+        if api_key is None:
             api_key = self.secret_store.get_api_key()
+        if not api_key:
+            api_key = self._file_value(dotenv_config, "DEEPSEEK_API_KEY") or ""
         if require_api_key and not api_key:
             raise ConfigError(
                 "未配置 DeepSeek API Key。请在设置中保存，或在 .env 中填写 DEEPSEEK_API_KEY。"
@@ -57,9 +64,10 @@ class ConfigManager:
 
         try:
             request_timeout = float(
-                os.getenv(
-                    "DEEPSEEK_TIMEOUT",
-                    str(saved_settings.get("request_timeout", 60)),
+                self._os_value("DEEPSEEK_TIMEOUT")
+                or saved_settings.get(
+                    "request_timeout",
+                    self._file_value(dotenv_config, "DEEPSEEK_TIMEOUT") or 60,
                 )
             )
         except (TypeError, ValueError) as exc:
@@ -69,20 +77,51 @@ class ConfigManager:
 
         return AppConfig(
             api_key=api_key,
-            model=os.getenv(
-                "DEEPSEEK_MODEL",
-                str(saved_settings.get("model", "deepseek-chat")),
+            model=(
+                self._os_value("DEEPSEEK_MODEL")
+                or saved_settings.get(
+                    "model",
+                    self._file_value(dotenv_config, "DEEPSEEK_MODEL") or "deepseek-chat",
+                )
             ),
-            base_url=os.getenv(
-                "DEEPSEEK_BASE_URL",
-                str(saved_settings.get("base_url", "https://api.deepseek.com")),
+            base_url=(
+                self._os_value("DEEPSEEK_BASE_URL")
+                or saved_settings.get(
+                    "base_url",
+                    self._file_value(dotenv_config, "DEEPSEEK_BASE_URL")
+                    or "https://api.deepseek.com",
+                )
             ),
             request_timeout=request_timeout,
-            ocr_language=os.getenv(
-                "OCR_LANGUAGE",
-                str(saved_settings.get("ocr_language", "japan")),
+            ocr_language=(
+                self._os_value("OCR_LANGUAGE")
+                or saved_settings.get(
+                    "ocr_language",
+                    self._file_value(dotenv_config, "OCR_LANGUAGE") or "japan",
+                )
             ),
         )
+
+    def _read_dotenv_values(self) -> dict[str, str]:
+        try:
+            values = dotenv_values(self.project_root / ".env")
+        except OSError:
+            return {}
+        return {
+            key: value.strip()
+            for key, value in values.items()
+            if isinstance(value, str) and value.strip()
+        }
+
+    @staticmethod
+    def _os_value(name: str) -> str | None:
+        value = os.environ.get(name)
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    @staticmethod
+    def _file_value(values: dict[str, str], name: str) -> str | None:
+        value = values.get(name)
+        return value.strip() if isinstance(value, str) and value.strip() else None
 
     def save_settings(self, api_key: str, model: str, request_timeout: float) -> None:
         """Save API key and normal settings through their dedicated stores."""
