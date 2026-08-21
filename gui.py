@@ -13,6 +13,7 @@ from app.config import ConfigError, ConfigManager
 from app.logging_config import configure_logging
 from app.platform.factory import create_global_hotkey_manager
 from app.platform.hotkey import DEFAULT_SHORTCUT
+from app.runtime_paths import APPLICATION_DIRECTORY
 from app.ui.application_controller import ApplicationController
 from app.ui.main_window import MainWindow
 from app.ui.tray import SystemTrayController
@@ -36,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName(APPLICATION_DIRECTORY)
+    app.setOrganizationName(APPLICATION_DIRECTORY)
     configure_logging()
     app.setQuitOnLastWindowClosed(False)
     logger.info("TellMeSensei version=%s", __version__)

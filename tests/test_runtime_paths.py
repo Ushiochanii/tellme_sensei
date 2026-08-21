@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from app.logging_config import configure_logging
@@ -25,6 +26,20 @@ def test_logging_accepts_explicit_test_path(tmp_path: Path) -> None:
     configure_logging(tmp_path)
     try:
         logging.getLogger("runtime-path-test").info("test log")
+        assert (tmp_path / "logs" / "app.log").is_file()
+    finally:
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+            handler.close()
+
+
+def test_logging_without_stderr_uses_file_handler(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(sys, "stderr", None)
+    configure_logging(tmp_path)
+    try:
+        handlers = logging.getLogger().handlers
+        assert any(isinstance(handler, logging.FileHandler) for handler in handlers)
+        assert not any(type(handler) is logging.StreamHandler for handler in handlers)
         assert (tmp_path / "logs" / "app.log").is_file()
     finally:
         for handler in logging.getLogger().handlers:

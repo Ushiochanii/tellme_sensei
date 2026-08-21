@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from tempfile import gettempdir
 
@@ -30,12 +31,15 @@ def configure_logging(project_root: Path | None = None) -> None:
         log_file = Path(gettempdir()) / APPLICATION_DIRECTORY / "logs" / "app.log"
         log_file.parent.mkdir(parents=True, exist_ok=True)
 
+    handlers: list[logging.Handler] = [
+        logging.FileHandler(log_file, encoding="utf-8")
+    ]
+    if sys.stderr is not None:
+        handlers.append(logging.StreamHandler(sys.stderr))
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(),
-        ],
+        handlers=handlers,
         force=True,
     )
