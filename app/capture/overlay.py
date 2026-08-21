@@ -100,6 +100,7 @@ class CaptureOverlay(QWidget):
                 logger.warning("无法保存调试截图: %s", self.debug_path)
             else:
                 logger.info("调试截图已保存: %s", self.debug_path)
+        self.hide()
         self.captured.emit(image)
         self.close()
 

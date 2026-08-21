@@ -16,6 +16,7 @@ from app.logging_config import configure_logging
 from app.platform.factory import create_global_hotkey_manager
 from app.platform.hotkey import DEFAULT_SHORTCUT
 from app.runtime_paths import APPLICATION_DIRECTORY
+from app.single_instance import SingleInstanceGuard
 from app.ui.application_controller import ApplicationController
 from app.ui.main_window import MainWindow
 from app.ui.tray import SystemTrayController
@@ -61,6 +62,9 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APPLICATION_DIRECTORY)
     app.setOrganizationName(APPLICATION_DIRECTORY)
+    single_instance = SingleInstanceGuard(parent=app)
+    if not single_instance.acquire():
+        return 0
     configure_logging()
     app.setQuitOnLastWindowClosed(False)
     logger.info("TellMeSensei version=%s", __version__)
@@ -82,7 +86,10 @@ def main(argv: list[str] | None = None) -> int:
         hotkey_manager=hotkey,
     )
     controller = ApplicationController(app, window, tray, hotkey)
+    # Keep the Python wrapper alive as well as the QObject parent relationship.
+    controller.single_instance_guard = single_instance
     app.aboutToQuit.connect(controller.cleanup)
+    app.aboutToQuit.connect(single_instance.release)
     controller.start(show_window=args.show_window)
     return app.exec()
 
