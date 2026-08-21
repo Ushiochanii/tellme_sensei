@@ -115,6 +115,15 @@ start screenshot recognition. `Esc` and right-click cancel capture. The
 development launcher remains available with `python gui.py --show-window`.
 The tray exit action unregisters the Win32 hotkey and stops the application.
 
+## Platform Support
+
+- Windows: supported.
+- macOS: planned; macOS global hotkey support is not implemented yet.
+
+Future macOS work will require Screen Recording permission handling and a
+platform-specific global hotkey implementation. The application and service
+layers remain independent of those platform details.
+
 During OCR or AI processing, use `停止` or press `Esc` in the answer window to
 request a cooperative cancellation. After the worker exits, `重新分析` keeps
 the existing OCR text, while `重新截图` starts a fresh capture job.
