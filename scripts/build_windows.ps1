@@ -15,6 +15,22 @@ if (-not (Test-Path -LiteralPath $pythonPath)) {
     $pythonPath = $pythonCommand.Source
 }
 
+Push-Location $repoRoot
+try {
+    $version = (& $pythonPath -c "from app.version import __version__; print(__version__)").Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) {
+        throw "Could not read the application version from app/version.py."
+    }
+}
+finally {
+    Pop-Location
+}
+
+$iconPath = Join-Path $repoRoot "assets\tellme_sensei.ico"
+if (-not (Test-Path -LiteralPath $iconPath)) {
+    throw "Application icon was not found: $iconPath"
+}
+
 $buildPath = Join-Path $repoRoot "build"
 $distPath = Join-Path $repoRoot "dist"
 foreach ($path in @($buildPath, $distPath)) {
@@ -78,3 +94,4 @@ $exe = Get-Item -LiteralPath $exePath
 Write-Host "Portable build succeeded: $($exe.FullName)"
 Write-Host "Executable size: $([math]::Round($exe.Length / 1MB, 2)) MB"
 Write-Host "Cython Utility data found: $($cythonUtilityFile.FullName)"
+Write-Host "Version: $version"

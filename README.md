@@ -124,6 +124,24 @@ Future macOS work will require Screen Recording permission handling and a
 platform-specific global hotkey implementation. The application and service
 layers remain independent of those platform details.
 
+## Windows installer
+
+The installer build requires Windows, Python 3.12, the project `.venv`, and
+Inno Setup 6. Build the portable application and per-user installer with:
+
+```powershell
+.\scripts\build_installer.ps1
+```
+
+The portable output is `dist\TellMeSensei\`; the installer is written to
+`dist\installer\TellMeSensei-Setup-<version>.exe`. The installer uses a
+per-user location under `%LOCALAPPDATA%\Programs\TellMeSensei`, creates a
+Start Menu shortcut, and does not remove Settings, Credential Manager data,
+logs, or OCR model caches when uninstalled.
+
+The executable and installer are currently unsigned. Windows SmartScreen may
+therefore show an unknown-publisher warning.
+
 ## Windows portable build
 
 Build prerequisites: Windows, Python 3.12, and the project `.venv` with
