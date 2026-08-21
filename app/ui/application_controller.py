@@ -31,7 +31,10 @@ class ApplicationController(QObject):
         self._quit_called = False
 
         self.tray.capture_requested.connect(self.window.start_capture)
-        self.tray.settings_requested.connect(self.window.show_launcher)
+        settings_handler = getattr(self.window, "show_settings", None)
+        if not callable(settings_handler):
+            settings_handler = self.window.show_launcher
+        self.tray.settings_requested.connect(settings_handler)
         self.hotkey.triggered.connect(self.window.start_capture)
         self.tray.exit_requested.connect(self.request_exit)
         if hasattr(self.window, "shutdown_ready"):

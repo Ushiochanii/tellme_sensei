@@ -90,6 +90,33 @@ class DeepSeekService:
         logger.info("DeepSeek API request completed")
         return answer.strip()
 
+    def test_connection(self, cancel_event: threading.Event | None = None) -> bool:
+        """Make a minimal non-streaming request for the Settings window."""
+
+        self._raise_if_cancelled(cancel_event)
+        if not self.config.api_key:
+            raise DeepSeekError("未配置 DeepSeek API Key。")
+
+        client = self._get_client()
+        response = None
+        try:
+            response = client.chat.completions.create(
+                model=self.config.model,
+                messages=[{"role": "user", "content": "ping"}],
+                temperature=0,
+                max_tokens=1,
+                timeout=self.config.request_timeout,
+                stream=False,
+            )
+            self._raise_if_cancelled(cancel_event)
+        except DeepSeekCancelled:
+            raise
+        except Exception as exc:  # SDK exception classes vary across versions.
+            raise DeepSeekError(self._format_error(exc)) from exc
+        finally:
+            self._close_stream(response)
+        return True
+
     @staticmethod
     def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:
         if cancel_event is not None and cancel_event.is_set():
