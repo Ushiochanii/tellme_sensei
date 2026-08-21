@@ -8,7 +8,7 @@ from typing import Callable
 from PySide6.QtCore import QObject
 
 from app.platform.base import GlobalHotkeyManager
-from app.platform.macos.hotkey import UnsupportedGlobalHotkey
+from app.platform.unsupported import UnsupportedGlobalHotkey
 from app.platform.windows.hotkey import WindowsGlobalHotkey
 
 

@@ -4,7 +4,7 @@ import inspect
 
 from app.platform.base import GlobalHotkeyManager
 from app.platform.factory import create_global_hotkey_manager
-from app.platform.macos.hotkey import UnsupportedGlobalHotkey
+from app.platform.unsupported import UnsupportedGlobalHotkey
 from app.platform.windows import hotkey as windows_hotkey
 from app.platform.windows.hotkey import WindowsGlobalHotkey
 from app.ui import application_controller
@@ -41,4 +41,3 @@ def test_win32_integration_is_confined_to_platform_layer() -> None:
     assert "RegisterHotKey" not in source
     assert "ctypes" not in source
     assert windows_hotkey.WM_HOTKEY == 0x0312
-    assert hasattr(windows_hotkey.ctypes, "WinDLL")

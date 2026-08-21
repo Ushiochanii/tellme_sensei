@@ -1,4 +1,4 @@
-"""macOS hotkey placeholder until a permission-aware implementation is added."""
+"""Fallback platform services for unsupported operating systems."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class UnsupportedGlobalHotkey(GlobalHotkeyManager):
-    """Safe fallback for platforms without a hotkey implementation."""
+    """Safe fallback when a platform hotkey implementation is unavailable."""
 
     def __init__(self, parent: QObject | None = None, platform_name: str = "unknown") -> None:
         super().__init__(parent)
