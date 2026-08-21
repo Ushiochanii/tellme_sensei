@@ -18,7 +18,11 @@ ROOT = Path(SPECPATH).resolve().parent
 
 site_packages = Path(sysconfig.get_paths()["purelib"])
 paddleocr_package_path = site_packages / "paddleocr"
-datas = collect_data_files("paddleocr")
+cython_datas = collect_data_files(
+    "Cython",
+    includes=["Utility/**/*"],
+)
+datas = collect_data_files("paddleocr") + cython_datas
 sys.path.insert(0, str(paddleocr_package_path))
 
 # PaddleOCR 2.x imports these directories as top-level modules at runtime.
@@ -65,9 +69,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="TellMeSensei",
     debug=False,
     bootloader_ignore_signals=False,

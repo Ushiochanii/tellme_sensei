@@ -43,11 +43,18 @@ finally {
     Pop-Location
 }
 
-$exePath = Join-Path $distPath "TellMeSensei\TellMeSensei.exe"
+$distAppPath = Join-Path $distPath "TellMeSensei"
+$exePath = Join-Path $distAppPath "TellMeSensei.exe"
 if (-not (Test-Path -LiteralPath $exePath)) {
     throw "Portable executable was not created: $exePath"
+}
+
+$cythonUtilityFile = Get-ChildItem -LiteralPath $distAppPath -Recurse -Filter "CppSupport.cpp" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($null -eq $cythonUtilityFile) {
+    throw "Cython Utility data was not bundled: Cython\Utility\CppSupport.cpp"
 }
 
 $exe = Get-Item -LiteralPath $exePath
 Write-Host "Portable build succeeded: $($exe.FullName)"
 Write-Host "Executable size: $([math]::Round($exe.Length / 1MB, 2)) MB"
+Write-Host "Cython Utility data found: $($cythonUtilityFile.FullName)"
