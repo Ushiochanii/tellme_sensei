@@ -1,0 +1,1 @@
+"""Study Assistant application package."""
