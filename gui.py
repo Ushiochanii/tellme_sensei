@@ -10,7 +10,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from app.logging_config import configure_logging
-from app.platform.windows_hotkey import GlobalHotkeyManager
+from app.platform.factory import create_global_hotkey_manager
 from app.ui.application_controller import ApplicationController
 from app.ui.main_window import MainWindow
 from app.ui.tray import SystemTrayController
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
 
     window = MainWindow(debug_capture_path=args.debug_capture, tray_mode=not args.show_window)
     tray = SystemTrayController(parent=app)
-    hotkey = GlobalHotkeyManager(parent=app)
+    hotkey = create_global_hotkey_manager(parent=app)
     controller = ApplicationController(app, window, tray, hotkey)
     app.aboutToQuit.connect(controller.cleanup)
     controller.start(show_window=args.show_window)

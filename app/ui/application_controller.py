@@ -6,13 +6,22 @@ import logging
 
 from PySide6.QtCore import QObject
 
+from app.platform.base import GlobalHotkeyManager
+
 logger = logging.getLogger(__name__)
 
 
 class ApplicationController(QObject):
     """Connect tray/hotkey signals and own the shutdown sequence."""
 
-    def __init__(self, app, window, tray, hotkey, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        app,
+        window,
+        tray,
+        hotkey: GlobalHotkeyManager,
+        parent: QObject | None = None,
+    ) -> None:
         super().__init__(parent or app)
         self.app = app
         self.window = window
