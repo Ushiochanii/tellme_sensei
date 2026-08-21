@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import traceback
+from tempfile import gettempdir
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
@@ -35,7 +37,27 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="可选：将本次框选结果保存到指定 PNG，用于确认截图区域。",
     )
+    parser.add_argument(
+        "--smoke-import-ocr",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args(argv)
+    if args.smoke_import_ocr:
+        try:
+            from paddleocr import PaddleOCR  # noqa: F401
+        except Exception:
+            smoke_log = Path(gettempdir()) / APPLICATION_DIRECTORY / "ocr-import-smoke.log"
+            try:
+                smoke_log.parent.mkdir(parents=True, exist_ok=True)
+                smoke_log.write_text(traceback.format_exc(), encoding="utf-8")
+            except OSError:
+                pass
+            if sys.stderr is not None:
+                traceback.print_exc()
+            return 1
+        return 0
+
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APPLICATION_DIRECTORY)
     app.setOrganizationName(APPLICATION_DIRECTORY)

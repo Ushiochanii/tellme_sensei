@@ -18,11 +18,16 @@ ROOT = Path(SPECPATH).resolve().parent
 
 site_packages = Path(sysconfig.get_paths()["purelib"])
 paddleocr_package_path = site_packages / "paddleocr"
+paddleocr_e2e_path = paddleocr_package_path / "ppocr" / "utils" / "e2e_utils"
+paddleocr_datas = collect_data_files(
+    "paddleocr",
+    include_py_files=True,
+)
 cython_datas = collect_data_files(
     "Cython",
     includes=["Utility/**/*"],
 )
-datas = collect_data_files("paddleocr") + cython_datas
+datas = paddleocr_datas + cython_datas
 sys.path.insert(0, str(paddleocr_package_path))
 
 # PaddleOCR 2.x imports these directories as top-level modules at runtime.
@@ -42,6 +47,8 @@ hiddenimports = sorted(
         + [
             "paddle",
             "paddleocr",
+            "extract_textpoint_slow",
+            "extract_textpoint_fast",
             "keyring",
             "keyring.backends.Windows",
             "win32ctypes",
@@ -55,7 +62,12 @@ hiddenimports = sorted(
 
 a = Analysis(
     [str(ROOT / "gui.py")],
-    pathex=[str(ROOT), str(site_packages), str(paddleocr_package_path)],
+    pathex=[
+        str(ROOT),
+        str(site_packages),
+        str(paddleocr_package_path),
+        str(paddleocr_e2e_path),
+    ],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

@@ -54,6 +54,26 @@ if ($null -eq $cythonUtilityFile) {
     throw "Cython Utility data was not bundled: Cython\Utility\CppSupport.cpp"
 }
 
+$requiredPaddleSources = @(
+    "paddleocr\tools\__init__.py",
+    "paddleocr\ppocr\__init__.py"
+)
+foreach ($relativePath in $requiredPaddleSources) {
+    $sourceFile = Get-ChildItem -LiteralPath $distAppPath -Recurse -Filter (Split-Path -Leaf $relativePath) -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName.EndsWith($relativePath, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Select-Object -First 1
+    if ($null -eq $sourceFile) {
+        throw "PaddleOCR runtime source was not bundled: $relativePath"
+    }
+    Write-Host "PaddleOCR runtime source found: $($sourceFile.FullName)"
+}
+
+$smokeTest = Start-Process -FilePath $exePath -ArgumentList "--smoke-import-ocr" -WorkingDirectory "C:\" -WindowStyle Hidden -Wait -PassThru
+if ($smokeTest.ExitCode -ne 0) {
+    throw "Packaged PaddleOCR import smoke test failed with exit code $($smokeTest.ExitCode)."
+}
+Write-Host "Packaged PaddleOCR import smoke test passed."
+
 $exe = Get-Item -LiteralPath $exePath
 Write-Host "Portable build succeeded: $($exe.FullName)"
 Write-Host "Executable size: $([math]::Round($exe.Length / 1MB, 2)) MB"
