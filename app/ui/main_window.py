@@ -26,6 +26,7 @@ class MainWindow(QWidget):
     """Keep GUI state and route work to the existing services/worker."""
 
     processing_finished = Signal()
+    shutdown_ready = Signal()
 
     def __init__(self, debug_capture_path: Path | None = None, tray_mode: bool = False) -> None:
         super().__init__()
@@ -41,6 +42,7 @@ class MainWindow(QWidget):
         self._cancelled_job_id: str | None = None
         self._busy = False
         self._last_ocr_text = ""
+        self._shutdown_ready_emitted = False
 
         self.setWindowTitle("AI 学习助手")
         self.setFixedSize(260, 140)
@@ -84,6 +86,39 @@ class MainWindow(QWidget):
         self._overlay.cancelled.connect(self._on_capture_cancelled)
         self._overlay.begin()
         return True
+
+    @Slot()
+    def request_shutdown(self) -> None:
+        """Request non-blocking shutdown and emit when the worker is stopped."""
+
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        self._busy = True
+        self.capture_button.setEnabled(False)
+
+        if self._overlay is not None:
+            self._overlay.close()
+            self._overlay = None
+
+        thread = self.processing_thread
+        if thread is not None and thread.isRunning():
+            self.state = AppState.CANCELLING
+            if self._answer_window is not None:
+                self._answer_window.set_cancelling()
+            if self.processing_worker is not None:
+                self.processing_worker.request_cancel()
+            logger.info("shutdown waiting for processing thread to finish")
+            return
+
+        self._emit_shutdown_ready()
+
+    def _emit_shutdown_ready(self) -> None:
+        if self._shutdown_ready_emitted:
+            return
+        self._shutdown_ready_emitted = True
+        logger.info("main window shutdown ready")
+        self.shutdown_ready.emit()
 
     @Slot(QImage)
     def _on_capture(self, image: QImage) -> None:
@@ -262,6 +297,8 @@ class MainWindow(QWidget):
             self._answer_window.set_retry_enabled(bool(self._last_ocr_text))
         self._cancelled_job_id = None
         self.processing_finished.emit()
+        if self._shutting_down:
+            self._emit_shutdown_ready()
 
     @Slot()
     def cancel_processing(self) -> None:
@@ -328,28 +365,9 @@ class MainWindow(QWidget):
         self.capture_button.setEnabled(True)
 
     def shutdown(self) -> None:
-        """Stop accepting work and request safe GUI-owned resource cleanup."""
+        """Backward-compatible alias for the non-blocking shutdown request."""
 
-        if self._shutting_down:
-            return
-        self._shutting_down = True
-        self._restore_idle()
-        if self._overlay is not None:
-            self._overlay.close()
-            self._overlay = None
-
-        thread = self.processing_thread
-        if thread is not None and thread.isRunning():
-            logger.info("waiting for processing worker cancellation during shutdown")
-            if self.processing_worker is not None:
-                self.processing_worker.request_cancel()
-            thread.requestInterruption()
-            if not thread.wait(10000):
-                logger.warning("processing worker is still stopping; no forced thread termination will be used")
-        if thread is None or not thread.isRunning():
-            self.processing_thread = None
-            self.processing_worker = None
-            self._active_job_id = None
+        self.request_shutdown()
         if self._answer_window is not None:
             self._answer_window.close()
             self._answer_window = None
