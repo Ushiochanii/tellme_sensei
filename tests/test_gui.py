@@ -128,7 +128,12 @@ def test_capture_overlay_rejects_small_selection(qt_app) -> None:
 def test_capture_overlay_emits_selected_image(qt_app) -> None:
     overlay = CaptureOverlay()
     captured: list[QImage] = []
-    overlay.captured.connect(captured.append)
+
+    def on_captured(image: QImage) -> None:
+        assert overlay.isVisible() is False
+        captured.append(image)
+
+    overlay.captured.connect(on_captured)
     overlay.show()
     qt_app.processEvents()
     QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))

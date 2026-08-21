@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import traceback
+from tempfile import gettempdir
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
@@ -13,9 +15,12 @@ from app.config import ConfigError, ConfigManager
 from app.logging_config import configure_logging
 from app.platform.factory import create_global_hotkey_manager
 from app.platform.hotkey import DEFAULT_SHORTCUT
+from app.runtime_paths import APPLICATION_DIRECTORY
+from app.single_instance import SingleInstanceGuard
 from app.ui.application_controller import ApplicationController
 from app.ui.main_window import MainWindow
 from app.ui.tray import SystemTrayController
+from app.version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +38,36 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="可选：将本次框选结果保存到指定 PNG，用于确认截图区域。",
     )
+    parser.add_argument(
+        "--smoke-import-ocr",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args(argv)
-    configure_logging()
+    if args.smoke_import_ocr:
+        try:
+            from paddleocr import PaddleOCR  # noqa: F401
+        except Exception:
+            smoke_log = Path(gettempdir()) / APPLICATION_DIRECTORY / "ocr-import-smoke.log"
+            try:
+                smoke_log.parent.mkdir(parents=True, exist_ok=True)
+                smoke_log.write_text(traceback.format_exc(), encoding="utf-8")
+            except OSError:
+                pass
+            if sys.stderr is not None:
+                traceback.print_exc()
+            return 1
+        return 0
 
     app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName(APPLICATION_DIRECTORY)
+    app.setOrganizationName(APPLICATION_DIRECTORY)
+    single_instance = SingleInstanceGuard(parent=app)
+    if not single_instance.acquire():
+        return 0
+    configure_logging()
     app.setQuitOnLastWindowClosed(False)
+    logger.info("TellMeSensei version=%s", __version__)
     logger.info("GUI 程序启动")
 
     config_manager = ConfigManager()
@@ -56,7 +86,10 @@ def main(argv: list[str] | None = None) -> int:
         hotkey_manager=hotkey,
     )
     controller = ApplicationController(app, window, tray, hotkey)
+    # Keep the Python wrapper alive as well as the QObject parent relationship.
+    controller.single_instance_guard = single_instance
     app.aboutToQuit.connect(controller.cleanup)
+    app.aboutToQuit.connect(single_instance.release)
     controller.start(show_window=args.show_window)
     return app.exec()
 
