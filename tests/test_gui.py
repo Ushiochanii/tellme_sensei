@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication
 from app.capture.overlay import CaptureOverlay
 from app.config import AppConfig
 from app.state import AppState
-from app.services.deepseek_service import DeepSeekService
+from app.services.deepseek_service import DeepSeekError, DeepSeekService
 from app.services.ocr_service import OCRLine, OCRResult, OCRService
 from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
@@ -71,6 +71,47 @@ def test_answer_window_copy_and_retry(qt_app) -> None:
     window.copy_button.click()
     assert QApplication.clipboard().text() == "【答案】复制测试"
     assert window.retry_button.isEnabled()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_answer_window_error_replaces_processing_placeholder(qt_app) -> None:
+    window = AnswerWindow()
+    window.set_ocr_text("题目")
+    window.set_result("旧答案")
+    window.show_error("DeepSeek API Key 无效（401）")
+
+    answer_text = window.answer_edit.toPlainText()
+    assert "AI 解析失败" in answer_text
+    assert "401" in answer_text
+    assert "旧答案" not in answer_text
+    assert window.copy_button.isEnabled() is False
+    assert window.retry_button.isEnabled() is True
+    window.close()
+    qt_app.processEvents()
+
+
+def test_answer_window_cancelled_replaces_processing_placeholder(qt_app) -> None:
+    window = AnswerWindow()
+    window.set_result("旧答案")
+    window.show_cancelled()
+
+    assert "已取消" in window.answer_edit.toPlainText()
+    assert "旧答案" not in window.answer_edit.toPlainText()
+    assert window.copy_button.isEnabled() is False
+    assert window.stop_button.isVisible() is False
+    window.close()
+    qt_app.processEvents()
+
+
+def test_answer_window_ai_processing_clears_previous_answer(qt_app) -> None:
+    window = AnswerWindow()
+    window.set_result("旧答案")
+    window.set_ai_processing()
+
+    assert window.answer_edit.toPlainText() == ""
+    assert window._answer_text == ""
+    assert window.copy_button.isEnabled() is False
     window.close()
     qt_app.processEvents()
 
@@ -182,6 +223,48 @@ def test_main_window_runs_worker_through_real_qthread(qt_app, monkeypatch) -> No
     assert "真实 QThread OCR" in window._answer_window.answer_edit.toPlainText()
     assert window.state is AppState.IDLE
     assert window._busy is False
+    window._answer_window.close()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_main_window_ai_error_renders_terminal_answer_state(qt_app, monkeypatch) -> None:
+    class FakeOCR:
+        def __init__(self, language: str) -> None:
+            self.language = language
+
+        def recognize(self, _image) -> OCRResult:
+            return OCRResult("OCR 题目", (OCRLine("OCR 题目"),))
+
+    class FakeAI:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def analyze(self, text: str) -> str:
+            raise DeepSeekError("DeepSeek API Key 无效（401）")
+
+    monkeypatch.setattr(
+        main_window_module.ConfigManager,
+        "load",
+        lambda _self, require_api_key=True: AppConfig(api_key="test"),
+    )
+    monkeypatch.setattr(main_window_module, "OCRService", FakeOCR)
+    monkeypatch.setattr(main_window_module, "DeepSeekService", FakeAI)
+
+    window = MainWindow(tray_mode=True)
+    window._show_or_create_answer()
+    loop = QEventLoop()
+    window.processing_finished.connect(loop.quit)
+    window._launch_worker(QImage(32, 24, QImage.Format.Format_RGBA8888), None)
+    QTimer.singleShot(3000, loop.quit)
+    loop.exec()
+    qt_app.processEvents()
+
+    assert window.state is AppState.IDLE
+    assert window._answer_window is not None
+    assert "401" in window._answer_window.status_label.text()
+    assert "AI 解析失败" in window._answer_window.answer_edit.toPlainText()
+    assert window._answer_window.copy_button.isEnabled() is False
     window._answer_window.close()
     window.close()
     qt_app.processEvents()

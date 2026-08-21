@@ -90,6 +90,33 @@ class DeepSeekService:
         logger.info("DeepSeek API request completed")
         return answer.strip()
 
+    def test_connection(self, cancel_event: threading.Event | None = None) -> bool:
+        """Make a minimal non-streaming request for the Settings window."""
+
+        self._raise_if_cancelled(cancel_event)
+        if not self.config.api_key:
+            raise DeepSeekError("未配置 DeepSeek API Key，请在设置中保存 API Key。")
+
+        client = self._get_client()
+        response = None
+        try:
+            response = client.chat.completions.create(
+                model=self.config.model,
+                messages=[{"role": "user", "content": "ping"}],
+                temperature=0,
+                max_tokens=1,
+                timeout=self.config.request_timeout,
+                stream=False,
+            )
+            self._raise_if_cancelled(cancel_event)
+        except DeepSeekCancelled:
+            raise
+        except Exception as exc:  # SDK exception classes vary across versions.
+            raise DeepSeekError(self._format_error(exc)) from exc
+        finally:
+            self._close_stream(response)
+        return True
+
     @staticmethod
     def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:
         if cancel_event is not None and cancel_event.is_set():
@@ -122,7 +149,7 @@ class DeepSeekService:
             return self._client
         if not self.config.api_key:
             raise DeepSeekError(
-                "未配置 DeepSeek API Key。请复制 .env.example 为 .env，并填写 DEEPSEEK_API_KEY。"
+                "未配置 DeepSeek API Key，请在设置中保存 API Key，或检查 .env 配置。"
             )
         try:
             from openai import OpenAI
@@ -142,7 +169,7 @@ class DeepSeekService:
     def _format_error(exc: Exception) -> str:
         status_code = getattr(exc, "status_code", None)
         if status_code == 401:
-            return "DeepSeek API Key 无效（401）。请检查 .env 中的 DEEPSEEK_API_KEY。"
+            return "DeepSeek API Key 无效（401）。请前往设置检查 API Key。"
         if status_code == 403:
             return "DeepSeek API 访问被拒绝（403）。请检查账户权限或 API Key。"
         if status_code == 429:

@@ -1,14 +1,15 @@
-"""Application configuration for the Phase 1-3 command-line pipeline."""
+"""Runtime configuration assembled from environment, settings, and secrets."""
 
 from __future__ import annotations
 
-import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
+
+from app.settings.repository import SettingsRepository
+from app.settings.secret_store import SecretStore
 
 
 class ConfigError(RuntimeError):
@@ -17,9 +18,9 @@ class ConfigError(RuntimeError):
 
 @dataclass(frozen=True)
 class AppConfig:
-    """Runtime settings shared by services."""
+    """Immutable runtime settings shared by services and one processing job."""
 
-    api_key: str
+    api_key: str = field(repr=False)
     model: str = "deepseek-chat"
     base_url: str = "https://api.deepseek.com"
     request_timeout: float = 60.0
@@ -27,51 +28,108 @@ class AppConfig:
 
 
 class ConfigManager:
-    """Load environment variables and optional JSON settings in one place."""
+    """Compose environment variables, saved settings, and the OS secret store."""
 
     def __init__(
         self,
         project_root: Path | None = None,
         config_path: Path | None = None,
+        settings_repository: SettingsRepository | None = None,
+        secret_store: SecretStore | None = None,
     ) -> None:
         self.project_root = project_root or Path(__file__).resolve().parents[1]
-        self.config_path = config_path or self.project_root / "config.json"
+        self.settings_repository = settings_repository or SettingsRepository(config_path)
+        self.secret_store = secret_store or SecretStore()
+
+    def has_explicit_api_key(self) -> bool:
+        """Return whether a real OS environment variable overrides stored settings."""
+
+        return bool(os.environ.get("DEEPSEEK_API_KEY", "").strip())
 
     def load(self, require_api_key: bool = True) -> AppConfig:
-        """Return application settings without ever logging the API key."""
+        """Return one immutable runtime configuration without logging secrets."""
 
-        load_dotenv(self.project_root / ".env", override=False)
-        file_config = self._read_json_config()
+        dotenv_config = self._read_dotenv_values()
+        saved_settings = self.settings_repository.load()
 
-        api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        api_key = self._os_value("DEEPSEEK_API_KEY")
+        if api_key is None:
+            api_key = self.secret_store.get_api_key()
+        if not api_key:
+            api_key = self._file_value(dotenv_config, "DEEPSEEK_API_KEY") or ""
         if require_api_key and not api_key:
             raise ConfigError(
-                "未配置 DeepSeek API Key。请复制 .env.example 为 .env，"
-                "并填写 DEEPSEEK_API_KEY。"
+                "未配置 DeepSeek API Key。请在设置中保存，或在 .env 中填写 DEEPSEEK_API_KEY。"
             )
+
+        try:
+            request_timeout = float(
+                self._os_value("DEEPSEEK_TIMEOUT")
+                or saved_settings.get(
+                    "request_timeout",
+                    self._file_value(dotenv_config, "DEEPSEEK_TIMEOUT") or 60,
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("DEEPSEEK_TIMEOUT 必须是正数") from exc
+        if request_timeout <= 0:
+            raise ConfigError("DEEPSEEK_TIMEOUT 必须是正数")
 
         return AppConfig(
             api_key=api_key,
-            model=os.getenv("DEEPSEEK_MODEL", str(file_config.get("model", "deepseek-chat"))),
-            base_url=os.getenv(
-                "DEEPSEEK_BASE_URL",
-                str(file_config.get("base_url", "https://api.deepseek.com")),
+            model=(
+                self._os_value("DEEPSEEK_MODEL")
+                or saved_settings.get(
+                    "model",
+                    self._file_value(dotenv_config, "DEEPSEEK_MODEL") or "deepseek-chat",
+                )
             ),
-            request_timeout=float(
-                os.getenv("DEEPSEEK_TIMEOUT", str(file_config.get("request_timeout", 60)))
+            base_url=(
+                self._os_value("DEEPSEEK_BASE_URL")
+                or saved_settings.get(
+                    "base_url",
+                    self._file_value(dotenv_config, "DEEPSEEK_BASE_URL")
+                    or "https://api.deepseek.com",
+                )
             ),
-            ocr_language=os.getenv(
-                "OCR_LANGUAGE", str(file_config.get("ocr_language", "japan"))
+            request_timeout=request_timeout,
+            ocr_language=(
+                self._os_value("OCR_LANGUAGE")
+                or saved_settings.get(
+                    "ocr_language",
+                    self._file_value(dotenv_config, "OCR_LANGUAGE") or "japan",
+                )
             ),
         )
 
-    def _read_json_config(self) -> dict[str, Any]:
-        if not self.config_path.exists():
-            return {}
+    def _read_dotenv_values(self) -> dict[str, str]:
         try:
-            data = json.loads(self.config_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ConfigError(f"无法读取配置文件 {self.config_path}: {exc}") from exc
-        if not isinstance(data, dict):
-            raise ConfigError("config.json 必须是 JSON 对象。")
-        return data
+            values = dotenv_values(self.project_root / ".env")
+        except OSError:
+            return {}
+        return {
+            key: value.strip()
+            for key, value in values.items()
+            if isinstance(value, str) and value.strip()
+        }
+
+    @staticmethod
+    def _os_value(name: str) -> str | None:
+        value = os.environ.get(name)
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    @staticmethod
+    def _file_value(values: dict[str, str], name: str) -> str | None:
+        value = values.get(name)
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    def save_settings(self, api_key: str, model: str, request_timeout: float) -> None:
+        """Save API key and normal settings through their dedicated stores."""
+
+        if api_key.strip():
+            self.secret_store.set_api_key(api_key)
+        else:
+            self.secret_store.delete_api_key()
+        self.settings_repository.save(
+            {"model": model, "request_timeout": request_timeout}
+        )

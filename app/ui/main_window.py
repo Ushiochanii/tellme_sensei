@@ -17,6 +17,7 @@ from app.services.ocr_service import OCRService
 from app.state import AppState
 from app.thread_info import current_thread_info
 from app.ui.answer_window import AnswerWindow
+from app.ui.settings_window import SettingsWindow
 from app.workers.processing_worker import ProcessingWorker
 
 logger = logging.getLogger(__name__)
@@ -28,14 +29,21 @@ class MainWindow(QWidget):
     processing_finished = Signal()
     shutdown_ready = Signal()
 
-    def __init__(self, debug_capture_path: Path | None = None, tray_mode: bool = False) -> None:
+    def __init__(
+        self,
+        debug_capture_path: Path | None = None,
+        tray_mode: bool = False,
+        config_manager: ConfigManager | None = None,
+    ) -> None:
         super().__init__()
         self.debug_capture_path = debug_capture_path
         self.tray_mode = tray_mode
+        self.config_manager = config_manager or ConfigManager()
         self.state = AppState.IDLE
         self._shutting_down = False
         self._overlay: CaptureOverlay | None = None
         self._answer_window: AnswerWindow | None = None
+        self._settings_window: SettingsWindow | None = None
         self.processing_thread: QThread | None = None
         self.processing_worker: ProcessingWorker | None = None
         self._active_job_id: str | None = None
@@ -101,6 +109,9 @@ class MainWindow(QWidget):
             self._overlay.close()
             self._overlay = None
 
+        if self._settings_window is not None:
+            self._settings_window.request_shutdown()
+
         thread = self.processing_thread
         if thread is not None and thread.isRunning():
             self.state = AppState.CANCELLING
@@ -109,6 +120,10 @@ class MainWindow(QWidget):
             if self.processing_worker is not None:
                 self.processing_worker.request_cancel()
             logger.info("shutdown waiting for processing thread to finish")
+            return
+
+        if self._settings_window is not None and self._settings_window.is_connection_running():
+            logger.info("shutdown waiting for settings connection test to finish")
             return
 
         self._emit_shutdown_ready()
@@ -164,7 +179,7 @@ class MainWindow(QWidget):
             current_thread_info(),
         )
         try:
-            config = ConfigManager().load(require_api_key=False)
+            config = self.config_manager.load(require_api_key=False)
         except ConfigError as exc:
             self._answer_window.show_error(str(exc))
             self._restore_idle()
@@ -298,6 +313,18 @@ class MainWindow(QWidget):
         self._cancelled_job_id = None
         self.processing_finished.emit()
         if self._shutting_down:
+            self._maybe_emit_shutdown_ready()
+
+    @Slot()
+    def _on_settings_shutdown_ready(self) -> None:
+        self._maybe_emit_shutdown_ready()
+
+    def _maybe_emit_shutdown_ready(self) -> None:
+        if self._shutting_down:
+            if self.processing_thread is not None and self.processing_thread.isRunning():
+                return
+            if self._settings_window is not None and self._settings_window.is_connection_running():
+                return
             self._emit_shutdown_ready()
 
     @Slot()
@@ -358,6 +385,16 @@ class MainWindow(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def show_settings(self) -> None:
+        """Show one reusable SettingsWindow from the system tray."""
+
+        if self._settings_window is None:
+            self._settings_window = SettingsWindow(config_manager=self.config_manager)
+            self._settings_window.shutdown_ready.connect(self._on_settings_shutdown_ready)
+        self._settings_window.show()
+        self._settings_window.raise_()
+        self._settings_window.activateWindow()
 
     def _restore_idle(self) -> None:
         self._busy = False
