@@ -6,8 +6,8 @@ from app.version import __version__
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_packaging_uses_single_dev_version_source() -> None:
-    assert __version__ == "0.4.0-dev"
+def test_packaging_uses_single_release_version_source() -> None:
+    assert __version__ == "0.4.0"
     spec = (ROOT / "packaging" / "tellme_sensei.spec").read_text(encoding="utf-8")
     assert "from app.version import __version__" in spec
     assert "version=str(version_file)" in spec
