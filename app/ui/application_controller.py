@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QTimer
 
 from app.platform.base import GlobalHotkeyManager
 
@@ -48,6 +48,9 @@ class ApplicationController(QObject):
             self.window.show()
         else:
             self.window.hide()
+        prewarm = getattr(self.window, "request_local_ocr_prewarm", None)
+        if callable(prewarm):
+            QTimer.singleShot(0, prewarm)
 
     def request_exit(self) -> None:
         """Begin shutdown; QApplication.quit waits for shutdown_ready."""

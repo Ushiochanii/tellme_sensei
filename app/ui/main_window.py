@@ -7,12 +7,15 @@ import logging
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Qt, Signal, Slot
+import threading
+
+from PySide6.QtCore import QThread, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.capture.overlay import CaptureOverlay
 from app.config import ConfigError, ConfigManager
+from app.local_ocr.component_manager import LocalOCRComponentManager
 from app.ocr.factory import create_ocr_provider
 from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
@@ -22,6 +25,7 @@ from app.thread_info import current_thread_info
 from app.ui.answer_window import AnswerWindow
 from app.ui.settings_window import SettingsWindow
 from app.workers.processing_worker import ProcessingWorker
+from app.workers.local_ocr_prewarm_worker import LocalOCRPrewarmWorker
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +43,7 @@ class MainWindow(QWidget):
         config_manager: ConfigManager | None = None,
         hotkey_manager: GlobalHotkeyManager | None = None,
         local_ocr_session: LocalOCRSession | None = None,
+        component_manager: LocalOCRComponentManager | None = None,
     ) -> None:
         super().__init__()
         self.debug_capture_path = debug_capture_path
@@ -46,6 +51,7 @@ class MainWindow(QWidget):
         self.config_manager = config_manager or ConfigManager()
         self.hotkey_manager = hotkey_manager
         self._local_ocr_session = local_ocr_session or LocalOCRSession()
+        self._component_manager = component_manager or LocalOCRComponentManager()
         self.state = AppState.IDLE
         self._shutting_down = False
         self._overlay: CaptureOverlay | None = None
@@ -58,6 +64,9 @@ class MainWindow(QWidget):
         self._busy = False
         self._last_ocr_text = ""
         self._shutdown_ready_emitted = False
+        self._prewarm_thread: QThread | None = None
+        self._prewarm_worker: LocalOCRPrewarmWorker | None = None
+        self._prewarm_cancel_event: threading.Event | None = None
 
         self.setWindowTitle("AI 学习助手")
         self.setFixedSize(260, 140)
@@ -122,6 +131,8 @@ class MainWindow(QWidget):
         if self._answer_window is not None:
             self._answer_window.close()
 
+        self._cancel_local_ocr_prewarm()
+
         thread = self.processing_thread
         if thread is not None and thread.isRunning():
             self.state = AppState.CANCELLING
@@ -136,6 +147,10 @@ class MainWindow(QWidget):
         if self._settings_window is not None and self._settings_window.has_running_background_operations():
             logger.info("shutdown waiting for settings background operations to finish")
             self._local_ocr_session.stop()
+            return
+
+        if self._prewarm_thread is not None and self._prewarm_thread.isRunning():
+            logger.info("shutdown waiting for Local OCR prewarm to finish")
             return
 
         self._local_ocr_session.stop()
@@ -354,6 +369,8 @@ class MainWindow(QWidget):
                 return
             if self._settings_window is not None and self._settings_window.has_running_background_operations():
                 return
+            if self._prewarm_thread is not None and self._prewarm_thread.isRunning():
+                return
             self._emit_shutdown_ready()
 
     @Slot()
@@ -422,10 +439,14 @@ class MainWindow(QWidget):
             self._settings_window = SettingsWindow(
                 config_manager=self.config_manager,
                 hotkey_manager=self.hotkey_manager,
+                component_manager=self._component_manager,
                 local_ocr_session=self._local_ocr_session,
             )
             self._settings_window.shutdown_ready.connect(self._on_settings_shutdown_ready)
             self._settings_window.settings_saved.connect(self._on_settings_saved)
+            self._settings_window.local_ocr_component_changed.connect(
+                self._on_local_ocr_component_changed
+            )
         self._settings_window.reload_values()
         self._settings_window.show()
         self._settings_window.raise_()
@@ -438,7 +459,82 @@ class MainWindow(QWidget):
 
     @Slot()
     def _on_settings_saved(self) -> None:
-        self._stop_local_session_if_online()
+        self._schedule_or_stop_local_ocr()
+
+    @Slot()
+    def _on_local_ocr_component_changed(self) -> None:
+        self._schedule_or_stop_local_ocr()
+
+    @Slot()
+    def request_local_ocr_prewarm(self) -> None:
+        """Schedule one conditional, lazy Local OCR initialization."""
+
+        if self._shutting_down:
+            return
+        if self._prewarm_thread is not None:
+            return
+        if self._local_ocr_session.is_running() or self._local_ocr_session.capability_unsupported:
+            return
+        try:
+            config = self.config_manager.load(require_api_key=False)
+        except ConfigError:
+            return
+        if config.ocr_provider != "local" or not self._component_manager.is_installed():
+            return
+
+        cancel_event = threading.Event()
+        worker = LocalOCRPrewarmWorker(self._local_ocr_session, cancel_event)
+        thread = QThread(self)
+        thread.setObjectName("LocalOCRPrewarmThread")
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._on_local_ocr_prewarm_succeeded)
+        worker.failed.connect(self._on_local_ocr_prewarm_failed)
+        worker.cancelled.connect(self._on_local_ocr_prewarm_cancelled)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_local_ocr_prewarm_finished)
+        self._prewarm_cancel_event = cancel_event
+        self._prewarm_worker = worker
+        self._prewarm_thread = thread
+        logger.info("local OCR prewarm scheduled")
+        thread.start()
+
+    def _cancel_local_ocr_prewarm(self) -> None:
+        if self._prewarm_worker is not None:
+            self._prewarm_worker.request_cancel()
+        self._local_ocr_session.stop()
+
+    @Slot()
+    def _on_local_ocr_prewarm_succeeded(self) -> None:
+        logger.info("local OCR prewarm ready")
+
+    @Slot(str)
+    def _on_local_ocr_prewarm_failed(self, message: str) -> None:
+        logger.warning("Local OCR prewarm failed: %s", message or "UnknownError")
+
+    @Slot()
+    def _on_local_ocr_prewarm_cancelled(self) -> None:
+        logger.info("local OCR prewarm cancelled")
+
+    @Slot()
+    def _on_local_ocr_prewarm_finished(self) -> None:
+        self._prewarm_thread = None
+        self._prewarm_worker = None
+        self._prewarm_cancel_event = None
+        if self._shutting_down:
+            self._maybe_emit_shutdown_ready()
+
+    def _schedule_or_stop_local_ocr(self) -> None:
+        try:
+            config = self.config_manager.load(require_api_key=False)
+        except ConfigError:
+            return
+        if config.ocr_provider == "local":
+            QTimer.singleShot(0, self.request_local_ocr_prewarm)
+        else:
+            self._cancel_local_ocr_prewarm()
 
     def _stop_local_session_if_online(self) -> None:
         if self._local_ocr_session.is_busy():

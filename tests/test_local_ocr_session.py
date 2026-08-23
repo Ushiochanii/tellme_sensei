@@ -108,6 +108,129 @@ def test_session_is_lazy_and_reuses_one_process(tmp_path: Path):
     assert session.is_running() is False
 
 
+def test_prepare_starts_worker_and_recognize_reuses_it(tmp_path: Path):
+    source = tmp_path / "input.png"
+    source.write_bytes(b"image")
+    processes: list[_FakeProcess] = []
+    session = _session(tmp_path, processes)
+
+    session.prepare()
+    assert session.is_running() is True
+    session.prepare()
+    assert session.recognize(source).text == "题目"
+    assert len(processes) == 1
+    session.stop()
+
+
+def test_prepare_failure_allows_later_retry(tmp_path: Path):
+    executable = tmp_path / "TellMeSenseiOCR.exe"
+    executable.write_bytes(b"fake")
+    starts = 0
+
+    class StartupFailure:
+        returncode = 1
+        stdin = None
+
+        def poll(self):
+            return self.returncode
+
+    def factory(command, **kwargs):
+        nonlocal starts
+        starts += 1
+        if starts == 1:
+            return StartupFailure()
+        process = _FakeProcess(command)
+        return process
+
+    session = LocalOCRSession(executable=executable, process_factory=factory, timeout=1)
+    with pytest.raises(OCRError, match="failed to start"):
+        session.prepare()
+    session.prepare()
+    assert starts == 2
+    session.stop()
+
+
+def test_prepare_cancellation_stops_startup(tmp_path: Path):
+    executable = tmp_path / "TellMeSenseiOCR.exe"
+    executable.write_bytes(b"fake")
+    processes: list[_FakeProcess] = []
+
+    class SlowReadyProcess(_FakeProcess):
+        def __init__(self, command):
+            self.command = command
+            self.returncode = None
+            self.terminated = False
+            self.killed = False
+            self.respond = False
+            self.stdin = _FakeStdin(self._handle_line)
+
+    def factory(command, **kwargs):
+        process = SlowReadyProcess(command)
+        processes.append(process)
+        return process
+
+    session = LocalOCRSession(
+        executable=executable,
+        process_factory=factory,
+        timeout=1,
+        startup_timeout=1,
+    )
+    cancel_event = threading.Event()
+    error: list[BaseException] = []
+
+    def run_prepare():
+        try:
+            session.prepare(cancel_event=cancel_event)
+        except BaseException as exc:
+            error.append(exc)
+
+    thread = threading.Thread(target=run_prepare)
+    thread.start()
+    time.sleep(0.08)
+    cancel_event.set()
+    thread.join(timeout=1)
+
+    assert not thread.is_alive()
+    assert isinstance(error[0], OCRCancelled)
+    assert processes[0].terminated or processes[0].killed
+    assert session.is_running() is False
+
+
+def test_concurrent_prepare_and_recognize_share_one_worker(tmp_path: Path):
+    source = tmp_path / "input.png"
+    source.write_bytes(b"image")
+    processes: list[_FakeProcess] = []
+    session = _session(tmp_path, processes)
+    startup_entered = threading.Event()
+    original_ensure_started = session._ensure_started
+
+    def delayed_start(cancel_event):
+        startup_entered.set()
+        time.sleep(0.08)
+        return original_ensure_started(cancel_event)
+
+    session._ensure_started = delayed_start
+    prepare_errors: list[BaseException] = []
+
+    def run_prepare():
+        try:
+            session.prepare()
+        except BaseException as exc:
+            prepare_errors.append(exc)
+
+    prepare_thread = threading.Thread(target=run_prepare)
+    prepare_thread.start()
+    assert startup_entered.wait(timeout=1)
+    result = session.recognize(source)
+    prepare_thread.join(timeout=1)
+
+    assert not prepare_errors
+    assert not prepare_thread.is_alive()
+    assert result.text == "题目"
+    assert len(processes) == 1
+    session.stop()
+
+
 def test_session_cancellation_terminates_worker(tmp_path: Path):
     source = tmp_path / "input.png"
     source.write_bytes(b"image")

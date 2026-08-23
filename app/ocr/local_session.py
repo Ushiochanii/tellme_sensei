@@ -51,7 +51,9 @@ class LocalOCRSession:
         self._process: Any | None = None
         self._ready_directory: tempfile.TemporaryDirectory[str] | None = None
         self._in_flight = False
+        self._operation_kind: str | None = None
         self._unsupported = False
+        self._stop_event = threading.Event()
 
     @property
     def capability_unsupported(self) -> bool:
@@ -66,6 +68,10 @@ class LocalOCRSession:
     def is_busy(self) -> bool:
         with self._state_lock:
             return self._in_flight
+
+    def is_preparing(self) -> bool:
+        with self._state_lock:
+            return self._operation_kind == "prepare"
 
     def reset_capability(self) -> None:
         """Allow a newly installed component to retry serve mode."""
@@ -86,23 +92,46 @@ class LocalOCRSession:
         if cancel_event is not None and cancel_event.is_set():
             raise OCRCancelled("Local OCR cancelled")
 
-        with self._request_lock:
+        self._acquire_request_lock(cancel_event)
+        with self._state_lock:
+            self._stop_event.clear()
+            self._in_flight = True
+            self._operation_kind = "recognize"
+        try:
+            self._ensure_started(cancel_event)
+            request_id = uuid.uuid4().hex
+            with tempfile.TemporaryDirectory(prefix="tellme-sensei-ocr-response-") as raw_dir:
+                response_path = Path(raw_dir) / "response.json"
+                self._send_command(request_id, source, response_path)
+                return self._wait_for_response(request_id, response_path, cancel_event)
+        finally:
             with self._state_lock:
-                self._in_flight = True
-            try:
-                self._ensure_started(cancel_event)
-                request_id = uuid.uuid4().hex
-                with tempfile.TemporaryDirectory(prefix="tellme-sensei-ocr-response-") as raw_dir:
-                    response_path = Path(raw_dir) / "response.json"
-                    self._send_command(request_id, source, response_path)
-                    return self._wait_for_response(request_id, response_path, cancel_event)
-            finally:
-                with self._state_lock:
-                    self._in_flight = False
+                self._in_flight = False
+                self._operation_kind = None
+            self._request_lock.release()
+
+    def prepare(self, cancel_event: threading.Event | None = None) -> None:
+        """Lazily start the persistent worker and initialize its OCR engine."""
+
+        if cancel_event is not None and cancel_event.is_set():
+            raise OCRCancelled("Local OCR prewarm cancelled")
+        self._acquire_request_lock(cancel_event)
+        with self._state_lock:
+            self._stop_event.clear()
+            self._in_flight = True
+            self._operation_kind = "prepare"
+        try:
+            self._ensure_started(cancel_event)
+        finally:
+            with self._state_lock:
+                self._in_flight = False
+                self._operation_kind = None
+            self._request_lock.release()
 
     def stop(self) -> None:
         """Stop the worker, idempotently, without leaving an orphan process."""
 
+        self._stop_event.set()
         with self._state_lock:
             process = self._process
             busy = self._in_flight
@@ -119,6 +148,8 @@ class LocalOCRSession:
     shutdown = stop
 
     def _ensure_started(self, cancel_event: threading.Event | None) -> None:
+        if self._cancel_requested(cancel_event):
+            raise OCRCancelled("Local OCR cancelled")
         with self._state_lock:
             if self._unsupported:
                 raise PersistentWorkerUnsupported(
@@ -166,7 +197,7 @@ class LocalOCRSession:
             self._process = process
         deadline = time.monotonic() + self.startup_timeout
         while True:
-            if cancel_event is not None and cancel_event.is_set():
+            if self._cancel_requested(cancel_event):
                 self._terminate_process(process)
                 self._clear_process(process)
                 raise OCRCancelled("Local OCR cancelled")
@@ -228,7 +259,7 @@ class LocalOCRSession:
     ) -> OCRResult:
         deadline = time.monotonic() + self.timeout
         while True:
-            if cancel_event is not None and cancel_event.is_set():
+            if self._cancel_requested(cancel_event):
                 self.stop()
                 raise OCRCancelled("Local OCR cancelled")
             with self._state_lock:
@@ -247,6 +278,18 @@ class LocalOCRSession:
                 self.stop()
                 raise OCRError("Local OCR persistent request timed out.")
             time.sleep(0.05)
+
+    def _acquire_request_lock(self, cancel_event: threading.Event | None) -> None:
+        while not self._request_lock.acquire(blocking=False):
+            if cancel_event is not None and cancel_event.is_set():
+                self.stop()
+                raise OCRCancelled("Local OCR cancelled")
+            time.sleep(0.05)
+
+    def _cancel_requested(self, cancel_event: threading.Event | None) -> bool:
+        return self._stop_event.is_set() or (
+            cancel_event is not None and cancel_event.is_set()
+        )
 
     def _serve_command(self) -> list[str]:
         if self.executable is not None:
