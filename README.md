@@ -1,247 +1,251 @@
-# Windows OCR 学习助手（Phase 1～3）
+# TellMeSensei
 
-这是一个尚未包含 GUI 的 MVP 核心流水线：
+<p align="center">
+  <strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
+  A Windows desktop study assistant that captures a question from your screen,<br>
+  recognizes it with OCR, and asks DeepSeek for an explanation.
+</p>
+
+<p align="center">
+  <img alt="version" src="https://img.shields.io/badge/version-v0.5.0-blue">
+  <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey">
+  <img alt="local ocr" src="https://img.shields.io/badge/Local%20OCR-v1.1.0-green">
+</p>
 
 ```text
-图片 → PaddleOCR → 规范化文本 → DeepSeek → Console 输出
+Ctrl+Shift+Q
+    ↓
+Select a screen region
+    ↓
+OCR
+    ↓
+DeepSeek
+    ↓
+Floating answer window
 ```
 
-## 环境要求
+## Features
 
-- Windows 10/11
-- Python 3.11（推荐；项目代码也兼容 Python 3.12）
-- 可访问 DeepSeek API 的网络
+- Global screenshot hotkey (`Ctrl+Shift+Q` by default)
+- Drag-to-select screen capture
+- Streaming DeepSeek answers in a floating window
+- Two explicit OCR modes:
+  - **Local OCR** — PaddleOCR, processed on-device
+  - **Google Cloud Vision** — online OCR with your own Google API key
+- Optional Local OCR component download from Settings
+- Persistent Local OCR worker with background prewarm
+- Configurable global hotkey
+- Persistent answer-window position and size
+- Cooperative cancellation for OCR and AI requests
+- System tray operation
+- Per-user Windows installer with no administrator privileges required
 
-## 安装
+TellMeSensei never silently switches between Local OCR and Google Cloud Vision. The provider you select is the provider it uses.
 
-```powershell
-uv venv --python 3.11
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+## Download
+
+Download the latest Windows installer from the public binary release repository:
+
+**[TellMeSensei v0.5.0](https://github.com/Ushiochanii/tellme-sensei-releases/releases/tag/v0.5.0)**
+
+Current installer:
+
+```text
+TellMeSensei-Setup-0.5.0.exe
 ```
 
-如果本机已有 Python 3.11，也可以使用：
+The installer is currently unsigned, so Windows SmartScreen may show an **Unknown Publisher** warning.
+
+## Quick start
+
+### 1. Install TellMeSensei
+
+Run the installer. TellMeSensei is installed per-user under:
+
+```text
+%LOCALAPPDATA%\Programs\TellMeSensei
+```
+
+### 2. Configure DeepSeek
+
+Open **Settings** and enter your DeepSeek API key.
+
+API keys are stored through the operating-system secret store rather than in `settings.json`.
+
+### 3. Choose an OCR mode
+
+#### Local OCR
+
+Choose **Local OCR** and click **Download Local OCR**.
+
+The Local OCR component:
+
+- uses PaddleOCR
+- is approximately **255 MB** compressed
+- occupies roughly **700 MB** after installation
+- is installed separately from the Core application
+- keeps screenshots on the device during OCR
+
+After installation, TellMeSensei prepares the OCR worker in the background and reuses it between recognition jobs.
+
+#### Google Cloud Vision
+
+Choose **Google Cloud Vision**, enter your own Google Vision API key, test the connection, and save Settings.
+
+You need:
+
+- Google Cloud Vision API enabled for your project
+- your own API key
+- any applicable Google Cloud billing/quota configuration
+
+When this mode is selected, captured screenshots are uploaded to Google Cloud Vision for OCR.
+
+### 4. Capture a question
+
+Press:
+
+```text
+Ctrl+Shift+Q
+```
+
+Drag over the question on screen. TellMeSensei recognizes the text and sends the recognized question to DeepSeek.
+
+You can also start capture from the system tray menu.
+
+## OCR modes
+
+| | Local OCR | Google Cloud Vision |
+|---|---|---|
+| OCR engine | PaddleOCR | Google Cloud Vision |
+| Processing | On-device | Online |
+| Screenshot upload | No | Yes |
+| OCR API key required | No | Yes |
+| Extra download | ~255 MB | No |
+| Installed OCR size | ~700 MB | No local OCR component |
+| Best for | Privacy / repeated use | Lightweight setup / online OCR |
+
+The default OCR mode is **Local OCR**.
+
+## Privacy
+
+- **Local OCR:** screenshots are processed locally and are not uploaded to an OCR service.
+- **Google Cloud Vision:** screenshots are uploaded to Google only when this provider is explicitly selected.
+- **DeepSeek:** recognized question text is sent to DeepSeek to generate the answer.
+- **Logs:** application logs avoid storing API keys, full question text, or screenshots.
+
+There is no automatic Local-to-Online OCR fallback.
+
+## Local OCR component
+
+PaddleOCR is distributed separately so the Core installer stays small.
+
+```text
+TellMeSensei.exe
+      │
+      ├── Google Cloud Vision
+      │
+      └── Local OCR Provider
+              │
+              ↓
+       TellMeSenseiOCR.exe
+              │
+              ↓
+          PaddleOCR
+```
+
+The current Local OCR component is `v1.1.0` and is installed under:
+
+```text
+%LOCALAPPDATA%\TellMeSensei\components\local-ocr\1.1.0\
+```
+
+Component installation uses version-pinned release URLs, SHA-256 verification, safe ZIP extraction, smoke testing, staging, and atomic activation.
+
+## Development
+
+### Requirements
+
+- Windows 10 / 11
+- Python 3.12
+- DeepSeek API access
+
+Create a virtual environment and install dependencies:
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-local-ocr.txt
 ```
 
-首次运行 PaddleOCR 时可能会自动下载 OCR 模型，请保持网络可用。
-
-## API Key 配置
-
-```powershell
-Copy-Item .env.example .env
-notepad .env
-```
-
-在 `.env` 中填写：
-
-```text
-DEEPSEEK_API_KEY=你的密钥
-```
-
-API Key 只从环境变量读取，不会写入源码，也不会写入日志。若之前提供的密钥是真实密钥，建议在 DeepSeek 控制台测试完成后立即轮换。
-
-## Phase 1：DeepSeek
-
-```powershell
-python test_deepseek.py
-python test_deepseek.py "RAM 和 ROM 有什么区别？"
-```
-
-## Phase 2：OCR
-
-```powershell
-python test_ocr.py .\test.png
-```
-
-默认 OCR 语言为 `japan`，可在 `.env` 中修改 `OCR_LANGUAGE`。PaddleOCR 的日文模型也可识别常见中英文题目；需要时可尝试 `ch` 或 `en`。
-
-## Phase 3：完整 pipeline
-
-```powershell
-python test_pipeline.py .\test.png
-```
-
-也可以使用：
-
-```powershell
-python main.py .\test.png
-```
-
-## 自动化测试
-
-自动化测试不调用网络和 OCR 模型，使用假服务验证文本解析及模块连接：
-
-```powershell
-pytest
-```
-
-## Phase 4～6：GUI 截图与悬浮结果窗口
+Run the development GUI:
 
 ```powershell
 python gui.py
 ```
 
-点击“截图识别”后，在当前鼠标所在显示器上拖动框选题目；按 `Esc` 或鼠标右键取消。截图完成后会立即显示悬浮结果窗口，状态依次更新为“正在识别题目”“正在请求 AI”“完成”。
+The optional `.env` file is intended for development overrides. Normal installed users should configure the application through Settings.
 
-如需确认实际截取区域，可显式开启调试截图：
+## Build
 
-```powershell
-python gui.py --debug-capture .\temp\debug_capture.png
-```
-
-调试截图是可选的；默认流程不会把截图永久写入磁盘。结果窗口支持拖动、调整大小、滚动、复制答案、重新分析和关闭。重新分析只使用已有 OCR 文本，不会重新截图或 OCR。
-
-GUI 的 OCR 与 DeepSeek 请求运行在 `QThread` 中，主线程只负责界面更新。当前版本尚未实现全局快捷键、系统托盘、设置窗口和 PyInstaller 打包。
-
-## 日志和隐私
-
-运行日志写入 `logs/app.log`，只记录阶段、状态和文本长度，不记录 API Key 或完整题目。当前阶段不会上传截图，只会把本地 OCR 文本发送到 DeepSeek；截图不会由程序永久保存。
-
-## Phase 7: tray mode and global hotkey
-
-The default GUI entry point runs as a Windows tray application:
-
-```powershell
-python gui.py
-```
-
-Use `Ctrl+Shift+Q`, the tray menu, or a double-click on the tray icon to
-start screenshot recognition. `Esc` and right-click cancel capture. The
-development launcher remains available with `python gui.py --show-window`.
-The tray exit action unregisters the Win32 hotkey and stops the application.
-
-## Platform Support
-
-## v0.5.0 release candidate
-
-TellMeSensei v0.5.0 supports two explicit OCR modes. For normal Windows use:
-
-1. Install TellMeSensei with the Windows installer.
-2. Open Settings and save a DeepSeek API key.
-3. Choose Local OCR or Google Cloud Vision.
-4. For Local OCR, choose **Download Local OCR**, wait for verification and
-   installation, then use `Ctrl+Shift+Q` to capture a question.
-5. For Google Cloud Vision, enter your own Google Vision API key, test it, and
-   save the settings.
-
-Local OCR processes screenshots on this device. Google Cloud Vision uploads
-screenshots to Google for OCR only when that provider is explicitly selected.
-The application does not silently switch between providers.
-
-- Windows: supported.
-- macOS: planned; macOS global hotkey support is not implemented yet.
-
-Future macOS work will require Screen Recording permission handling and a
-platform-specific global hotkey implementation. The application and service
-layers remain independent of those platform details.
-
-## Online OCR backend
-
-Google Cloud Vision is an optional, BYOK OCR backend available in Settings. It
-requires the Cloud Vision API to be enabled
-for the Google project. When `google_vision` is explicitly selected, the
-captured screenshot is uploaded to Google Cloud Vision; the default remains
-the local OCR component. The provider uses the REST API directly and does not
-require the Google Cloud SDK.
-
-## Windows installer
-
-The installer build requires Windows, Python 3.12, the project `.venv`, and
-Inno Setup 6. Build the portable application and per-user installer with:
-
-```powershell
-.\scripts\build_installer.ps1
-```
-
-The portable output is `dist\TellMeSensei\`; the installer is written to
-`dist\installer\TellMeSensei-Setup-<version>.exe`. The installer uses a
-per-user location under `%LOCALAPPDATA%\Programs\TellMeSensei`, creates a
-Start Menu shortcut, and does not remove Settings, Credential Manager data,
-logs, or OCR model caches when uninstalled.
-
-The executable and installer are currently unsigned. Windows SmartScreen may
-therefore show an unknown-publisher warning.
-
-## OCR modes and the external Local OCR component
-
-TellMeSensei supports two OCR modes:
-
-- **Local OCR** uses PaddleOCR on this device. The optional component is
-  downloaded from the public distribution release by opening Settings > Local
-  OCR > Download Local OCR. The download is approximately 240 MB compressed
-  and is larger after installation; screenshots remain on the device.
-- **Google Cloud Vision** is an optional BYOK online backend. When selected,
-  screenshots are uploaded to Google Cloud Vision for recognition.
-
-The default remains Local OCR. The Core application does not bundle PaddleOCR.
-If the Local OCR component is missing, Settings can install it without
-installing anything into the Core application directory.
-
-The Core application no longer bundles PaddleOCR. Core development dependencies
-are installed with `requirements.txt`; a complete development environment also
-needs `requirements-local-ocr.txt` and `requirements-dev.txt`. Build and install
-the separate worker for development with:
-
-```powershell
-.\scripts\build_local_ocr.ps1
-.\scripts\install_local_ocr_dev.ps1
-```
-
-The worker is copied to the versioned per-user component directory under
-`%LOCALAPPDATA%\TellMeSensei\components\local-ocr\`. The Core installer does
-not include or download this component; if it is missing, the application shows
-a local OCR component error. PaddleOCR and its model cache remain outside the
-Core installation.
-
-For a developer-only component build or archive, run:
-
-```powershell
-.\scripts\build_local_ocr.ps1
-.\scripts\package_local_ocr.ps1
-```
-
-The archive and `local-ocr-manifest.json` are written to `dist\components`
-with immutable public GitHub Release URLs. The developer-only
-`scripts\install_local_ocr_dev.ps1` helper remains available for local builds;
-normal users should use Settings. `LOCAL_OCR_MANIFEST_URL` can still override
-the production URL for development and tests. Downloads are checked with
-SHA-256, safely extracted, smoke-tested, and installed atomically. Removing
-the component does not remove settings, API keys, logs, or model caches.
-
-For developer-only Local OCR performance diagnostics, use the packaged worker
-with `scripts/profile_local_ocr.py`. This is opt-in instrumentation; normal OCR
-does not create profile files or change the worker JSON protocol:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\profile_local_ocr.py `
-  --input "C:\path\question.png" `
-  --worker ".\dist\LocalOCR\TellMeSenseiOCR.exe"
-```
-
-## Windows portable build
-
-Build prerequisites: Windows, Python 3.12, and the project `.venv` with
-`requirements-dev.txt` installed. From the repository root, run:
+Build the Windows Core application:
 
 ```powershell
 .\scripts\build_windows.ps1
 ```
 
-The onedir output is `dist\TellMeSensei\TellMeSensei.exe`. The portable build
-does not require Python, a virtual environment, the repository, or a `.env`
-file at runtime. Save the DeepSeek API key from Settings; it remains in the
-Windows Credential Manager and is never placed in `settings.json`.
+Build the installer (requires Inno Setup 6):
 
-On first OCR use, PaddleOCR may download its model files to Paddle's normal
-per-user cache. The packaged application does not bundle those models and does
-not depend on the current working directory. Runtime logs are stored in the
-Qt user data directory, normally `%LOCALAPPDATA%\TellMeSensei\logs\app.log`.
+```powershell
+.\scripts\build_installer.ps1
+```
 
-During OCR or AI processing, use `停止` or press `Esc` in the answer window to
-request a cooperative cancellation. After the worker exits, `重新分析` keeps
-the existing OCR text, while `重新截图` starts a fresh capture job.
+Build the Local OCR worker:
+
+```powershell
+.\scripts\build_local_ocr.ps1
+```
+
+Run the test suite:
+
+```powershell
+pytest
+```
+
+## Release artifacts
+
+Public binaries are hosted in:
+
+**[Ushiochanii/tellme-sensei-releases](https://github.com/Ushiochanii/tellme-sensei-releases)**
+
+Current releases:
+
+```text
+v0.5.0
+├── TellMeSensei-Setup-0.5.0.exe
+└── TellMeSensei-Setup-0.5.0.exe.sha256
+
+local-ocr-v1.1.0
+├── TellMeSensei-LocalOCR-1.1.0-win-x64.zip
+└── local-ocr-manifest.json
+```
+
+## Platform support
+
+- **Windows 10 / 11:** supported
+- **macOS:** planned
+
+## Known limitations
+
+- Windows executable and installer are currently unsigned
+- No automatic application updater yet
+- Local OCR currently uses PaddleOCR only
+- macOS support is not implemented yet
+
+---
+
+TellMeSensei `v0.5.0` is the current stable Windows release.
