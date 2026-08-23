@@ -40,6 +40,13 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Files]
 Source: "{#PortableDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; Remove runtime directories bundled by pre-10C Core installers. Local OCR is
+; installed below %LOCALAPPDATA%\TellMeSensei\components and is unaffected.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal\paddle"
+Type: filesandordirs; Name: "{app}\_internal\paddleocr"
+Type: filesandordirs; Name: "{app}\_internal\Cython"
+
 [Icons]
 Name: "{autoprograms}\TellMeSensei"; Filename: "{app}\TellMeSensei.exe"; IconFilename: "{app}\TellMeSensei.exe"; WorkingDir: "{app}"
 Name: "{autodesktop}\TellMeSensei"; Filename: "{app}\TellMeSensei.exe"; IconFilename: "{app}\TellMeSensei.exe"; WorkingDir: "{app}"; Tasks: desktopicon

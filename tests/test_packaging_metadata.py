@@ -30,6 +30,9 @@ def test_windows_packaging_metadata_is_present() -> None:
     assert "AppId={{D4B4E8C6-8B91-4C8B-9C20-2C3A0DA2A8B4}" in iss
     assert "Source: \"{#PortableDir}\\*\"" in iss
     assert "OutputBaseFilename=TellMeSensei-Setup-{#VersionLabel}" in iss
+    assert '{app}\\_internal\\paddle' in iss
+    assert '{app}\\_internal\\paddleocr' in iss
+    assert '{app}\\_internal\\Cython' in iss
     assert "ISCC.exe not found" in build_script
     assert "build_windows.ps1" in build_script
     assert ".sha256" in build_script
