@@ -11,6 +11,7 @@ from app.config import AppConfig
 from app.ocr.factory import create_local_ocr_provider
 from app.ocr import local_runtime
 from app.ocr.providers.local_worker import LocalOCRProvider
+from app.ocr.profiling import read_profile
 from app.ocr.types import OCRCancelled, OCRError, OCRLine, OCRResult
 from app.ocr.worker_protocol import error_payload, parse_result, result_payload
 from app.local_ocr import worker_main
@@ -63,6 +64,70 @@ def test_worker_error_serialization_has_no_traceback(
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload == {"schema_version": 1, "ok": False, "error": "PaddleOCR unavailable"}
     assert "Traceback" not in output_path.read_text(encoding="utf-8")
+
+
+def test_worker_profile_output_is_separate_from_result_protocol(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_path = tmp_path / "input.png"
+    output_path = tmp_path / "result.json"
+    profile_path = tmp_path / "profile.json"
+    input_path.write_bytes(b"image")
+
+    class ProfiledProvider:
+        def __init__(self, language: str) -> None:
+            assert language == "japan"
+            self.calls = 0
+
+        def recognize_profiled(self, image: Path):
+            self.calls += 1
+            return OCRResult("secret OCR text", (OCRLine("secret OCR text"),)), {
+                "engine_init_ms": 10.0 if self.calls == 1 else 0.0,
+                "input_prepare_ms": 1.0,
+                "engine_call_ms": 5.0,
+                "result_parse_ms": 2.0,
+                "normalize_ms": 0.1,
+                "total_ms": 18.1,
+            }
+
+    monkeypatch.setattr(worker_main, "PaddleOCRProvider", ProfiledProvider)
+
+    assert worker_main.main(
+        [
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+            "--profile-output",
+            str(profile_path),
+            "--profile-runs",
+            "2",
+        ]
+    ) == 0
+    result_payload_text = output_path.read_text(encoding="utf-8")
+    profile_payload_text = profile_path.read_text(encoding="utf-8")
+    profile = read_profile(profile_path)
+    assert json.loads(result_payload_text)["ok"] is True
+    assert len(profile["runs"]) == 2
+    assert "secret OCR text" not in profile_payload_text
+    assert "secret OCR text" in result_payload_text
+
+
+def test_worker_profile_runs_must_be_positive(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.png"
+    output_path = tmp_path / "result.json"
+    input_path.write_bytes(b"image")
+
+    assert worker_main.main(
+        [
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+            "--profile-runs",
+            "0",
+        ]
+    ) == 2
 
 
 def test_protocol_rejects_malformed_payloads() -> None:
@@ -124,6 +189,7 @@ def test_local_provider_returns_result_and_cleans_temp_files(tmp_path: Path) -> 
 
     assert result.text == "识别"
     assert processes[0].kwargs["shell"] is False
+    assert "--profile-output" not in processes[0].command
     output_path = Path(processes[0].command[processes[0].command.index("--output") + 1])
     assert not output_path.parent.exists()
 

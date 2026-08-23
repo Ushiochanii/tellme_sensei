@@ -182,6 +182,16 @@ development override. Downloads are checked with SHA-256, safely extracted,
 smoke-tested, and installed atomically. Removing the component does not remove
 settings, API keys, logs, or model caches.
 
+For developer-only Local OCR performance diagnostics, use the packaged worker
+with `scripts/profile_local_ocr.py`. This is opt-in instrumentation; normal OCR
+does not create profile files or change the worker JSON protocol:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\profile_local_ocr.py `
+  --input "C:\path\question.png" `
+  --worker ".\dist\LocalOCR\TellMeSenseiOCR.exe"
+```
+
 ## Windows portable build
 
 Build prerequisites: Windows, Python 3.12, and the project `.venv` with
