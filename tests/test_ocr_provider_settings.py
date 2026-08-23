@@ -109,8 +109,41 @@ def test_google_key_environment_override_is_visible(qt_app, tmp_path, monkeypatc
     monkeypatch.setenv("GOOGLE_VISION_API_KEY", "environment-google")
     window, _ = _window(tmp_path, _Secrets(google="stored-google"))
     assert window.google_vision_api_key_edit.text() == "environment-google"
+    assert window.google_vision_api_key_edit.isReadOnly()
+    assert not window.google_vision_api_key_edit.isEnabled()
+    assert not window.google_vision_override_label.isHidden()
     assert "GOOGLE_VISION_API_KEY" in window.status_label.text()
     assert "overridden" in window.status_label.text()
+    window.close()
+
+
+def test_google_test_uses_effective_environment_key(qt_app, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_VISION_API_KEY", "environment-google")
+    received: list[str] = []
+
+    class FakeProvider:
+        def __init__(self, api_key, **_kwargs) -> None:
+            received.append(api_key)
+
+        def test_connection(self, _cancel_event) -> OCRResult:
+            return OCRResult("TEST", ())
+
+    monkeypatch.setattr(settings_window_module, "GoogleVisionOCRProvider", FakeProvider)
+    window, _ = _window(tmp_path, _Secrets(google="stored-google"))
+    window.google_vision_api_key_edit.setText("different-field-value")
+    window.test_google_vision()
+    _wait_for(qt_app, lambda: not window.is_google_test_running())
+    assert received == ["environment-google"]
+    window.close()
+
+
+def test_save_does_not_copy_environment_key_to_secret_store(qt_app, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_VISION_API_KEY", "environment-google")
+    secrets = _Secrets(google="stored-google")
+    window, _ = _window(tmp_path, secrets)
+    window.ocr_provider_combo.setCurrentIndex(window.ocr_provider_combo.findData("google_vision"))
+    window.save()
+    assert secrets.google == "stored-google"
     window.close()
 
 

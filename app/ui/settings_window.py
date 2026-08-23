@@ -222,12 +222,18 @@ class SettingsWindow(QWidget):
         self.google_vision_api_key_edit.setPlaceholderText("Enter Google Vision API Key")
         google_key_form = QFormLayout()
         google_key_form.addRow("Google Vision API Key", self.google_vision_api_key_edit)
+        self.google_vision_override_label = QLabel(
+            "Google Vision API Key is controlled by GOOGLE_VISION_API_KEY."
+        )
+        self.google_vision_override_label.setWordWrap(True)
+        self.google_vision_override_label.setVisible(False)
         self.google_vision_test_button = QPushButton("Test Google Vision")
         self.google_vision_test_button.clicked.connect(self.test_google_vision)
         self.google_vision_status_label = QLabel()
         self.google_vision_status_label.setWordWrap(True)
         google_layout.addWidget(self.google_vision_privacy_label)
         google_layout.addLayout(google_key_form)
+        google_layout.addWidget(self.google_vision_override_label)
         google_layout.addWidget(self.google_vision_test_button)
         google_layout.addWidget(self.google_vision_status_label)
         root.addWidget(self.google_vision_group)
@@ -259,6 +265,10 @@ class SettingsWindow(QWidget):
             config = AppConfig(api_key="")
         self.api_key_edit.setText(config.api_key)
         self.google_vision_api_key_edit.setText(config.google_vision_api_key)
+        google_env_override = self.config_manager.has_explicit_google_vision_api_key()
+        self.google_vision_api_key_edit.setReadOnly(google_env_override)
+        self.google_vision_api_key_edit.setEnabled(not google_env_override)
+        self.google_vision_override_label.setVisible(google_env_override)
         self.model_edit.setText(config.model)
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
@@ -528,14 +538,18 @@ class SettingsWindow(QWidget):
         if self.is_connection_running() or self.is_download_running():
             self._set_status("Wait for the active operation to finish before testing Google Vision.")
             return
-        api_key = self.google_vision_api_key_edit.text().strip()
-        if not api_key:
-            self.google_vision_status_label.setText("Enter a Google Vision API Key first.")
-            return
         try:
             config = self.config_manager.load(require_api_key=False)
         except ConfigError as exc:
             self.google_vision_status_label.setText(str(exc))
+            return
+        api_key = (
+            config.google_vision_api_key
+            if self.config_manager.has_explicit_google_vision_api_key()
+            else self.google_vision_api_key_edit.text().strip()
+        )
+        if not api_key:
+            self.google_vision_status_label.setText("Enter a Google Vision API Key first.")
             return
 
         self._close_requested = False
@@ -605,13 +619,16 @@ class SettingsWindow(QWidget):
                     self._set_status("快捷键注册失败，可能已被其他程序占用。")
                     return
                 rebound = True
+            google_key_to_save = None
+            if not self.config_manager.has_explicit_google_vision_api_key():
+                google_key_to_save = config.google_vision_api_key
             self.config_manager.save_settings(
                 config.api_key,
                 config.model,
                 config.request_timeout,
                 config.global_shortcut,
                 ocr_provider=config.ocr_provider,
-                google_vision_api_key=config.google_vision_api_key,
+                google_vision_api_key=google_key_to_save,
                 online_ocr_timeout=config.online_ocr_timeout,
             )
         except (ConfigError, SecretStoreError, ValueError) as exc:
