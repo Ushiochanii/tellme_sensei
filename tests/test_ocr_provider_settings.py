@@ -73,12 +73,12 @@ def _wait_for(qt_app, predicate) -> None:
 
 def test_provider_defaults_local_and_saved_google_is_loaded(qt_app, tmp_path) -> None:
     window, secrets = _window(tmp_path, _Secrets(google="stored-google"))
-    assert window.ocr_provider_combo.currentData() == "local"
+    assert window.local_mode_radio.isChecked()
     window.close()
 
     SettingsRepository(tmp_path / "settings.json").update({"ocr_provider": "google_vision"})
     window, _ = _window(tmp_path, secrets)
-    assert window.ocr_provider_combo.currentData() == "google_vision"
+    assert window.online_mode_radio.isChecked()
     assert window.google_vision_api_key_edit.text() == "stored-google"
     assert window.local_ocr_group.isHidden()
     assert not window.google_vision_group.isHidden()
@@ -90,8 +90,10 @@ def test_ocr_provider_environment_override_locks_google_and_preserves_saved_valu
 ) -> None:
     monkeypatch.setenv("OCR_PROVIDER", "google_vision")
     window, _ = _window(tmp_path)
-    assert window.ocr_provider_combo.currentData() == "google_vision"
-    assert not window.ocr_provider_combo.isEnabled()
+    assert window.online_mode_radio.isChecked()
+    assert not window.online_mode_radio.isEnabled()
+    assert not window.local_mode_radio.isEnabled()
+    assert not window.online_service_combo.isEnabled()
     assert not window.ocr_provider_override_label.isHidden()
     window.close()
 
@@ -107,8 +109,9 @@ def test_ocr_provider_environment_override_locks_local(qt_app, tmp_path, monkeyp
     monkeypatch.setenv("OCR_PROVIDER", "local")
     SettingsRepository(tmp_path / "settings.json").update({"ocr_provider": "google_vision"})
     window, _ = _window(tmp_path)
-    assert window.ocr_provider_combo.currentData() == "local"
-    assert not window.ocr_provider_combo.isEnabled()
+    assert window.local_mode_radio.isChecked()
+    assert not window.local_mode_radio.isEnabled()
+    assert not window.local_engine_combo.isEnabled()
     assert not window.ocr_provider_override_label.isHidden()
     window.close()
 
@@ -116,24 +119,45 @@ def test_ocr_provider_environment_override_locks_local(qt_app, tmp_path, monkeyp
 def test_ocr_provider_selector_enabled_without_environment_override(qt_app, tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("OCR_PROVIDER", raising=False)
     window, _ = _window(tmp_path)
-    assert window.ocr_provider_combo.isEnabled()
+    assert window.local_mode_radio.isEnabled()
+    assert window.online_mode_radio.isEnabled()
+    assert window.local_engine_combo.isEnabled()
+    assert window.online_service_combo.isEnabled()
     assert window.ocr_provider_override_label.isHidden()
+    window.close()
+
+
+def test_provider_controls_are_disabled_while_background_operation_runs(qt_app, tmp_path) -> None:
+    window, _ = _window(tmp_path)
+
+    window._refresh_operation_controls(connection_running=True)
+
+    assert not window.local_mode_radio.isEnabled()
+    assert not window.online_mode_radio.isEnabled()
+    assert not window.local_engine_combo.isEnabled()
+    assert not window.online_service_combo.isEnabled()
+
+    window._refresh_operation_controls(connection_running=False)
+    assert window.local_mode_radio.isEnabled()
+    assert window.online_mode_radio.isEnabled()
+    assert window.local_engine_combo.isEnabled()
+    assert window.online_service_combo.isEnabled()
     window.close()
 
 
 def test_provider_save_and_cancel_semantics(qt_app, tmp_path) -> None:
     window, secrets = _window(tmp_path)
-    window.ocr_provider_combo.setCurrentIndex(window.ocr_provider_combo.findData("google_vision"))
+    window.online_mode_radio.setChecked(True)
     window.google_vision_api_key_edit.setText("google-key")
     window.save()
     assert secrets.google == "google-key"
     assert window.config_manager.settings_repository.load()["ocr_provider"] == "google_vision"
 
-    window.ocr_provider_combo.setCurrentIndex(window.ocr_provider_combo.findData("local"))
+    window.local_mode_radio.setChecked(True)
     window.google_vision_api_key_edit.setText("unsaved-key")
     window.close()
     window.reload_values()
-    assert window.ocr_provider_combo.currentData() == "google_vision"
+    assert window.online_mode_radio.isChecked()
     assert window.google_vision_api_key_edit.text() == "google-key"
     window.google_vision_api_key_edit.clear()
     window.save()
@@ -177,7 +201,7 @@ def test_save_does_not_copy_environment_key_to_secret_store(qt_app, tmp_path, mo
     monkeypatch.setenv("GOOGLE_VISION_API_KEY", "environment-google")
     secrets = _Secrets(google="stored-google")
     window, _ = _window(tmp_path, secrets)
-    window.ocr_provider_combo.setCurrentIndex(window.ocr_provider_combo.findData("google_vision"))
+    window.online_mode_radio.setChecked(True)
     window.save()
     assert secrets.google == "stored-google"
     window.close()
@@ -222,7 +246,7 @@ def test_google_test_failure_is_shown_without_fallback(qt_app, tmp_path, monkeyp
     window.test_google_vision()
     _wait_for(qt_app, lambda: not window.is_google_test_running())
     assert "Google Vision connection test failed" in window.google_vision_status_label.text()
-    assert window.ocr_provider_combo.currentData() == "local"
+    assert window.local_mode_radio.isChecked()
     window.close()
 
 

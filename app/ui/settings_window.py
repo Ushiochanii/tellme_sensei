@@ -9,6 +9,8 @@ from dataclasses import replace
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
+    QButtonGroup,
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -16,9 +18,9 @@ from PySide6.QtWidgets import (
     QKeySequenceEdit,
     QLineEdit,
     QMessageBox,
-    QComboBox,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QVBoxLayout,
     QWidget,
 )
@@ -168,10 +170,24 @@ class SettingsWindow(QWidget):
         self.timeout_edit = QLineEdit()
         self.shortcut_edit = QKeySequenceEdit()
         self.shortcut_edit.setMaximumSequenceLength(1)
-        self.ocr_provider_combo = QComboBox()
-        self.ocr_provider_combo.addItem("Local OCR", "local")
-        self.ocr_provider_combo.addItem("Google Cloud Vision", "google_vision")
-        self.ocr_provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        mode_widget = QWidget()
+        mode_layout = QHBoxLayout(mode_widget)
+        mode_layout.setContentsMargins(0, 0, 0, 0)
+        self.local_mode_radio = QRadioButton("Local")
+        self.online_mode_radio = QRadioButton("Online")
+        self.ocr_mode_group = QButtonGroup(self)
+        self.ocr_mode_group.setExclusive(True)
+        self.ocr_mode_group.addButton(self.local_mode_radio)
+        self.ocr_mode_group.addButton(self.online_mode_radio)
+        self.local_mode_radio.toggled.connect(self._on_provider_changed)
+        self.online_mode_radio.toggled.connect(self._on_provider_changed)
+        mode_layout.addWidget(self.local_mode_radio)
+        mode_layout.addWidget(self.online_mode_radio)
+        mode_layout.addStretch(1)
+        self.local_engine_combo = QComboBox()
+        self.local_engine_combo.addItem("PaddleOCR", "local")
+        self.online_service_combo = QComboBox()
+        self.online_service_combo.addItem("Google Cloud Vision", "google_vision")
         self.ocr_provider_override_label = QLabel(
             "OCR Provider is controlled by the OCR_PROVIDER environment variable."
         )
@@ -181,14 +197,17 @@ class SettingsWindow(QWidget):
         form.addRow("Model", self.model_edit)
         form.addRow("Request timeout", self.timeout_edit)
         form.addRow("Global shortcut", self.shortcut_edit)
-        form.addRow("OCR Provider", self.ocr_provider_combo)
+        form.addRow("OCR Mode", mode_widget)
         root.addLayout(form)
         root.addWidget(self.ocr_provider_override_label)
 
-        self.local_ocr_group = QGroupBox("Local OCR")
+        self.local_ocr_group = QGroupBox("Local OCR Engine")
         ocr_layout = QVBoxLayout(self.local_ocr_group)
+        local_engine_form = QFormLayout()
+        local_engine_form.addRow("Local OCR Engine", self.local_engine_combo)
+        ocr_layout.addLayout(local_engine_form)
         self.local_ocr_privacy_label = QLabel(
-            "Local OCR processes screenshots on this device."
+            "Screenshots are processed on this device."
         )
         self.local_ocr_privacy_label.setWordWrap(True)
         self.local_ocr_status_label = QLabel()
@@ -217,8 +236,11 @@ class SettingsWindow(QWidget):
         ocr_layout.addLayout(ocr_buttons)
         root.addWidget(self.local_ocr_group)
 
-        self.google_vision_group = QGroupBox("Google Cloud Vision")
+        self.google_vision_group = QGroupBox("Online OCR Service")
         google_layout = QVBoxLayout(self.google_vision_group)
+        online_service_form = QFormLayout()
+        online_service_form.addRow("Online OCR Service", self.online_service_combo)
+        google_layout.addLayout(online_service_form)
         self.google_vision_privacy_label = QLabel(
             "Online OCR. Screenshots will be uploaded to Google Cloud Vision for OCR."
         )
@@ -278,13 +300,21 @@ class SettingsWindow(QWidget):
         self.model_edit.setText(config.model)
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
-        provider_index = self.ocr_provider_combo.findData(config.ocr_provider)
+        is_online = config.ocr_provider == "google_vision"
         provider_env_override = self.config_manager.has_explicit_ocr_provider()
-        self.ocr_provider_combo.setEnabled(not provider_env_override)
+        self.local_mode_radio.setChecked(not is_online)
+        self.online_mode_radio.setChecked(is_online)
+        self.local_engine_combo.setCurrentIndex(
+            max(0, self.local_engine_combo.findData("local"))
+        )
+        self.online_service_combo.setCurrentIndex(
+            max(0, self.online_service_combo.findData("google_vision"))
+        )
+        self.local_mode_radio.setEnabled(not provider_env_override)
+        self.online_mode_radio.setEnabled(not provider_env_override)
+        self.local_engine_combo.setEnabled(not provider_env_override)
+        self.online_service_combo.setEnabled(not provider_env_override)
         self.ocr_provider_override_label.setVisible(provider_env_override)
-        self.ocr_provider_combo.blockSignals(True)
-        self.ocr_provider_combo.setCurrentIndex(provider_index if provider_index >= 0 else 0)
-        self.ocr_provider_combo.blockSignals(False)
         self._on_provider_changed()
         self._show_environment_override_warnings()
 
@@ -298,10 +328,15 @@ class SettingsWindow(QWidget):
 
     @Slot()
     def _on_provider_changed(self) -> None:
-        is_google = self.ocr_provider_combo.currentData() == "google_vision"
+        is_google = self.online_mode_radio.isChecked()
         self.local_ocr_group.setVisible(not is_google)
         self.google_vision_group.setVisible(is_google)
         self._refresh_operation_controls()
+
+    def _current_provider_from_ui(self) -> str:
+        if self.local_mode_radio.isChecked():
+            return str(self.local_engine_combo.currentData() or "local")
+        return str(self.online_service_combo.currentData() or "google_vision")
 
     def _show_environment_override_warnings(self) -> None:
         warnings: list[str] = []
@@ -347,9 +382,11 @@ class SettingsWindow(QWidget):
         )
         self.test_button.setEnabled(not busy)
         self.google_vision_test_button.setEnabled(not busy)
-        self.ocr_provider_combo.setEnabled(
-            not busy and not self.config_manager.has_explicit_ocr_provider()
-        )
+        provider_editable = not busy and not self.config_manager.has_explicit_ocr_provider()
+        self.local_mode_radio.setEnabled(provider_editable)
+        self.online_mode_radio.setEnabled(provider_editable)
+        self.local_engine_combo.setEnabled(provider_editable)
+        self.online_service_combo.setEnabled(provider_editable)
         self.cancel_download_button.setVisible(download_running)
         self.cancel_download_button.setEnabled(download_running)
         self.local_ocr_progress.setVisible(download_running)
@@ -481,7 +518,7 @@ class SettingsWindow(QWidget):
             request_timeout=request_timeout,
             ocr_language=current.ocr_language,
             global_shortcut=global_shortcut,
-            ocr_provider=str(self.ocr_provider_combo.currentData() or "local"),
+            ocr_provider=self._current_provider_from_ui(),
             google_vision_api_key=self.google_vision_api_key_edit.text().strip(),
             online_ocr_timeout=current.online_ocr_timeout,
         )
