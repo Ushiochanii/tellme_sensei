@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import logging
 import sys
 import tempfile
 import threading
@@ -11,10 +12,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.ocr.local_runtime import worker_executable_candidates, worker_script_path
+from app.ocr.local_session import LocalOCRSession, PersistentWorkerUnsupported
 from app.ocr.types import OCRCancelled, OCRError, OCRResult
 from app.ocr.worker_protocol import read_error_message, read_result
 
 ProcessFactory = Callable[..., Any]
+logger = logging.getLogger(__name__)
 
 
 class LocalOCRProvider:
@@ -26,6 +29,7 @@ class LocalOCRProvider:
         executable: str | Path | None = None,
         timeout: float = 60.0,
         process_factory: ProcessFactory | None = None,
+        session: LocalOCRSession | None = None,
     ) -> None:
         if timeout <= 0:
             raise ValueError("timeout must be positive")
@@ -33,6 +37,7 @@ class LocalOCRProvider:
         self.executable = Path(executable) if executable is not None else None
         self.timeout = timeout
         self._process_factory = process_factory or subprocess.Popen
+        self.session = session
 
     def recognize(
         self,
@@ -51,6 +56,14 @@ class LocalOCRProvider:
                 profile_timings["input_prepare_ms"] = (
                     time.perf_counter() - input_started
                 ) * 1000.0
+            if self.session is not None and profile_output is None:
+                try:
+                    return self.session.recognize(input_path, cancel_event=cancel_event)
+                except PersistentWorkerUnsupported:
+                    logger.warning(
+                        "Local OCR component does not support persistent mode; "
+                        "using one-shot compatibility mode."
+                    )
             output_path = temp_path / "result.json"
             command = self._command(input_path, output_path, profile_output=profile_output)
             process_started = time.perf_counter() if profile_timings is not None else 0.0

@@ -9,6 +9,7 @@ import pytest
 from app.config import AppConfig
 from app.ocr.base import OCRProvider
 from app.ocr.factory import create_ocr_provider
+from app.ocr.local_session import LocalOCRSession
 from app.ocr.profiling import read_profile, write_profile
 from app.ocr.providers.local_worker import LocalOCRProvider
 from app.ocr.providers.paddle import PaddleOCRProvider
@@ -25,6 +26,21 @@ def test_factory_returns_local_provider_by_default() -> None:
 
     assert isinstance(provider, LocalOCRProvider)
     assert provider.language == "en"
+
+
+def test_factory_injects_shared_local_session_without_starting_it(tmp_path) -> None:
+    executable = tmp_path / "TellMeSenseiOCR.exe"
+    executable.write_bytes(b"fake")
+    session = LocalOCRSession(executable=executable)
+
+    provider = create_ocr_provider(
+        AppConfig(api_key="test", ocr_provider="local"),
+        local_ocr_session=session,
+    )
+
+    assert isinstance(provider, LocalOCRProvider)
+    assert provider.session is session
+    assert session.is_running() is False
 
 
 def test_ocr_result_contract_is_provider_independent() -> None:

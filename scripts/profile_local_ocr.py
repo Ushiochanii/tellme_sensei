@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from PySide6.QtGui import QImage  # noqa: E402
 
+from app.ocr.local_session import LocalOCRSession  # noqa: E402
 from app.ocr.profiling import read_profile  # noqa: E402
 from app.ocr.providers.local_worker import LocalOCRProvider  # noqa: E402
 from app.ocr.types import OCRError  # noqa: E402
@@ -134,12 +135,44 @@ def _run_worker_profile(
     return process_wall_ms, read_profile(profile_path)
 
 
+def _run_persistent_pipeline(
+    image: QImage,
+    worker: Path,
+    language: str,
+    runs_count: int,
+) -> list[float]:
+    """Measure the real Core session path with one lazily-started worker."""
+
+    session = LocalOCRSession(
+        executable=worker,
+        language=language,
+        timeout=180.0,
+        startup_timeout=180.0,
+    )
+    provider = LocalOCRProvider(
+        language=language,
+        executable=worker,
+        timeout=180.0,
+        session=session,
+    )
+    totals: list[float] = []
+    try:
+        for _ in range(runs_count):
+            started = time.perf_counter()
+            provider.recognize(image)
+            totals.append((time.perf_counter() - started) * 1000.0)
+        return totals
+    finally:
+        session.stop()
+
+
 def _print_report(
     image: QImage,
     current_totals: list[float],
     current_details: list[dict[str, Any]],
     cold_details: list[tuple[float, dict[str, Any]]],
     warm_detail: tuple[float, dict[str, Any]],
+    persistent_totals: list[float],
 ) -> None:
     print("TellMeSensei Local OCR Profile")
     print("=" * 40)
@@ -194,6 +227,15 @@ def _print_report(
             f"\nApproximate current median / warm median: "
             f"{median_ms(current_totals) / median_ms(warm_values):.2f}x"
         )
+    print("\nPersistent Core session (lazy worker reuse):")
+    for index, value in enumerate(persistent_totals, 1):
+        label = "first run" if index == 1 else f"warm run {index}"
+        print(f"  {label}: {value / 1000.0:.2f} s")
+    persistent_warm = persistent_totals[1:]
+    print(
+        f"  warm median (excluding first run): "
+        f"{median_ms(persistent_warm) / 1000.0:.2f} s"
+    )
     print("\nengine_call_ms is Paddle engine call wall-clock time, not pure model inference.")
 
 
@@ -218,7 +260,17 @@ def main(argv: list[str] | None = None) -> int:
             warm_detail = _run_worker_profile(
                 args.input, args.worker, args.language, args.warm_runs, temp_dir
             )
-        _print_report(image, current_totals, current_details, cold_details, warm_detail)
+        persistent_totals = _run_persistent_pipeline(
+            image, args.worker, args.language, args.warm_runs
+        )
+        _print_report(
+            image,
+            current_totals,
+            current_details,
+            cold_details,
+            warm_detail,
+            persistent_totals,
+        )
         return 0
     except (OCRError, OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         print(f"Local OCR profiling failed: {exc}", file=sys.stderr)
