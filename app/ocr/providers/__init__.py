@@ -1,9 +1,13 @@
 """Concrete OCR provider implementations, loaded lazily by name."""
 
-__all__ = ["LocalOCRProvider", "PaddleOCRProvider"]
+__all__ = ["GoogleVisionOCRProvider", "LocalOCRProvider", "PaddleOCRProvider"]
 
 
 def __getattr__(name: str):
+    if name == "GoogleVisionOCRProvider":
+        from app.ocr.providers.google_vision import GoogleVisionOCRProvider
+
+        return GoogleVisionOCRProvider
     if name == "LocalOCRProvider":
         from app.ocr.providers.local_worker import LocalOCRProvider
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Protocol
 
 from app.ocr.types import OCRResult
@@ -10,5 +11,9 @@ from app.ocr.types import OCRResult
 class OCRProvider(Protocol):
     """Minimal OCR interface consumed by the pipeline and worker."""
 
-    def recognize(self, image: Any) -> OCRResult:
+    def recognize(
+        self,
+        image: Any,
+        cancel_event: threading.Event | None = None,
+    ) -> OCRResult:
         """Recognize text from an image path or an in-memory image."""

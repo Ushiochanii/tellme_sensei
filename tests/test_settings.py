@@ -302,6 +302,8 @@ def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
         "model": "new-model",
         "request_timeout": 33.0,
         "global_shortcut": "Ctrl+Shift+Q",
+        "ocr_provider": "local",
+        "online_ocr_timeout": 15.0,
     }
     window.deleteLater()
     qt_app.processEvents()
