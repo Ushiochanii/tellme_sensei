@@ -29,6 +29,7 @@ from app.config import AppConfig, ConfigError, ConfigManager
 from app.local_ocr.component_manager import ComponentError, LocalOCRComponentManager
 from app.local_ocr.download import LocalOCRDownloadWorker
 from app.local_ocr.manifest import resolve_manifest_url
+from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
 from app.platform.hotkey import DEFAULT_SHORTCUT, HotkeySpec, HotkeySpecError
 from app.ocr.providers.google_vision import GoogleVisionOCRProvider
@@ -138,12 +139,14 @@ class SettingsWindow(QWidget):
         config_manager: ConfigManager | None = None,
         hotkey_manager: GlobalHotkeyManager | None = None,
         component_manager: LocalOCRComponentManager | None = None,
+        local_ocr_session: LocalOCRSession | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.config_manager = config_manager or ConfigManager()
         self.hotkey_manager = hotkey_manager
         self.component_manager = component_manager or LocalOCRComponentManager()
+        self.local_ocr_session = local_ocr_session
         self._connection_thread: QThread | None = None
         self._connection_worker: ConnectionTestWorker | None = None
         self._connection_cancel_event: threading.Event | None = None
@@ -401,6 +404,11 @@ class SettingsWindow(QWidget):
         if self.is_connection_running() or self.is_google_test_running():
             self._set_status("Wait for the active OCR or connection test to finish before downloading Local OCR.")
             return
+        if self.local_ocr_session is not None and self.local_ocr_session.is_busy():
+            self._set_status("Local OCR is currently in use. Please wait for recognition to finish.")
+            return
+        if self.local_ocr_session is not None:
+            self.local_ocr_session.stop()
         manifest_url = resolve_manifest_url(self.config_manager.project_root)
         if "example.invalid" in manifest_url:
             self.local_ocr_status_label.setText("Download URL is not configured.")
@@ -435,6 +443,8 @@ class SettingsWindow(QWidget):
 
     @Slot(str)
     def _on_local_ocr_download_succeeded(self, installed_path: str) -> None:
+        if self.local_ocr_session is not None:
+            self.local_ocr_session.reset_capability()
         self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version}")
         self.local_ocr_size_label.setText("")
 
@@ -484,11 +494,20 @@ class SettingsWindow(QWidget):
         )
         if answer == QMessageBox.StandardButton.Yes:
             try:
+                if self.local_ocr_session is not None:
+                    if self.local_ocr_session.is_busy():
+                        self.local_ocr_status_label.setText(
+                            "Local OCR is currently in use. Please wait for recognition to finish."
+                        )
+                        return
+                    self.local_ocr_session.stop()
                 self.component_manager.remove()
             except (OSError, ComponentError) as exc:
                 logger.warning("local OCR removal failed: %s", type(exc).__name__)
                 self.local_ocr_status_label.setText(f"Failed to remove Local OCR: {exc}")
                 return
+            if self.local_ocr_session is not None:
+                self.local_ocr_session.reset_capability()
             self._refresh_local_ocr_state()
 
     def _read_config_from_fields(self) -> AppConfig:

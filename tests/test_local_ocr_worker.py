@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 import subprocess
 import threading
 from pathlib import Path
@@ -42,6 +43,124 @@ def test_worker_success_serialization(tmp_path: Path, monkeypatch: pytest.Monkey
         "text": "题目",
         "lines": [{"text": "题目", "confidence": 0.96, "top": 12.0, "left": 20.0}],
     }
+
+
+def test_worker_serve_initializes_provider_once_and_reuses_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_path = tmp_path / "input.png"
+    input_path.write_bytes(b"image")
+    ready_path = tmp_path / "ready.json"
+    response_one = tmp_path / "response-one.json"
+    response_two = tmp_path / "response-two.json"
+    commands = [
+        {
+            "schema_version": 1,
+            "type": "recognize",
+            "request_id": "request-1",
+            "input": str(input_path.resolve()),
+            "output": str(response_one.resolve()),
+        },
+        {
+            "schema_version": 1,
+            "type": "recognize",
+            "request_id": "request-2",
+            "input": str(input_path.resolve()),
+            "output": str(response_two.resolve()),
+        },
+        {"schema_version": 1, "type": "shutdown"},
+    ]
+
+    class FakeProvider:
+        instances = []
+
+        def __init__(self, language: str) -> None:
+            self.language = language
+            self.initialize_calls = 0
+            self.recognize_calls = 0
+            self.__class__.instances.append(self)
+
+        def initialize(self) -> None:
+            self.initialize_calls += 1
+
+        def recognize(self, image: Path) -> OCRResult:
+            self.recognize_calls += 1
+            assert image == input_path
+            return OCRResult("题目", (OCRLine("题目"),))
+
+    monkeypatch.setattr(worker_main, "PaddleOCRProvider", FakeProvider)
+    monkeypatch.setattr(
+        worker_main,
+        "sys",
+        type("FakeSys", (), {"stdin": io.StringIO("\n".join(json.dumps(c) for c in commands) + "\n"), "stderr": None})(),
+    )
+
+    args = worker_main.build_parser().parse_args(
+        ["--serve", "--ready-file", str(ready_path), "--language", "japan"]
+    )
+    assert worker_main._serve(args) == 0
+    assert len(FakeProvider.instances) == 1
+    assert FakeProvider.instances[0].initialize_calls == 1
+    assert FakeProvider.instances[0].recognize_calls == 2
+    assert json.loads(ready_path.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "ok": True,
+        "mode": "persistent",
+    }
+    assert json.loads(response_one.read_text(encoding="utf-8"))["request_id"] == "request-1"
+    assert json.loads(response_two.read_text(encoding="utf-8"))["request_id"] == "request-2"
+
+
+def test_worker_serve_writes_error_response_for_ocr_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_path = tmp_path / "input.png"
+    input_path.write_bytes(b"image")
+    ready_path = tmp_path / "ready.json"
+    response_path = tmp_path / "response.json"
+
+    class FailingProvider:
+        def __init__(self, language: str) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
+        def recognize(self, image: Path) -> OCRResult:
+            raise OCRError("Local OCR failed")
+
+    monkeypatch.setattr(worker_main, "PaddleOCRProvider", FailingProvider)
+    monkeypatch.setattr(
+        worker_main,
+        "sys",
+        type(
+            "FakeSys",
+            (),
+            {
+                "stdin": io.StringIO(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "type": "recognize",
+                            "request_id": "request-1",
+                            "input": str(input_path.resolve()),
+                            "output": str(response_path.resolve()),
+                        }
+                    )
+                    + "\n"
+                ),
+                "stderr": None,
+            },
+        )(),
+    )
+    args = worker_main.build_parser().parse_args(
+        ["--serve", "--ready-file", str(ready_path)]
+    )
+    assert worker_main._serve(args) == 0
+    payload = json.loads(response_path.read_text(encoding="utf-8"))
+    assert payload["request_id"] == "request-1"
+    assert payload["ok"] is False
+    assert payload["error"] == "Local OCR failed"
 
 
 def test_worker_error_serialization_has_no_traceback(

@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
 from pathlib import Path
 
 from app.ocr.profiling import make_profile_payload, make_profile_run, write_profile
+from app.ocr.persistent_protocol import (
+    PersistentProtocolError,
+    parse_command,
+    write_persistent_error,
+    write_persistent_result,
+)
 from app.ocr.providers.paddle import PaddleOCRProvider
 from app.ocr.types import OCRError
 from app.ocr.worker_protocol import error_payload, result_payload, write_payload
@@ -24,6 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--language", default="japan")
     parser.add_argument("--profile-output", type=Path)
     parser.add_argument("--profile-runs", type=int, default=1)
+    parser.add_argument("--serve", action="store_true", help="run as a persistent OCR sidecar")
+    parser.add_argument("--ready-file", type=Path)
     return parser
 
 
@@ -31,6 +40,11 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.smoke:
         return _smoke_import()
+    if args.serve:
+        if args.ready_file is None:
+            _log_error("--ready-file is required with --serve")
+            return 2
+        return _serve(args)
     if args.input is None or args.output is None:
         _log_error("--input and --output are required unless --smoke is used")
         return 2
@@ -86,6 +100,58 @@ def _run_profile(
         profile_path,
         make_profile_payload(runs, worker_profiled_total_ms, result_write_ms),
     )
+
+
+def _serve(args: argparse.Namespace) -> int:
+    provider = PaddleOCRProvider(language=args.language)
+    try:
+        provider.initialize()
+        from app.ocr.worker_protocol import write_payload_atomic
+
+        write_payload_atomic(
+            args.ready_file,
+            {"schema_version": 1, "ok": True, "mode": "persistent"},
+        )
+    except Exception:
+        _log_exception("persistent Local OCR worker initialization failed")
+        return 1
+
+    seen_request_ids: set[str] = set()
+    for raw_line in sys.stdin:
+        if not raw_line.strip():
+            continue
+        try:
+            command = parse_command(json.loads(raw_line))
+        except (json.JSONDecodeError, PersistentProtocolError):
+            _log_error("persistent OCR command rejected")
+            continue
+        if command["type"] == "shutdown":
+            break
+
+        request_id = command["request_id"]
+        output_path = Path(command["output"])
+        if request_id in seen_request_ids:
+            try:
+                write_persistent_error(output_path, request_id, "duplicate request_id")
+            except OSError:
+                _log_error("persistent OCR response write failed")
+            continue
+        seen_request_ids.add(request_id)
+        try:
+            result = provider.recognize(Path(command["input"]))
+            write_persistent_result(output_path, request_id, result)
+        except OCRError as exc:
+            try:
+                write_persistent_error(output_path, request_id, str(exc))
+            except OSError:
+                _log_error("persistent OCR response write failed")
+        except Exception:
+            try:
+                write_persistent_error(output_path, request_id, "Local OCR processing failed.")
+            except OSError:
+                _log_error("persistent OCR response write failed")
+            _log_exception("persistent Local OCR request failed")
+    return 0
 
 
 def _smoke_import() -> int:

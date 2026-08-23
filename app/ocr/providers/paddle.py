@@ -104,6 +104,11 @@ class PaddleOCRProvider:
         if root_logger.handlers:
             root_logger.setLevel(logging.INFO)
 
+    def initialize(self) -> None:
+        """Ensure the lazy PaddleOCR engine is initialized."""
+
+        self._get_engine()
+
     def _get_engine(self) -> Any:
         if self._engine is not None:
             return self._engine

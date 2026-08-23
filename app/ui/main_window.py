@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import uuid
 from pathlib import Path
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 from app.capture.overlay import CaptureOverlay
 from app.config import ConfigError, ConfigManager
 from app.ocr.factory import create_ocr_provider
+from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
 from app.services.deepseek_service import DeepSeekService
 from app.state import AppState
@@ -36,12 +38,14 @@ class MainWindow(QWidget):
         tray_mode: bool = False,
         config_manager: ConfigManager | None = None,
         hotkey_manager: GlobalHotkeyManager | None = None,
+        local_ocr_session: LocalOCRSession | None = None,
     ) -> None:
         super().__init__()
         self.debug_capture_path = debug_capture_path
         self.tray_mode = tray_mode
         self.config_manager = config_manager or ConfigManager()
         self.hotkey_manager = hotkey_manager
+        self._local_ocr_session = local_ocr_session or LocalOCRSession()
         self.state = AppState.IDLE
         self._shutting_down = False
         self._overlay: CaptureOverlay | None = None
@@ -126,12 +130,15 @@ class MainWindow(QWidget):
             if self.processing_worker is not None:
                 self.processing_worker.request_cancel()
             logger.info("shutdown waiting for processing thread to finish")
+            self._local_ocr_session.stop()
             return
 
         if self._settings_window is not None and self._settings_window.has_running_background_operations():
             logger.info("shutdown waiting for settings background operations to finish")
+            self._local_ocr_session.stop()
             return
 
+        self._local_ocr_session.stop()
         self._emit_shutdown_ready()
 
     def _emit_shutdown_ready(self) -> None:
@@ -194,7 +201,20 @@ class MainWindow(QWidget):
             self.processing_finished.emit()
             return
 
-        ocr_provider = create_ocr_provider(config)
+        try:
+            factory_parameters = inspect.signature(create_ocr_provider).parameters
+        except (TypeError, ValueError):
+            factory_parameters = {}
+        if "local_ocr_session" in factory_parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in factory_parameters.values()
+        ):
+            ocr_provider = create_ocr_provider(
+                config,
+                local_ocr_session=self._local_ocr_session,
+            )
+        else:
+            ocr_provider = create_ocr_provider(config)
         deepseek_service = DeepSeekService(config)
         thread = QThread(self)
         thread.setObjectName("StudyAssistantProcessingThread")
@@ -320,6 +340,7 @@ class MainWindow(QWidget):
             self._answer_window.set_retry_enabled(bool(self._last_ocr_text))
         self._cancelled_job_id = None
         self.processing_finished.emit()
+        self._stop_local_session_if_online()
         if self._shutting_down:
             self._maybe_emit_shutdown_ready()
 
@@ -401,8 +422,10 @@ class MainWindow(QWidget):
             self._settings_window = SettingsWindow(
                 config_manager=self.config_manager,
                 hotkey_manager=self.hotkey_manager,
+                local_ocr_session=self._local_ocr_session,
             )
             self._settings_window.shutdown_ready.connect(self._on_settings_shutdown_ready)
+            self._settings_window.settings_saved.connect(self._on_settings_saved)
         self._settings_window.reload_values()
         self._settings_window.show()
         self._settings_window.raise_()
@@ -412,6 +435,20 @@ class MainWindow(QWidget):
         self._busy = False
         self.state = AppState.IDLE
         self.capture_button.setEnabled(True)
+
+    @Slot()
+    def _on_settings_saved(self) -> None:
+        self._stop_local_session_if_online()
+
+    def _stop_local_session_if_online(self) -> None:
+        if self._local_ocr_session.is_busy():
+            return
+        try:
+            config = self.config_manager.load(require_api_key=False)
+        except ConfigError:
+            return
+        if config.ocr_provider != "local":
+            self._local_ocr_session.stop()
 
     def shutdown(self) -> None:
         """Backward-compatible alias for the non-blocking shutdown request."""
