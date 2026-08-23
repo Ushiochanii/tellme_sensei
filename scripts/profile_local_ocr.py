@@ -20,6 +20,7 @@ from PySide6.QtGui import QImage  # noqa: E402
 from app.ocr.profiling import read_profile  # noqa: E402
 from app.ocr.providers.local_worker import LocalOCRProvider  # noqa: E402
 from app.ocr.types import OCRError  # noqa: E402
+from app.ocr.worker_protocol import read_error_message  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,6 +44,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--cold-runs must be at least 1")
     if args.warm_runs < 2:
         raise ValueError("--warm-runs must be at least 2")
+    args.input = args.input.expanduser().resolve()
+    args.worker = args.worker.expanduser().resolve()
     if not args.input.is_file():
         raise ValueError(f"image was not found: {args.input}")
     if not args.worker.is_file():
@@ -122,7 +125,12 @@ def _run_worker_profile(
     )
     process_wall_ms = (time.perf_counter() - started) * 1000.0
     if completed.returncode != 0:
-        raise RuntimeError("packaged Local OCR worker returned a non-zero exit code")
+        message = read_error_message(output_path)
+        if message is None:
+            message = "no valid worker error payload was returned"
+        raise RuntimeError(
+            f"Local OCR worker failed with exit code {completed.returncode}: {message}"
+        )
     return process_wall_ms, read_profile(profile_path)
 
 
