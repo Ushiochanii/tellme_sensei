@@ -117,6 +117,22 @@ The tray exit action unregisters the Win32 hotkey and stops the application.
 
 ## Platform Support
 
+## v0.5.0 release candidate
+
+TellMeSensei v0.5.0 supports two explicit OCR modes. For normal Windows use:
+
+1. Install TellMeSensei with the Windows installer.
+2. Open Settings and save a DeepSeek API key.
+3. Choose Local OCR or Google Cloud Vision.
+4. For Local OCR, choose **Download Local OCR**, wait for verification and
+   installation, then use `Ctrl+Shift+Q` to capture a question.
+5. For Google Cloud Vision, enter your own Google Vision API key, test it, and
+   save the settings.
+
+Local OCR processes screenshots on this device. Google Cloud Vision uploads
+screenshots to Google for OCR only when that provider is explicitly selected.
+The application does not silently switch between providers.
+
 - Windows: supported.
 - macOS: planned; macOS global hotkey support is not implemented yet.
 
@@ -126,8 +142,8 @@ layers remain independent of those platform details.
 
 ## Online OCR backend
 
-Google Cloud Vision is an optional, BYOK OCR backend for development and
-future Settings integration. It requires the Cloud Vision API to be enabled
+Google Cloud Vision is an optional, BYOK OCR backend available in Settings. It
+requires the Cloud Vision API to be enabled
 for the Google project. When `google_vision` is explicitly selected, the
 captured screenshot is uploaded to Google Cloud Vision; the default remains
 the local OCR component. The provider uses the REST API directly and does not

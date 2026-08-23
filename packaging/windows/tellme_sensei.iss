@@ -3,10 +3,10 @@
 
 #define AppName "TellMeSensei"
 #ifndef VersionLabel
-  #define VersionLabel "0.4.0-dev"
+  #define VersionLabel "0.5.0"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.4.0"
+  #define AppVersion "0.5.0"
 #endif
 #ifndef PortableDir
   #define PortableDir "..\..\dist\TellMeSensei"
@@ -39,6 +39,13 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "{#PortableDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Remove runtime directories bundled by pre-10C Core installers. Local OCR is
+; installed below %LOCALAPPDATA%\TellMeSensei\components and is unaffected.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal\paddle"
+Type: filesandordirs; Name: "{app}\_internal\paddleocr"
+Type: filesandordirs; Name: "{app}\_internal\Cython"
 
 [Icons]
 Name: "{autoprograms}\TellMeSensei"; Filename: "{app}\TellMeSensei.exe"; IconFilename: "{app}\TellMeSensei.exe"; WorkingDir: "{app}"

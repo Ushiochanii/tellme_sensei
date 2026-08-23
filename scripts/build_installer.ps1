@@ -97,9 +97,14 @@ if (-not (Test-Path -LiteralPath $installerExePath)) {
 
 $portableSize = (Get-ChildItem -LiteralPath $portablePath -Recurse -File | Measure-Object -Property Length -Sum).Sum
 $installer = Get-Item -LiteralPath $installerExePath
+$installerHash = (Get-FileHash -LiteralPath $installerExePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$checksumPath = "$installerExePath.sha256"
+"$installerHash  $($installer.Name)" | Set-Content -LiteralPath $checksumPath -Encoding ascii
 Write-Host "Portable path: $portablePath"
 Write-Host "Portable size: $([math]::Round($portableSize / 1MB, 2)) MB"
 Write-Host "Installer path: $($installer.FullName)"
 Write-Host "Installer size: $([math]::Round($installer.Length / 1MB, 2)) MB"
+Write-Host "Installer SHA256: $installerHash"
+Write-Host "Checksum path: $checksumPath"
 Write-Host "Version: $version"
 Write-Host "Inno Setup compiler: $isccPath"
