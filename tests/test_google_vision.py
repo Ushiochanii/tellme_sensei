@@ -219,3 +219,18 @@ def test_logs_do_not_contain_key_or_image_payload(qt_app, caplog) -> None:
     )
     provider.recognize(_image())
     assert key not in caplog.text
+
+
+def test_diagnostic_image_does_not_require_qt_gui(monkeypatch) -> None:
+    provider = GoogleVisionOCRProvider("key")
+    captured: list[QImage] = []
+
+    def fake_recognize(image, cancel_event=None):
+        captured.append(image)
+        return type("Result", (), {"text": "TEST"})()
+
+    monkeypatch.setattr(provider, "recognize", fake_recognize)
+    result = provider.test_connection()
+
+    assert result.text == "TEST"
+    assert captured and not captured[0].isNull()

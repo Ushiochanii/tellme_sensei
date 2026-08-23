@@ -192,6 +192,10 @@ class ConfigManager:
         model: str,
         request_timeout: float,
         global_shortcut: str | None = None,
+        *,
+        ocr_provider: str | None = None,
+        google_vision_api_key: str | None = None,
+        online_ocr_timeout: float | None = None,
     ) -> None:
         """Save API key and normal settings through their dedicated stores."""
 
@@ -202,4 +206,30 @@ class ConfigManager:
         settings = {"model": model, "request_timeout": request_timeout}
         if global_shortcut is not None:
             settings["global_shortcut"] = self._normalized_shortcut(global_shortcut)
+        if ocr_provider is not None:
+            normalized_provider = ocr_provider.strip().lower()
+            if normalized_provider not in {"local", "google_vision"}:
+                raise ConfigError(f"Unsupported OCR provider: {ocr_provider}")
+            settings["ocr_provider"] = normalized_provider
+        if online_ocr_timeout is not None:
+            if online_ocr_timeout <= 0 or online_ocr_timeout > 15:
+                raise ConfigError("ONLINE_OCR_TIMEOUT must be between 0 and 15 seconds")
+            settings["online_ocr_timeout"] = float(online_ocr_timeout)
+        if google_vision_api_key is not None:
+            if google_vision_api_key.strip():
+                setter = getattr(self.secret_store, "set_google_vision_api_key", None)
+                if callable(setter):
+                    setter(google_vision_api_key)
+                else:
+                    generic_setter = getattr(self.secret_store, "set_secret", None)
+                    if callable(generic_setter):
+                        generic_setter("google-vision-api-key", google_vision_api_key)
+            else:
+                deleter = getattr(self.secret_store, "delete_google_vision_api_key", None)
+                if callable(deleter):
+                    deleter()
+                else:
+                    generic_deleter = getattr(self.secret_store, "delete_secret", None)
+                    if callable(generic_deleter):
+                        generic_deleter("google-vision-api-key")
         self.settings_repository.update(settings)

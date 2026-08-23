@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QKeySequenceEdit,
     QLineEdit,
     QMessageBox,
+    QComboBox,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
@@ -28,6 +29,8 @@ from app.local_ocr.download import LocalOCRDownloadWorker
 from app.local_ocr.manifest import resolve_manifest_url
 from app.platform.base import GlobalHotkeyManager
 from app.platform.hotkey import DEFAULT_SHORTCUT, HotkeySpec, HotkeySpecError
+from app.ocr.providers.google_vision import GoogleVisionOCRProvider
+from app.ocr.types import OCRCancelled, OCRError
 from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
 from app.settings.secret_store import SecretStoreError
 
@@ -36,6 +39,11 @@ CONNECTION_TEST_TIMEOUT = 10.0
 API_KEY_ENV_OVERRIDE_MESSAGE = (
     "当前 API Key 由环境变量 DEEPSEEK_API_KEY 覆盖。"
     "在设置中保存新的 API Key 不会改变当前实际使用的 Key。"
+)
+GOOGLE_VISION_ENV_OVERRIDE_MESSAGE = (
+    "Google Vision API Key is currently overridden by the environment variable "
+    "GOOGLE_VISION_API_KEY. "
+    "Saving a different key will not change the key currently in use."
 )
 
 
@@ -72,6 +80,51 @@ class ConnectionTestWorker(QObject):
         self.cancel_event.set()
 
 
+class GoogleVisionTestWorker(QObject):
+    """Run a generated-image Google Vision diagnostic outside the GUI thread."""
+
+    succeeded = Signal()
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(
+        self,
+        api_key: str,
+        language: str,
+        timeout: float,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
+        super().__init__()
+        self.api_key = api_key
+        self.language = language
+        self.timeout = timeout
+        self.cancel_event = cancel_event or threading.Event()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            GoogleVisionOCRProvider(
+                api_key=self.api_key,
+                language=self.language,
+                timeout=self.timeout,
+            ).test_connection(self.cancel_event)
+            if not self.cancel_event.is_set():
+                self.succeeded.emit()
+        except OCRCancelled:
+            pass
+        except OCRError as exc:
+            self.failed.emit(str(exc))
+        except Exception:
+            logger.exception("Google Vision connection test failed")
+            self.failed.emit("Google Vision connection test failed.")
+        finally:
+            self.finished.emit()
+
+    @Slot()
+    def request_cancel(self) -> None:
+        self.cancel_event.set()
+
+
 class SettingsWindow(QWidget):
     """A single-instance settings window owned by MainWindow."""
 
@@ -98,6 +151,9 @@ class SettingsWindow(QWidget):
         self._download_thread: QThread | None = None
         self._download_worker: LocalOCRDownloadWorker | None = None
         self._download_cancel_event: threading.Event | None = None
+        self._google_thread: QThread | None = None
+        self._google_worker: GoogleVisionTestWorker | None = None
+        self._google_cancel_event: threading.Event | None = None
 
         self.setWindowTitle("设置")
         self.setMinimumWidth(430)
@@ -112,14 +168,23 @@ class SettingsWindow(QWidget):
         self.timeout_edit = QLineEdit()
         self.shortcut_edit = QKeySequenceEdit()
         self.shortcut_edit.setMaximumSequenceLength(1)
+        self.ocr_provider_combo = QComboBox()
+        self.ocr_provider_combo.addItem("Local OCR", "local")
+        self.ocr_provider_combo.addItem("Google Cloud Vision", "google_vision")
+        self.ocr_provider_combo.currentIndexChanged.connect(self._on_provider_changed)
         form.addRow("DeepSeek API Key", self.api_key_edit)
         form.addRow("Model", self.model_edit)
         form.addRow("Request timeout", self.timeout_edit)
         form.addRow("Global shortcut", self.shortcut_edit)
+        form.addRow("OCR Provider", self.ocr_provider_combo)
         root.addLayout(form)
 
-        ocr_group = QGroupBox("Local OCR")
-        ocr_layout = QVBoxLayout(ocr_group)
+        self.local_ocr_group = QGroupBox("Local OCR")
+        ocr_layout = QVBoxLayout(self.local_ocr_group)
+        self.local_ocr_privacy_label = QLabel(
+            "Local OCR processes screenshots on this device."
+        )
+        self.local_ocr_privacy_label.setWordWrap(True)
         self.local_ocr_status_label = QLabel()
         self.local_ocr_size_label = QLabel()
         self.local_ocr_progress = QProgressBar()
@@ -139,11 +204,33 @@ class SettingsWindow(QWidget):
         ocr_buttons.addWidget(self.cancel_download_button)
         ocr_buttons.addWidget(self.verify_ocr_button)
         ocr_buttons.addWidget(self.remove_ocr_button)
+        ocr_layout.addWidget(self.local_ocr_privacy_label)
         ocr_layout.addWidget(self.local_ocr_status_label)
         ocr_layout.addWidget(self.local_ocr_size_label)
         ocr_layout.addWidget(self.local_ocr_progress)
         ocr_layout.addLayout(ocr_buttons)
-        root.addWidget(ocr_group)
+        root.addWidget(self.local_ocr_group)
+
+        self.google_vision_group = QGroupBox("Google Cloud Vision")
+        google_layout = QVBoxLayout(self.google_vision_group)
+        self.google_vision_privacy_label = QLabel(
+            "Online OCR. Screenshots will be uploaded to Google Cloud Vision for OCR."
+        )
+        self.google_vision_privacy_label.setWordWrap(True)
+        self.google_vision_api_key_edit = QLineEdit()
+        self.google_vision_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.google_vision_api_key_edit.setPlaceholderText("Enter Google Vision API Key")
+        google_key_form = QFormLayout()
+        google_key_form.addRow("Google Vision API Key", self.google_vision_api_key_edit)
+        self.google_vision_test_button = QPushButton("Test Google Vision")
+        self.google_vision_test_button.clicked.connect(self.test_google_vision)
+        self.google_vision_status_label = QLabel()
+        self.google_vision_status_label.setWordWrap(True)
+        google_layout.addWidget(self.google_vision_privacy_label)
+        google_layout.addLayout(google_key_form)
+        google_layout.addWidget(self.google_vision_test_button)
+        google_layout.addWidget(self.google_vision_status_label)
+        root.addWidget(self.google_vision_group)
 
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
@@ -171,47 +258,90 @@ class SettingsWindow(QWidget):
         except ConfigError:
             config = AppConfig(api_key="")
         self.api_key_edit.setText(config.api_key)
+        self.google_vision_api_key_edit.setText(config.google_vision_api_key)
         self.model_edit.setText(config.model)
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
-        if self.config_manager.has_explicit_api_key():
-            self._set_status(API_KEY_ENV_OVERRIDE_MESSAGE)
+        provider_index = self.ocr_provider_combo.findData(config.ocr_provider)
+        self.ocr_provider_combo.blockSignals(True)
+        self.ocr_provider_combo.setCurrentIndex(provider_index if provider_index >= 0 else 0)
+        self.ocr_provider_combo.blockSignals(False)
+        self._on_provider_changed()
+        self._show_environment_override_warnings()
 
     def reload_values(self) -> None:
         """Reload persisted values when the window is shown again."""
 
-        if not self.is_connection_running():
+        if not self.has_running_background_operations():
             self._load_current_values()
-        if self._download_thread is None or not self._download_thread.isRunning():
+        if not self.is_download_running():
             self._refresh_local_ocr_state()
+
+    @Slot()
+    def _on_provider_changed(self) -> None:
+        is_google = self.ocr_provider_combo.currentData() == "google_vision"
+        self.local_ocr_group.setVisible(not is_google)
+        self.google_vision_group.setVisible(is_google)
+        self._refresh_operation_controls()
+
+    def _show_environment_override_warnings(self) -> None:
+        warnings: list[str] = []
+        if self.config_manager.has_explicit_api_key():
+            warnings.append(API_KEY_ENV_OVERRIDE_MESSAGE)
+        if self.config_manager.has_explicit_google_vision_api_key():
+            warnings.append(GOOGLE_VISION_ENV_OVERRIDE_MESSAGE)
+        if warnings:
+            self._set_status("\n".join(warnings))
 
     def _refresh_local_ocr_state(self) -> None:
         if self.component_manager.is_installed():
             self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version}")
             self.download_ocr_button.setVisible(False)
-            self.verify_ocr_button.setEnabled(True)
-            self.remove_ocr_button.setEnabled(True)
         else:
             self.local_ocr_status_label.setText("Not installed")
             self.download_ocr_button.setVisible(True)
-            self.verify_ocr_button.setEnabled(False)
-            self.remove_ocr_button.setEnabled(False)
+        self._refresh_operation_controls()
+
+    def _refresh_operation_controls(
+        self,
+        *,
+        connection_running: bool | None = None,
+        download_running: bool | None = None,
+        google_running: bool | None = None,
+    ) -> None:
+        connection_running = (
+            self.is_connection_running() if connection_running is None else connection_running
+        )
+        download_running = (
+            self.is_download_running() if download_running is None else download_running
+        )
+        google_running = (
+            self.is_google_test_running() if google_running is None else google_running
+        )
+        busy = connection_running or download_running or google_running
+        self.download_ocr_button.setEnabled(not busy)
+        self.verify_ocr_button.setEnabled(
+            not busy and self.component_manager.is_installed()
+        )
+        self.remove_ocr_button.setEnabled(
+            not busy and self.component_manager.is_installed()
+        )
+        self.test_button.setEnabled(not busy)
+        self.google_vision_test_button.setEnabled(not busy)
+        self.ocr_provider_combo.setEnabled(not busy)
+        self.cancel_download_button.setVisible(download_running)
+        self.cancel_download_button.setEnabled(download_running)
+        self.local_ocr_progress.setVisible(download_running)
 
     def _set_download_state(self, running: bool) -> None:
-        connection_running = self.is_connection_running()
-        self.download_ocr_button.setEnabled(not running and not connection_running)
-        self.verify_ocr_button.setEnabled(not running and not connection_running and self.component_manager.is_installed())
-        self.remove_ocr_button.setEnabled(not running and not connection_running and self.component_manager.is_installed())
-        self.test_button.setEnabled(not running)
-        self.cancel_download_button.setVisible(running)
-        self.local_ocr_progress.setVisible(running)
+        self._refresh_operation_controls(download_running=running)
 
     @Slot()
     def download_local_ocr(self) -> None:
         if self._download_thread is not None and self._download_thread.isRunning():
             return
-        if self.is_connection_running():
-            self._set_status("Wait for the connection test to finish before downloading Local OCR.")
+        if self.is_connection_running() or self.is_google_test_running():
+            self._set_status("Wait for the active OCR or connection test to finish before downloading Local OCR.")
             return
         manifest_url = resolve_manifest_url(self.config_manager.project_root)
         if "example.invalid" in manifest_url:
@@ -267,7 +397,7 @@ class SettingsWindow(QWidget):
         self._download_thread = None
         self._download_worker = None
         self._download_cancel_event = None
-        self._set_download_state(False)
+        self._refresh_operation_controls()
         self._refresh_local_ocr_state()
         self._maybe_emit_shutdown_ready()
 
@@ -330,14 +460,17 @@ class SettingsWindow(QWidget):
             request_timeout=request_timeout,
             ocr_language=current.ocr_language,
             global_shortcut=global_shortcut,
+            ocr_provider=str(self.ocr_provider_combo.currentData() or "local"),
+            google_vision_api_key=self.google_vision_api_key_edit.text().strip(),
+            online_ocr_timeout=current.online_ocr_timeout,
         )
 
     @Slot()
     def test_connection(self) -> None:
         if self._connection_thread is not None and self._connection_thread.isRunning():
             return
-        if self._download_thread is not None and self._download_thread.isRunning():
-            self._set_status("Wait for the Local OCR download to finish before testing the connection.")
+        if self.is_download_running() or self.is_google_test_running():
+            self._set_status("Wait for the active OCR operation to finish before testing the connection.")
             return
         try:
             config = self._read_config_from_fields()
@@ -364,10 +497,7 @@ class SettingsWindow(QWidget):
         thread.finished.connect(self._on_connection_finished)
         self._connection_worker = worker
         self._connection_thread = thread
-        self.test_button.setEnabled(False)
-        self.download_ocr_button.setEnabled(False)
-        self.verify_ocr_button.setEnabled(False)
-        self.remove_ocr_button.setEnabled(False)
+        self._refresh_operation_controls(connection_running=True)
         self._set_status("正在测试连接...")
         thread.start()
 
@@ -386,10 +516,78 @@ class SettingsWindow(QWidget):
         self._connection_thread = None
         self._connection_worker = None
         self._connection_cancel_event = None
-        self.test_button.setEnabled(True)
         if self._close_requested or self._shutdown_requested:
             self.hide()
-        self._set_download_state(False)
+        self._refresh_operation_controls()
+        self._maybe_emit_shutdown_ready()
+
+    @Slot()
+    def test_google_vision(self) -> None:
+        if self.is_google_test_running():
+            return
+        if self.is_connection_running() or self.is_download_running():
+            self._set_status("Wait for the active operation to finish before testing Google Vision.")
+            return
+        api_key = self.google_vision_api_key_edit.text().strip()
+        if not api_key:
+            self.google_vision_status_label.setText("Enter a Google Vision API Key first.")
+            return
+        try:
+            config = self.config_manager.load(require_api_key=False)
+        except ConfigError as exc:
+            self.google_vision_status_label.setText(str(exc))
+            return
+
+        self._close_requested = False
+        self._google_cancel_event = threading.Event()
+        worker = GoogleVisionTestWorker(
+            api_key=api_key,
+            language=config.ocr_language,
+            timeout=min(config.online_ocr_timeout, CONNECTION_TEST_TIMEOUT),
+            cancel_event=self._google_cancel_event,
+        )
+        thread = QThread(self)
+        thread.setObjectName("SettingsGoogleVisionTestThread")
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._on_google_test_success)
+        worker.failed.connect(self._on_google_test_failed)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_google_test_finished)
+        self._google_worker = worker
+        self._google_thread = thread
+        self.google_vision_test_button.setText("Testing...")
+        self.google_vision_status_label.setText("Testing...")
+        self._refresh_operation_controls(google_running=True)
+        thread.start()
+
+    @Slot()
+    def cancel_google_vision_test(self) -> None:
+        if self._google_worker is not None:
+            self._google_worker.request_cancel()
+            self.google_vision_status_label.setText("Cancelling...")
+
+    @Slot()
+    def _on_google_test_success(self) -> None:
+        if not self._close_requested and not self._shutdown_requested:
+            self.google_vision_status_label.setText("Google Vision connection successful.")
+
+    @Slot(str)
+    def _on_google_test_failed(self, message: str) -> None:
+        if not self._close_requested and not self._shutdown_requested:
+            self.google_vision_status_label.setText(message)
+
+    @Slot()
+    def _on_google_test_finished(self) -> None:
+        self._google_thread = None
+        self._google_worker = None
+        self._google_cancel_event = None
+        self.google_vision_test_button.setText("Test Google Vision")
+        if self._close_requested or self._shutdown_requested:
+            self.hide()
+        self._refresh_operation_controls()
         self._maybe_emit_shutdown_ready()
 
     @Slot()
@@ -412,6 +610,9 @@ class SettingsWindow(QWidget):
                 config.model,
                 config.request_timeout,
                 config.global_shortcut,
+                ocr_provider=config.ocr_provider,
+                google_vision_api_key=config.google_vision_api_key,
+                online_ocr_timeout=config.online_ocr_timeout,
             )
         except (ConfigError, SecretStoreError, ValueError) as exc:
             if rebound and self.hotkey_manager is not None and old_shortcut is not None:
@@ -420,8 +621,7 @@ class SettingsWindow(QWidget):
             self._set_status(str(exc))
             return
         self._set_status("设置已保存")
-        if self.config_manager.has_explicit_api_key():
-            self._set_status(API_KEY_ENV_OVERRIDE_MESSAGE)
+        self._show_environment_override_warnings()
         self.settings_saved.emit()
         self.close()
 
@@ -434,8 +634,15 @@ class SettingsWindow(QWidget):
     def is_download_running(self) -> bool:
         return self._download_thread is not None and self._download_thread.isRunning()
 
+    def is_google_test_running(self) -> bool:
+        return self._google_thread is not None and self._google_thread.isRunning()
+
     def has_running_background_operations(self) -> bool:
-        return self.is_connection_running() or self.is_download_running()
+        return (
+            self.is_connection_running()
+            or self.is_download_running()
+            or self.is_google_test_running()
+        )
 
     @Slot()
     def request_shutdown(self) -> None:
@@ -446,6 +653,8 @@ class SettingsWindow(QWidget):
         if self.is_connection_running():
             if self._connection_worker is not None:
                 self._connection_worker.request_cancel()
+        if self.is_google_test_running():
+            self.cancel_google_vision_test()
         self.hide()
         self._maybe_emit_shutdown_ready()
 
@@ -466,10 +675,9 @@ class SettingsWindow(QWidget):
         if self.is_connection_running():
             if self._connection_worker is not None:
                 self._connection_worker.request_cancel()
-            self.hide()
-            event.accept()
-            return
-        if self.is_download_running():
+        if self.is_google_test_running():
+            self.cancel_google_vision_test()
+        if self.has_running_background_operations():
             self.hide()
             event.accept()
             return

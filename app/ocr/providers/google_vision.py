@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtCore import QBuffer, QIODevice
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QImage
 
 from app.ocr.types import OCRCancelled, OCRError, OCRLine, OCRResult
 
@@ -78,11 +78,26 @@ class GoogleVisionOCRProvider:
     ) -> OCRResult:
         """Send a generated tiny image, never a user's screenshot."""
 
-        image = QImage(96, 32, QImage.Format.Format_RGB32)
+        # Draw a tiny bitmap directly into the image. This intentionally avoids
+        # QPainter/QFontDatabase so this diagnostic also works without a GUI app.
+        glyphs = {
+            "T": ("11111", "00100", "00100", "00100", "00100", "00100", "00100"),
+            "E": ("11111", "10000", "10000", "11110", "10000", "10000", "11111"),
+            "S": ("01111", "10000", "10000", "01110", "00001", "00001", "11110"),
+        }
+        scale = 3
+        image = QImage(4 * 5 * scale + 3 * scale + 6, 7 * scale + 6, QImage.Format.Format_RGB32)
         image.fill(0xFFFFFFFF)
-        painter = QPainter(image)
-        painter.drawText(4, 21, "TEST")
-        painter.end()
+        for index, character in enumerate("TEST"):
+            glyph = glyphs[character]
+            origin_x = 3 + index * 6 * scale
+            origin_y = 3
+            for row, bitmap_row in enumerate(glyph):
+                for column, pixel in enumerate(bitmap_row):
+                    if pixel == "1":
+                        for dy in range(scale):
+                            for dx in range(scale):
+                                image.setPixel(origin_x + column * scale + dx, origin_y + row * scale + dy, 0xFF000000)
         return self.recognize(image, cancel_event=cancel_event)
 
     def _request_payload(self, image_bytes: bytes) -> dict[str, Any]:
