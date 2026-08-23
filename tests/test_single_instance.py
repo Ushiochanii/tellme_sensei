@@ -56,9 +56,9 @@ def test_stale_endpoint_is_recovered(qt_app) -> None:
     qt_app.processEvents()
 
 
-def test_ocr_import_diagnostic_bypasses_single_instance_guard(monkeypatch) -> None:
+def test_core_diagnostic_bypasses_single_instance_guard(monkeypatch) -> None:
     def guard_must_not_be_created(*_args, **_kwargs):
         raise AssertionError("diagnostic CLI must bypass the single-instance guard")
 
     monkeypatch.setattr(gui, "SingleInstanceGuard", guard_must_not_be_created)
-    assert gui.main(["--smoke-import-ocr"]) == 0
+    assert gui.main(["--smoke-core"]) == 0

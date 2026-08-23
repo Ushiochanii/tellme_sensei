@@ -10,9 +10,10 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from app.ocr.base import OCRProvider
+from app.ocr.types import OCRCancelled, OCRError, OCRLine, OCRResult
 from app.pipeline import PipelineError, PipelineResult
 from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
-from app.services.ocr_service import OCRError, OCRLine, OCRResult, OCRService
 from app.thread_info import current_thread_info
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ class ProcessingWorker(QObject):
     def __init__(
         self,
         image: Any | None,
-        ocr_service: OCRService,
+        ocr_service: OCRProvider,
         deepseek_service: DeepSeekService,
         ocr_text: str | None = None,
         job_id: str | None = None,
@@ -83,7 +84,7 @@ class ProcessingWorker(QObject):
                 if self.image is None:
                     raise PipelineError("没有可处理的截图。")
                 logger.info("before OCRService.recognize job_id=%s [%s]", self.job_id, current_thread_info())
-                ocr_result = self.ocr_service.recognize(self.image)
+                ocr_result = self._recognize_with_cancellation(self.image)
                 logger.info(
                     "after OCRService.recognize job_id=%s text_length=%d [%s]",
                     self.job_id,
@@ -125,7 +126,7 @@ class ProcessingWorker(QObject):
             result = PipelineResult(ocr=ocr_result, answer=answer)
             self.result_ready.emit(result)
             self.job_result_ready.emit(self.job_id, result)
-        except (ProcessingCancelled, DeepSeekCancelled):
+        except (ProcessingCancelled, OCRCancelled, DeepSeekCancelled):
             self._emit_cancelled()
         except (OCRError, DeepSeekError, PipelineError) as exc:
             logger.error("GUI processing failed job_id=%s: %s [%s]", self.job_id, exc, current_thread_info())
@@ -165,3 +166,17 @@ class ProcessingWorker(QObject):
         if accepts_cancel:
             return analyze(text, cancel_event=self._cancel_event)
         return analyze(text)
+
+    def _recognize_with_cancellation(self, image: Any) -> OCRResult:
+        recognize = self.ocr_service.recognize
+        try:
+            parameters = inspect.signature(recognize).parameters
+            accepts_cancel = "cancel_event" in parameters or any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values()
+            )
+        except (TypeError, ValueError):
+            accepts_cancel = True
+        if accepts_cancel:
+            return recognize(image, cancel_event=self._cancel_event)
+        return recognize(image)

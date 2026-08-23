@@ -12,6 +12,7 @@ from app.config import AppConfig
 from app.pipeline import PipelineResult
 from app.services.deepseek_service import DeepSeekCancelled, DeepSeekService
 from app.services.ocr_service import OCRLine, OCRResult
+from app.ocr.types import OCRCancelled
 from app.state import AppState
 from app.ui import main_window as main_window_module
 from app.ui.answer_window import AnswerWindow
@@ -23,6 +24,36 @@ def _chunk(text: str):
     return SimpleNamespace(
         choices=[SimpleNamespace(delta=SimpleNamespace(content=text))]
     )
+
+
+def test_processing_worker_passes_cancel_event_to_ocr(qt_app) -> None:
+    cancel_event = threading.Event()
+    cancelled: list[str] = []
+    errors: list[str] = []
+
+    class CancelAwareOCR:
+        def recognize(self, image, cancel_event=None) -> OCRResult:
+            assert image == "image"
+            assert cancel_event is not None
+            raise OCRCancelled("cancelled")
+
+    class UnusedAI:
+        def analyze(self, text: str) -> str:
+            raise AssertionError("AI must not run after OCR cancellation")
+
+    worker = ProcessingWorker(
+        "image",
+        CancelAwareOCR(),
+        UnusedAI(),
+        job_id="ocr-cancel",
+        cancel_event=cancel_event,
+    )
+    worker.cancelled.connect(cancelled.append)
+    worker.error_occurred.connect(errors.append)
+    worker.run()
+
+    assert cancelled == ["ocr-cancel"]
+    assert errors == []
 
 
 class FakeStream:
@@ -170,7 +201,11 @@ def test_real_qthread_cancel_during_ai_restores_idle(qt_app, monkeypatch) -> Non
         "load",
         lambda _self, require_api_key=True: AppConfig(api_key="test"),
     )
-    monkeypatch.setattr(main_window_module, "OCRService", FakeOCR)
+    monkeypatch.setattr(
+        main_window_module,
+        "create_ocr_provider",
+        lambda config: FakeOCR(config.ocr_language),
+    )
     monkeypatch.setattr(main_window_module, "DeepSeekService", BlockingAI)
 
     window = MainWindow(tray_mode=True)

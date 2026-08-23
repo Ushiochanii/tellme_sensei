@@ -1,0 +1,116 @@
+"""Validated metadata for downloadable Local OCR components."""
+
+from __future__ import annotations
+
+import json
+import os
+import platform
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlparse
+
+from dotenv import dotenv_values
+
+SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+DEFAULT_MANIFEST_URL = "https://downloads.example.invalid/tellme-sensei/local-ocr-manifest.json"
+
+
+class ManifestError(ValueError):
+    """Raised when component metadata is missing or unsafe."""
+
+
+def current_platform() -> str:
+    return "windows" if sys.platform == "win32" else sys.platform
+
+
+def current_arch() -> str:
+    value = platform.machine().lower()
+    if value in {"amd64", "x86_64", "x64"}:
+        return "x86_64"
+    if value in {"arm64", "aarch64"}:
+        return "arm64"
+    return value
+
+
+@dataclass(frozen=True)
+class ComponentManifest:
+    component: str
+    version: str
+    platform: str
+    arch: str
+    url: str
+    sha256: str
+    size: int
+    archive_format: str = "zip"
+
+    @classmethod
+    def from_dict(
+        cls,
+        payload: object,
+        *,
+        expected_platform: str | None = None,
+        expected_arch: str | None = None,
+    ) -> "ComponentManifest":
+        if not isinstance(payload, dict):
+            raise ManifestError("Local OCR manifest must be a JSON object.")
+        required = ("component", "version", "platform", "arch", "url", "sha256", "size", "archive_format")
+        if any(key not in payload for key in required):
+            raise ManifestError("Local OCR manifest is missing required fields.")
+        values = {key: payload[key] for key in required}
+        if not all(isinstance(values[key], str) and values[key].strip() for key in required if key != "size"):
+            raise ManifestError("Local OCR manifest contains invalid text fields.")
+        version = values["version"].strip()
+        if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+            raise ManifestError("Local OCR manifest version is invalid.")
+        parsed = urlparse(values["url"].strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ManifestError("Local OCR manifest URL is invalid.")
+        sha256 = values["sha256"].strip()
+        if not SHA256_RE.fullmatch(sha256):
+            raise ManifestError("Local OCR manifest SHA-256 is invalid.")
+        size = values["size"]
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+            raise ManifestError("Local OCR manifest size is invalid.")
+        if values["component"].strip() != "local-ocr" or values["archive_format"].strip().lower() != "zip":
+            raise ManifestError("Unsupported Local OCR component manifest.")
+        expected_platform = expected_platform or current_platform()
+        expected_arch = expected_arch or current_arch()
+        if values["platform"].strip().lower() != expected_platform.lower():
+            raise ManifestError("Local OCR component platform is not supported on this system.")
+        if values["arch"].strip().lower() != expected_arch.lower():
+            raise ManifestError("Local OCR component architecture is not supported on this system.")
+        return cls(
+            component="local-ocr",
+            version=version,
+            platform=values["platform"].strip().lower(),
+            arch=values["arch"].strip().lower(),
+            url=values["url"].strip(),
+            sha256=sha256.lower(),
+            size=size,
+            archive_format="zip",
+        )
+
+    @classmethod
+    def from_json(cls, text: str, **kwargs: object) -> "ComponentManifest":
+        try:
+            payload = json.loads(text.lstrip("\ufeff"))
+        except json.JSONDecodeError as exc:
+            raise ManifestError("Local OCR manifest is not valid JSON.") from exc
+        return cls.from_dict(payload, **kwargs)
+
+
+def resolve_manifest_url(project_root: Path | None = None) -> str:
+    """Resolve distribution metadata without exposing a URL setting in the UI."""
+
+    explicit = os.environ.get("LOCAL_OCR_MANIFEST_URL", "").strip()
+    if explicit:
+        return explicit
+    root = project_root or Path(__file__).resolve().parents[2]
+    try:
+        values = dotenv_values(root / ".env")
+    except OSError:
+        values = {}
+    fallback = values.get("LOCAL_OCR_MANIFEST_URL")
+    return str(fallback).strip() if isinstance(fallback, str) and fallback.strip() else DEFAULT_MANIFEST_URL

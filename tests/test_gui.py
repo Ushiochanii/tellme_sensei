@@ -206,7 +206,11 @@ def test_main_window_runs_worker_through_real_qthread(qt_app, monkeypatch) -> No
         "load",
         lambda _self, require_api_key=True: AppConfig(api_key="test"),
     )
-    monkeypatch.setattr(main_window_module, "OCRService", FakeOCR)
+    monkeypatch.setattr(
+        main_window_module,
+        "create_ocr_provider",
+        lambda config: FakeOCR(config.ocr_language),
+    )
     monkeypatch.setattr(main_window_module, "DeepSeekService", FakeAI)
 
     window = MainWindow()
@@ -253,7 +257,11 @@ def test_main_window_ai_error_renders_terminal_answer_state(qt_app, monkeypatch)
         "load",
         lambda _self, require_api_key=True: AppConfig(api_key="test"),
     )
-    monkeypatch.setattr(main_window_module, "OCRService", FakeOCR)
+    monkeypatch.setattr(
+        main_window_module,
+        "create_ocr_provider",
+        lambda config: FakeOCR(config.ocr_language),
+    )
     monkeypatch.setattr(main_window_module, "DeepSeekService", FakeAI)
 
     window = MainWindow(tray_mode=True)

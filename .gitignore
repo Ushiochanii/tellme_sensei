@@ -17,5 +17,6 @@ temp/
 *.jpeg
 *.bmp
 *.webp
+ocr_result.json
 dist/
 build/

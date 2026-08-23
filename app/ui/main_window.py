@@ -12,9 +12,9 @@ from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.capture.overlay import CaptureOverlay
 from app.config import ConfigError, ConfigManager
+from app.ocr.factory import create_ocr_provider
 from app.platform.base import GlobalHotkeyManager
 from app.services.deepseek_service import DeepSeekService
-from app.services.ocr_service import OCRService
 from app.state import AppState
 from app.thread_info import current_thread_info
 from app.ui.answer_window import AnswerWindow
@@ -128,8 +128,8 @@ class MainWindow(QWidget):
             logger.info("shutdown waiting for processing thread to finish")
             return
 
-        if self._settings_window is not None and self._settings_window.is_connection_running():
-            logger.info("shutdown waiting for settings connection test to finish")
+        if self._settings_window is not None and self._settings_window.has_running_background_operations():
+            logger.info("shutdown waiting for settings background operations to finish")
             return
 
         self._emit_shutdown_ready()
@@ -194,13 +194,13 @@ class MainWindow(QWidget):
             self.processing_finished.emit()
             return
 
-        ocr_service = OCRService(language=config.ocr_language)
+        ocr_provider = create_ocr_provider(config)
         deepseek_service = DeepSeekService(config)
         thread = QThread(self)
         thread.setObjectName("StudyAssistantProcessingThread")
         thread.setProperty("processing_job_id", job_id)
         logger.info("QThread created job_id=%s [%s]", job_id, current_thread_info())
-        worker = ProcessingWorker(image, ocr_service, deepseek_service, ocr_text=ocr_text, job_id=job_id)
+        worker = ProcessingWorker(image, ocr_provider, deepseek_service, ocr_text=ocr_text, job_id=job_id)
         logger.info("Worker created job_id=%s [%s]", job_id, current_thread_info())
         worker.moveToThread(thread)
 
@@ -331,7 +331,7 @@ class MainWindow(QWidget):
         if self._shutting_down:
             if self.processing_thread is not None and self.processing_thread.isRunning():
                 return
-            if self._settings_window is not None and self._settings_window.is_connection_running():
+            if self._settings_window is not None and self._settings_window.has_running_background_operations():
                 return
             self._emit_shutdown_ready()
 
