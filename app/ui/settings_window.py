@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.config import AppConfig, ConfigError, ConfigManager
-from app.local_ocr.component_manager import LocalOCRComponentManager
+from app.local_ocr.component_manager import ComponentError, LocalOCRComponentManager
 from app.local_ocr.download import LocalOCRDownloadWorker
 from app.local_ocr.manifest import resolve_manifest_url
 from app.platform.base import GlobalHotkeyManager
@@ -294,8 +294,13 @@ class SettingsWindow(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-        if answer is QMessageBox.StandardButton.Yes:
-            self.component_manager.remove()
+        if answer == QMessageBox.StandardButton.Yes:
+            try:
+                self.component_manager.remove()
+            except (OSError, ComponentError) as exc:
+                logger.warning("local OCR removal failed: %s", type(exc).__name__)
+                self.local_ocr_status_label.setText(f"Failed to remove Local OCR: {exc}")
+                return
             self._refresh_local_ocr_state()
 
     def _read_config_from_fields(self) -> AppConfig:
