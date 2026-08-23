@@ -54,7 +54,7 @@ class PaddleOCRProvider:
 
         started = time.perf_counter()
         if isinstance(image, (str, Path)) and not Path(image).exists():
-            raise OCRError(f"鍥剧墖鏂囦欢涓嶅瓨鍦細{image}")
+            raise OCRError(f"图片文件不存在：{image}")
 
         engine_init_ms = 0.0
         if self._engine is None:

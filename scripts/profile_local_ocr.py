@@ -39,8 +39,10 @@ def median_ms(values: list[float]) -> float:
 
 
 def _validate_args(args: argparse.Namespace) -> None:
-    if args.cold_runs < 1 or args.warm_runs < 1:
-        raise ValueError("--cold-runs and --warm-runs must be at least 1")
+    if args.cold_runs < 1:
+        raise ValueError("--cold-runs must be at least 1")
+    if args.warm_runs < 2:
+        raise ValueError("--warm-runs must be at least 2")
     if not args.input.is_file():
         raise ValueError(f"image was not found: {args.input}")
     if not args.worker.is_file():
@@ -52,22 +54,18 @@ def _run_current_pipeline(
     worker: Path,
     language: str,
     runs_count: int,
-    temp_dir: Path,
 ) -> tuple[list[float], list[dict[str, Any]]]:
     totals: list[float] = []
     parent_timings: list[dict[str, Any]] = []
     for index in range(1, runs_count + 1):
-        profile_path = temp_dir / f"current-{index}.profile.json"
         provider_timings: dict[str, float] = {}
         provider = LocalOCRProvider(language=language, executable=worker, timeout=180.0)
         started = time.perf_counter()
         provider.recognize(
             image,
-            profile_output=profile_path,
             profile_timings=provider_timings,
         )
         total_ms = (time.perf_counter() - started) * 1000.0
-        profile = read_profile(profile_path)
         totals.append(total_ms)
         parent_timings.append(
             {
@@ -76,10 +74,16 @@ def _run_current_pipeline(
                 "input_prepare_ms": provider_timings.get("input_prepare_ms", 0.0),
                 "process_wall_ms": provider_timings.get("process_wall_ms", 0.0),
                 "result_read_ms": provider_timings.get("result_read_ms", 0.0),
-                "worker": profile,
             }
         )
     return totals, parent_timings
+
+
+def warm_sample_values(profile: dict[str, Any]) -> list[float]:
+    """Return only post-initialization samples from a warm profile."""
+
+    runs = profile.get("runs", [])
+    return [float(run["total_ms"]) for run in runs[1:]]
 
 
 def _run_worker_profile(
@@ -140,8 +144,9 @@ def _print_report(
     print("\nCurrent path breakdown (first run):")
     print(f"  QImage to temp PNG:          {first['input_prepare_ms'] / 1000.0:.3f} s")
     print(f"  process wall:                {first['process_wall_ms'] / 1000.0:.3f} s")
-    worker = first["worker"]
+    worker = cold_details[0][1]
     worker_total = float(worker["worker_profiled_total_ms"])
+    print("  (worker timings below come from a separate profiled run)")
     print(f"  estimated process overhead:  {(first['process_wall_ms'] - worker_total) / 1000.0:.3f} s")
     first_run = worker["runs"][0]
     print(f"  engine initialization:       {first_run['engine_init_ms'] / 1000.0:.3f} s")
@@ -162,15 +167,20 @@ def _print_report(
 
     warm_process_wall, warm_profile = warm_detail
     print("\nWarm engine reuse (same worker process):")
-    for run in warm_profile["runs"]:
+    warm_runs = warm_profile["runs"]
+    print(
+        f"  run 1 (initialization): total {warm_runs[0]['total_ms'] / 1000.0:.2f} s, "
+        f"engine init {warm_runs[0]['engine_init_ms'] / 1000.0:.2f} s"
+    )
+    for run in warm_runs[1:]:
         print(
-            f"  run {run['index']}: total {run['total_ms'] / 1000.0:.2f} s, "
+            f"  warm run {run['index']}: total {run['total_ms'] / 1000.0:.2f} s, "
             f"engine init {run['engine_init_ms'] / 1000.0:.3f} s, "
             f"engine call {run['engine_call_ms'] / 1000.0:.2f} s"
         )
-    warm_values = [float(run["total_ms"]) for run in warm_profile["runs"]]
+    warm_values = warm_sample_values(warm_profile)
     print(f"  process wall: {warm_process_wall / 1000.0:.2f} s")
-    print(f"  warm median: {median_ms(warm_values) / 1000.0:.2f} s")
+    print(f"  warm median (excluding run 1): {median_ms(warm_values) / 1000.0:.2f} s")
     if median_ms(warm_values) > 0:
         print(
             f"\nApproximate current median / warm median: "
@@ -189,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory(prefix="tellme-sensei-ocr-profile-") as raw_dir:
             temp_dir = Path(raw_dir)
             current_totals, current_details = _run_current_pipeline(
-                image, args.worker, args.language, args.cold_runs, temp_dir
+                image, args.worker, args.language, args.cold_runs
             )
             cold_details = [
                 _run_worker_profile(

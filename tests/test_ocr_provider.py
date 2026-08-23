@@ -9,9 +9,10 @@ from app.ocr.factory import create_ocr_provider
 from app.ocr.profiling import read_profile, write_profile
 from app.ocr.providers.local_worker import LocalOCRProvider
 from app.ocr.providers.paddle import PaddleOCRProvider
-from app.ocr.types import OCRLine, OCRResult
+from app.ocr.types import OCRError, OCRLine, OCRResult
 from app.ui import main_window as main_window_module
 from app.workers.processing_worker import ProcessingWorker
+from scripts import profile_local_ocr as profiling_script
 from scripts.profile_local_ocr import median_ms
 
 
@@ -124,3 +125,77 @@ def test_profile_schema_round_trip_contains_timings_only(tmp_path) -> None:
 
 def test_profile_benchmark_median() -> None:
     assert median_ms([30.0, 10.0, 20.0]) == 20.0
+
+
+def test_profiled_missing_image_error_is_readable(tmp_path) -> None:
+    provider = PaddleOCRProvider()
+
+    with pytest.raises(OCRError, match="图片文件不存在"):
+        provider.recognize_profiled(tmp_path / "missing.png")
+
+
+def test_current_benchmark_uses_normal_provider_path_without_child_profile(
+    tmp_path, monkeypatch
+) -> None:
+    worker = tmp_path / "TellMeSenseiOCR.exe"
+    worker.write_bytes(b"worker")
+    calls: list[dict[str, object]] = []
+
+    class FakeProvider:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def recognize(self, _image, **kwargs):
+            calls.append(kwargs)
+            kwargs["profile_timings"].update(
+                {
+                    "input_prepare_ms": 1.0,
+                    "process_wall_ms": 2.0,
+                    "result_read_ms": 3.0,
+                }
+            )
+            return OCRResult("text", ())
+
+    monkeypatch.setattr(profiling_script, "LocalOCRProvider", FakeProvider)
+    totals, details = profiling_script._run_current_pipeline(
+        object(), worker, "japan", 1
+    )
+
+    assert len(totals) == 1
+    assert details[0]["process_wall_ms"] == 2.0
+    assert "profile_output" not in calls[0]
+    assert "profile_timings" in calls[0]
+
+
+def test_warm_median_excludes_initialization_run() -> None:
+    profile = {
+        "runs": [
+            {"index": 1, "total_ms": 100.0},
+            {"index": 2, "total_ms": 20.0},
+            {"index": 3, "total_ms": 30.0},
+        ]
+    }
+
+    warm_values = profiling_script.warm_sample_values(profile)
+    assert warm_values == [20.0, 30.0]
+    assert median_ms(warm_values) == 25.0
+
+
+def test_warm_runs_one_is_rejected_and_two_is_valid(tmp_path) -> None:
+    image = tmp_path / "input.png"
+    worker = tmp_path / "worker.exe"
+    image.write_bytes(b"image")
+    worker.write_bytes(b"worker")
+
+    with pytest.raises(ValueError, match="--warm-runs must be at least 2"):
+        profiling_script._validate_args(
+            profiling_script.argparse.Namespace(
+                cold_runs=1, warm_runs=1, input=image, worker=worker
+            )
+        )
+
+    profiling_script._validate_args(
+        profiling_script.argparse.Namespace(
+            cold_runs=1, warm_runs=2, input=image, worker=worker
+        )
+    )
