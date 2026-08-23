@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from app.ocr.local_runtime import worker_executable_candidates, worker_script_path
 from app.ocr.types import OCRError, OCRResult
-from app.ocr.worker_protocol import read_result
+from app.ocr.worker_protocol import read_error_message, read_result
 
 ProcessFactory = Callable[..., Any]
 
@@ -48,6 +48,15 @@ class LocalOCRProvider:
                 raise OCRError("本地 OCR 请求超时。") from exc
 
             if process.returncode != 0:
+                if output_path.is_file():
+                    try:
+                        # A non-zero exit is always failure. This parse only
+                        # distinguishes an error document from success/malformed data.
+                        read_result(output_path)
+                    except OCRError:
+                        message = read_error_message(output_path)
+                        if message is not None:
+                            raise OCRError(message)
                 raise OCRError("本地 OCR 进程执行失败。")
             if not output_path.is_file():
                 raise OCRError("本地 OCR 未返回结果文件。")

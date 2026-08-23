@@ -10,7 +10,7 @@ from app.config import AppConfig
 from app.ocr.factory import create_local_ocr_provider
 from app.ocr.providers.local_worker import LocalOCRProvider
 from app.ocr.types import OCRError, OCRLine, OCRResult
-from app.ocr.worker_protocol import parse_result, result_payload
+from app.ocr.worker_protocol import error_payload, parse_result, result_payload
 from app.local_ocr import worker_main
 
 
@@ -152,12 +152,70 @@ def test_local_provider_rejects_missing_executable(tmp_path: Path) -> None:
         provider.recognize(source)
 
 
-def test_local_provider_handles_nonzero_worker(tmp_path: Path) -> None:
+def test_local_provider_propagates_nonzero_worker_error_payload(tmp_path: Path) -> None:
+    provider, _ = _provider_with_fake_process(
+        tmp_path,
+        {"returncode": 3, "payload": error_payload("Paddle model failed")},
+    )
+    input_path = tmp_path / "source.png"
+    input_path.write_bytes(b"source")
+    with pytest.raises(OCRError, match="Paddle model failed"):
+        provider.recognize(input_path)
+
+
+def test_local_provider_handles_nonzero_worker_without_result(tmp_path: Path) -> None:
     provider, _ = _provider_with_fake_process(tmp_path, {"returncode": 3})
     input_path = tmp_path / "source.png"
     input_path.write_bytes(b"source")
     with pytest.raises(OCRError, match="进程执行失败"):
         provider.recognize(input_path)
+
+
+def test_local_provider_handles_nonzero_worker_with_malformed_result(tmp_path: Path) -> None:
+    provider, _ = _provider_with_fake_process(
+        tmp_path,
+        {"returncode": 3, "payload": {"schema_version": 1, "ok": "nope"}},
+    )
+    input_path = tmp_path / "source.png"
+    input_path.write_bytes(b"source")
+    with pytest.raises(OCRError, match="进程执行失败"):
+        provider.recognize(input_path)
+
+
+def test_local_provider_rejects_nonzero_worker_success_payload(tmp_path: Path) -> None:
+    provider, _ = _provider_with_fake_process(
+        tmp_path,
+        {"returncode": 3, "payload": result_payload(OCRResult("unexpected", ()))},
+    )
+    input_path = tmp_path / "source.png"
+    input_path.write_bytes(b"source")
+    with pytest.raises(OCRError, match="进程执行失败"):
+        provider.recognize(input_path)
+
+
+def test_worker_error_payload_is_written_when_stderr_is_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_path = tmp_path / "input.png"
+    output_path = tmp_path / "result.json"
+    input_path.write_bytes(b"image")
+
+    class FailingProvider:
+        def __init__(self, language: str) -> None:
+            pass
+
+        def recognize(self, image: Path) -> OCRResult:
+            raise OCRError("worker failure")
+
+    monkeypatch.setattr(worker_main, "PaddleOCRProvider", FailingProvider)
+    monkeypatch.setattr(worker_main.sys, "stderr", None)
+
+    assert worker_main.main(["--input", str(input_path), "--output", str(output_path)]) == 1
+    assert json.loads(output_path.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "ok": False,
+        "error": "worker failure",
+    }
 
 
 def test_local_provider_kills_worker_on_timeout(tmp_path: Path) -> None:

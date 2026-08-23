@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.smoke:
         return _smoke_import()
     if args.input is None or args.output is None:
-        logger.error("--input and --output are required unless --smoke is used")
+        _log_error("--input and --output are required unless --smoke is used")
         return 2
 
     try:
@@ -39,11 +39,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except OCRError as exc:
         write_payload(args.output, error_payload(str(exc)))
-        logger.error("local OCR failed: %s", type(exc).__name__)
+        _log_error("local OCR failed: %s", type(exc).__name__)
         return 1
     except Exception:
         write_payload(args.output, error_payload("本地 OCR 处理失败。"))
-        logger.exception("local OCR worker failed")
+        _log_exception("local OCR worker failed")
         return 1
 
 
@@ -51,6 +51,16 @@ def _smoke_import() -> int:
     try:
         from paddleocr import PaddleOCR  # noqa: F401
     except Exception:
-        logger.exception("PaddleOCR import smoke failed")
+        _log_exception("PaddleOCR import smoke failed")
         return 1
     return 0
+
+
+def _log_error(message: str, *args: object) -> None:
+    if sys.stderr is not None:
+        logger.error(message, *args)
+
+
+def _log_exception(message: str) -> None:
+    if sys.stderr is not None:
+        logger.exception(message)

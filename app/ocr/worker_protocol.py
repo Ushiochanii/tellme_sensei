@@ -50,11 +50,32 @@ def write_payload(path: str | Path, payload: dict[str, Any]) -> None:
 def read_result(path: str | Path) -> OCRResult:
     """Read and strictly validate a worker result document."""
 
+    return parse_result(_read_document(path))
+
+
+def read_error_message(path: str | Path) -> str | None:
+    """Return a validated worker error message, or None for other payloads."""
+
+    try:
+        payload = _read_document(path)
+    except OCRError:
+        return None
+    if payload.get("schema_version") != SCHEMA_VERSION or payload.get("ok") is not False:
+        return None
+    message = payload.get("error")
+    if not isinstance(message, str) or not message.strip():
+        return None
+    return message.strip()
+
+
+def _read_document(path: str | Path) -> dict[str, Any]:
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise OCRError("本地 OCR 返回结果缺失或不是有效 JSON。") from exc
-    return parse_result(payload)
+    if not isinstance(payload, dict):
+        raise OCRError("本地 OCR 返回结果格式无效。")
+    return payload
 
 
 def parse_result(payload: Any) -> OCRResult:
