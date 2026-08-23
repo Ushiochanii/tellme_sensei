@@ -31,9 +31,10 @@ if (-not (Test-Path -LiteralPath $iconPath)) {
     throw "Application icon was not found: $iconPath"
 }
 
-$buildPath = Join-Path $repoRoot "build"
+$buildPath = Join-Path $repoRoot "build\tellme_sensei"
 $distPath = Join-Path $repoRoot "dist"
-foreach ($path in @($buildPath, $distPath)) {
+$distAppPath = Join-Path $distPath "TellMeSensei"
+foreach ($path in @($buildPath, $distAppPath)) {
     if (Test-Path -LiteralPath $path) {
         $resolved = (Resolve-Path -LiteralPath $path).Path
         if (-not $resolved.StartsWith($repoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -59,7 +60,6 @@ finally {
     Pop-Location
 }
 
-$distAppPath = Join-Path $distPath "TellMeSensei"
 $exePath = Join-Path $distAppPath "TellMeSensei.exe"
 if (-not (Test-Path -LiteralPath $exePath)) {
     throw "Portable executable was not created: $exePath"

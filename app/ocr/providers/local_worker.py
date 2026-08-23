@@ -101,9 +101,6 @@ class LocalOCRProvider:
                 return self._arguments(str(candidate), input_path, output_path)
 
         if getattr(sys, "frozen", False):
-            for candidate in worker_executable_candidates():
-                if candidate.is_file():
-                    return self._arguments(str(candidate), input_path, output_path)
             raise OCRError("找不到本地 OCR 组件，请确认 TellMeSenseiOCR 已安装。")
 
         script = worker_script_path()

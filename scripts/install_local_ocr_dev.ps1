@@ -16,16 +16,13 @@ if (-not (Test-Path -LiteralPath $sourceExe -PathType Leaf)) {
     throw "Local OCR executable was not found: $sourceExe"
 }
 
-if (Test-Path -LiteralPath $pythonPath) {
-    $runtimePath = (& $pythonPath -c "from app.runtime_paths import user_runtime_directory; print(user_runtime_directory())").Trim()
-} else {
-    $runtimePath = (& python -c "from app.runtime_paths import user_runtime_directory; print(user_runtime_directory())").Trim()
-}
+$versionCommand = if (Test-Path -LiteralPath $pythonPath) { $pythonPath } else { "python" }
+$runtimeScript = 'from PySide6.QtCore import QCoreApplication; from app.runtime_paths import user_runtime_directory; app=QCoreApplication([]); app.setApplicationName(''TellMeSensei''); app.setOrganizationName(''TellMeSensei''); print(user_runtime_directory())'
+$runtimePath = (& $versionCommand -c $runtimeScript).Trim()
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($runtimePath)) {
     throw "Could not resolve the user runtime directory."
 }
 
-$versionCommand = if (Test-Path -LiteralPath $pythonPath) { $pythonPath } else { "python" }
 $componentVersion = (& $versionCommand -c "from app.local_ocr.version import LOCAL_OCR_VERSION; print(LOCAL_OCR_VERSION)").Trim()
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($componentVersion)) {
     throw "Could not read the local OCR component version."
@@ -46,3 +43,4 @@ if (-not (Test-Path -LiteralPath $targetExe -PathType Leaf)) {
     throw "Local OCR component copy did not produce: $targetExe"
 }
 Write-Host "Local OCR development component installed at: $resolvedTarget"
+Write-Host "Runtime component root: $runtimePath\components\local-ocr"
