@@ -5,11 +5,13 @@ from __future__ import annotations
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 from app.ocr.local_runtime import worker_executable_candidates, worker_script_path
-from app.ocr.types import OCRError, OCRResult
+from app.ocr.types import OCRCancelled, OCRError, OCRResult
 from app.ocr.worker_protocol import read_error_message, read_result
 
 ProcessFactory = Callable[..., Any]
@@ -32,7 +34,11 @@ class LocalOCRProvider:
         self.timeout = timeout
         self._process_factory = process_factory or subprocess.Popen
 
-    def recognize(self, image: Any) -> OCRResult:
+    def recognize(
+        self,
+        image: Any,
+        cancel_event: threading.Event | None = None,
+    ) -> OCRResult:
         """Save the input safely, invoke the worker, and validate its response."""
 
         with tempfile.TemporaryDirectory(prefix="tellme-sensei-ocr-") as temp_dir:
@@ -42,10 +48,13 @@ class LocalOCRProvider:
             command = self._command(input_path, output_path)
             process = self._start_process(command)
             try:
-                process.communicate(timeout=self.timeout)
+                self._wait_for_process(process, cancel_event)
             except subprocess.TimeoutExpired as exc:
                 self._stop_process(process)
                 raise OCRError("本地 OCR 请求超时。") from exc
+
+            if cancel_event is not None and cancel_event.is_set():
+                raise OCRCancelled("本地 OCR 已取消。")
 
             if process.returncode != 0:
                 if output_path.is_file():
@@ -62,11 +71,34 @@ class LocalOCRProvider:
                 raise OCRError("本地 OCR 未返回结果文件。")
             return read_result(output_path)
 
+    def _wait_for_process(
+        self,
+        process: Any,
+        cancel_event: threading.Event | None,
+    ) -> None:
+        deadline = time.monotonic() + self.timeout
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                self._stop_process(process)
+                raise OCRCancelled("本地 OCR 已取消。")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired([], self.timeout)
+            try:
+                process.communicate(timeout=min(0.2, remaining))
+                return
+            except subprocess.TimeoutExpired:
+                continue
+
     def _command(self, input_path: Path, output_path: Path) -> list[str]:
         if self.executable is not None:
             if not self.executable.is_file():
                 raise OCRError(f"找不到本地 OCR 组件：{self.executable}")
             return self._arguments(str(self.executable), input_path, output_path)
+
+        for candidate in worker_executable_candidates():
+            if candidate.is_file():
+                return self._arguments(str(candidate), input_path, output_path)
 
         if getattr(sys, "frozen", False):
             for candidate in worker_executable_candidates():

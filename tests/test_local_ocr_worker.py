@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
 
 from app.config import AppConfig
 from app.ocr.factory import create_local_ocr_provider
+from app.ocr import local_runtime
 from app.ocr.providers.local_worker import LocalOCRProvider
-from app.ocr.types import OCRError, OCRLine, OCRResult
+from app.ocr.types import OCRCancelled, OCRError, OCRLine, OCRResult
 from app.ocr.worker_protocol import error_payload, parse_result, result_payload
 from app.local_ocr import worker_main
 
@@ -225,6 +227,55 @@ def test_local_provider_kills_worker_on_timeout(tmp_path: Path) -> None:
     input_path.write_bytes(b"source")
     with pytest.raises(OCRError, match="请求超时"):
         provider.recognize(input_path)
+    assert processes[0].killed is True
+
+
+def test_local_component_versioned_user_path_is_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = tmp_path / "runtime"
+    monkeypatch.setattr(local_runtime, "user_runtime_directory", lambda: runtime)
+    monkeypatch.setattr(local_runtime.sys, "executable", str(tmp_path / "python.exe"))
+
+    candidates = local_runtime.worker_executable_candidates()
+
+    assert candidates[0] == (
+        runtime / "components" / "local-ocr" / "1.0.0" / "TellMeSenseiOCR.exe"
+    )
+
+
+def test_local_provider_kills_worker_when_cancelled(tmp_path: Path) -> None:
+    cancel_event = threading.Event()
+    executable = tmp_path / "TellMeSenseiOCR.exe"
+    executable.write_bytes(b"fake")
+    processes: list[object] = []
+
+    class CancelAwareProcess:
+        returncode = 0
+
+        def __init__(self, command: list[str], **kwargs: object) -> None:
+            self.command = command
+            self.killed = False
+            processes.append(self)
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            if not self.killed:
+                cancel_event.set()
+                raise subprocess.TimeoutExpired(self.command, timeout)
+            return "", ""
+
+        def kill(self) -> None:
+            self.killed = True
+
+    def factory(command: list[str], **kwargs: object) -> CancelAwareProcess:
+        return CancelAwareProcess(command, **kwargs)
+
+    provider = LocalOCRProvider(executable=executable, process_factory=factory)
+    input_path = tmp_path / "source.png"
+    input_path.write_bytes(b"source")
+
+    with pytest.raises(OCRCancelled):
+        provider.recognize(input_path, cancel_event=cancel_event)
     assert processes[0].killed is True
 
 

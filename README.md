@@ -142,6 +142,24 @@ logs, or OCR model caches when uninstalled.
 The executable and installer are currently unsigned. Windows SmartScreen may
 therefore show an unknown-publisher warning.
 
+## External local OCR component
+
+The Core application no longer bundles PaddleOCR. Core development dependencies
+are installed with `requirements.txt`; a complete development environment also
+needs `requirements-local-ocr.txt` and `requirements-dev.txt`. Build and install
+the separate worker for development with:
+
+```powershell
+.\scripts\build_local_ocr.ps1
+.\scripts\install_local_ocr_dev.ps1
+```
+
+The worker is copied to the versioned per-user component directory under
+`%LOCALAPPDATA%\TellMeSensei\components\local-ocr\`. The Core installer does
+not include or download this component; if it is missing, the application shows
+a local OCR component error. PaddleOCR and its model cache remain outside the
+Core installation.
+
 ## Windows portable build
 
 Build prerequisites: Windows, Python 3.12, and the project `.venv` with

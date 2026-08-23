@@ -9,6 +9,10 @@ class OCRError(RuntimeError):
     """A user-facing OCR error."""
 
 
+class OCRCancelled(OCRError):
+    """Raised when an OCR provider stops because cancellation was requested."""
+
+
 @dataclass(frozen=True)
 class OCRLine:
     """One recognized text line and its optional confidence/position."""

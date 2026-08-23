@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
 import sys
 import traceback
-from tempfile import gettempdir
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
@@ -39,25 +39,13 @@ def main(argv: list[str] | None = None) -> int:
         help="可选：将本次框选结果保存到指定 PNG，用于确认截图区域。",
     )
     parser.add_argument(
-        "--smoke-import-ocr",
+        "--smoke-core",
         action="store_true",
         help=argparse.SUPPRESS,
     )
     args = parser.parse_args(argv)
-    if args.smoke_import_ocr:
-        try:
-            from paddleocr import PaddleOCR  # noqa: F401
-        except Exception:
-            smoke_log = Path(gettempdir()) / APPLICATION_DIRECTORY / "ocr-import-smoke.log"
-            try:
-                smoke_log.parent.mkdir(parents=True, exist_ok=True)
-                smoke_log.write_text(traceback.format_exc(), encoding="utf-8")
-            except OSError:
-                pass
-            if sys.stderr is not None:
-                traceback.print_exc()
-            return 1
-        return 0
+    if args.smoke_core:
+        return _smoke_core()
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APPLICATION_DIRECTORY)
@@ -92,6 +80,38 @@ def main(argv: list[str] | None = None) -> int:
     app.aboutToQuit.connect(single_instance.release)
     controller.start(show_window=args.show_window)
     return app.exec()
+
+
+def _smoke_core() -> int:
+    """Validate the frozen Core import graph without starting the GUI loop."""
+
+    try:
+        app = QApplication.instance() or QApplication([])
+        app.setApplicationName(APPLICATION_DIRECTORY)
+        app.setOrganizationName(APPLICATION_DIRECTORY)
+        from app.config import ConfigManager
+        from app.ocr.factory import create_ocr_provider
+        from app.platform.factory import create_global_hotkey_manager
+        from app.platform.hotkey import DEFAULT_SHORTCUT
+        from app.services.deepseek_service import DeepSeekService
+
+        config = ConfigManager().load(require_api_key=False)
+        create_ocr_provider(config)
+        DeepSeekService(config)
+        create_global_hotkey_manager(parent=app, shortcut=DEFAULT_SHORTCUT)
+
+        if getattr(sys, "frozen", False):
+            for module_name in ("paddle", "paddleocr"):
+                try:
+                    importlib.import_module(module_name)
+                except ModuleNotFoundError:
+                    continue
+                raise RuntimeError(f"forbidden Core dependency was bundled: {module_name}")
+        return 0
+    except Exception:
+        if sys.stderr is not None:
+            traceback.print_exc()
+        return 1
 
 
 if __name__ == "__main__":

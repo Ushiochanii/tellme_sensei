@@ -4,16 +4,17 @@ import inspect
 from app.config import AppConfig
 from app.ocr.base import OCRProvider
 from app.ocr.factory import create_ocr_provider
+from app.ocr.providers.local_worker import LocalOCRProvider
 from app.ocr.providers.paddle import PaddleOCRProvider
 from app.ocr.types import OCRLine, OCRResult
 from app.ui import main_window as main_window_module
 from app.workers.processing_worker import ProcessingWorker
 
 
-def test_factory_returns_paddle_provider_by_default() -> None:
+def test_factory_returns_local_provider_by_default() -> None:
     provider = create_ocr_provider(AppConfig(api_key="test", ocr_language="en"))
 
-    assert isinstance(provider, PaddleOCRProvider)
+    assert isinstance(provider, LocalOCRProvider)
     assert provider.language == "en"
 
 

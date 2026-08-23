@@ -65,33 +65,26 @@ if (-not (Test-Path -LiteralPath $exePath)) {
     throw "Portable executable was not created: $exePath"
 }
 
-$cythonUtilityFile = Get-ChildItem -LiteralPath $distAppPath -Recurse -Filter "CppSupport.cpp" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($null -eq $cythonUtilityFile) {
-    throw "Cython Utility data was not bundled: Cython\Utility\CppSupport.cpp"
+$forbiddenPaths = Get-ChildItem -LiteralPath $distAppPath -Recurse -Force -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.FullName -match "[\\/]paddle(ocr)?([\\/]|$)" -or
+        $_.FullName -match "[\\/]ppocr([\\/]|$)" -or
+        $_.FullName -match "[\\/]ppstructure([\\/]|$)" -or
+        $_.FullName -match "[\\/]Cython[\\/]Utility[\\/]CppSupport\.cpp$"
+    } |
+    Select-Object -First 1
+if ($null -ne $forbiddenPaths) {
+    throw "Forbidden Paddle/Cython runtime was bundled in Core: $($forbiddenPaths.FullName)"
 }
+Write-Host "Core no-Paddle filesystem verification passed."
 
-$requiredPaddleSources = @(
-    "paddleocr\tools\__init__.py",
-    "paddleocr\ppocr\__init__.py"
-)
-foreach ($relativePath in $requiredPaddleSources) {
-    $sourceFile = Get-ChildItem -LiteralPath $distAppPath -Recurse -Filter (Split-Path -Leaf $relativePath) -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName.EndsWith($relativePath, [System.StringComparison]::OrdinalIgnoreCase) } |
-        Select-Object -First 1
-    if ($null -eq $sourceFile) {
-        throw "PaddleOCR runtime source was not bundled: $relativePath"
-    }
-    Write-Host "PaddleOCR runtime source found: $($sourceFile.FullName)"
-}
-
-$smokeTest = Start-Process -FilePath $exePath -ArgumentList "--smoke-import-ocr" -WorkingDirectory "C:\" -WindowStyle Hidden -Wait -PassThru
+$smokeTest = Start-Process -FilePath $exePath -ArgumentList "--smoke-core" -WorkingDirectory "C:\" -WindowStyle Hidden -Wait -PassThru
 if ($smokeTest.ExitCode -ne 0) {
-    throw "Packaged PaddleOCR import smoke test failed with exit code $($smokeTest.ExitCode)."
+    throw "Packaged Core smoke test failed with exit code $($smokeTest.ExitCode)."
 }
-Write-Host "Packaged PaddleOCR import smoke test passed."
+Write-Host "Packaged Core smoke test passed."
 
 $exe = Get-Item -LiteralPath $exePath
 Write-Host "Portable build succeeded: $($exe.FullName)"
 Write-Host "Executable size: $([math]::Round($exe.Length / 1MB, 2)) MB"
-Write-Host "Cython Utility data found: $($cythonUtilityFile.FullName)"
 Write-Host "Version: $version"
