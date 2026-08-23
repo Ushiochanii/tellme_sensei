@@ -3,10 +3,10 @@
 
 #define AppName "TellMeSensei"
 #ifndef VersionLabel
-  #define VersionLabel "0.4.0-dev"
+  #define VersionLabel "0.5.0"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.4.0"
+  #define AppVersion "0.5.0"
 #endif
 #ifndef PortableDir
   #define PortableDir "..\..\dist\TellMeSensei"
