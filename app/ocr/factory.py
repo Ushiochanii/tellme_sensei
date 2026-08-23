@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.config import AppConfig
+from app.config import AppConfig, ConfigError
 from app.ocr.base import OCRProvider
 from app.ocr.providers.local_worker import LocalOCRProvider
 
@@ -15,7 +15,17 @@ def create_ocr_provider(config: AppConfig) -> OCRProvider:
     coupling callers to a concrete implementation.
     """
 
-    return LocalOCRProvider(language=config.ocr_language)
+    if config.ocr_provider == "local":
+        return LocalOCRProvider(language=config.ocr_language)
+    if config.ocr_provider == "google_vision":
+        from app.ocr.providers.google_vision import GoogleVisionOCRProvider
+
+        return GoogleVisionOCRProvider(
+            api_key=config.google_vision_api_key,
+            language=config.ocr_language,
+            timeout=config.online_ocr_timeout,
+        )
+    raise ConfigError(f"Unsupported OCR provider: {config.ocr_provider}")
 
 
 def create_local_ocr_provider(

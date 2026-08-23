@@ -124,6 +124,15 @@ Future macOS work will require Screen Recording permission handling and a
 platform-specific global hotkey implementation. The application and service
 layers remain independent of those platform details.
 
+## Online OCR backend
+
+Google Cloud Vision is an optional, BYOK OCR backend for development and
+future Settings integration. It requires the Cloud Vision API to be enabled
+for the Google project. When `google_vision` is explicitly selected, the
+captured screenshot is uploaded to Google Cloud Vision; the default remains
+the local OCR component. The provider uses the REST API directly and does not
+require the Google Cloud SDK.
+
 ## Windows installer
 
 The installer build requires Windows, Python 3.12, the project `.venv`, and

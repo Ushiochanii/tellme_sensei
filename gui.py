@@ -91,12 +91,14 @@ def _smoke_core() -> int:
         app.setOrganizationName(APPLICATION_DIRECTORY)
         from app.config import ConfigManager
         from app.ocr.factory import create_ocr_provider
+        from app.ocr.providers.google_vision import GoogleVisionOCRProvider
         from app.platform.factory import create_global_hotkey_manager
         from app.platform.hotkey import DEFAULT_SHORTCUT
         from app.services.deepseek_service import DeepSeekService
 
         config = ConfigManager().load(require_api_key=False)
         create_ocr_provider(config)
+        GoogleVisionOCRProvider(api_key="diagnostic-key")
         DeepSeekService(config)
         create_global_hotkey_manager(parent=app, shortcut=DEFAULT_SHORTCUT)
 

@@ -55,6 +55,12 @@ class SettingsRepository:
             value = raw.get(key)
             if isinstance(value, str) and value.strip():
                 settings[key] = value.strip()
+        provider = raw.get("ocr_provider")
+        if isinstance(provider, str) and provider.strip():
+            settings["ocr_provider"] = provider.strip().lower()
+        online_timeout = raw.get("online_ocr_timeout")
+        if isinstance(online_timeout, (int, float)) and not isinstance(online_timeout, bool) and online_timeout > 0:
+            settings["online_ocr_timeout"] = float(online_timeout)
         shortcut = raw.get("global_shortcut")
         if isinstance(shortcut, str) and shortcut.strip():
             settings["global_shortcut"] = shortcut.strip()
@@ -90,6 +96,19 @@ class SettingsRepository:
             if not shortcut:
                 raise ValueError("global_shortcut 不能为空")
             payload["global_shortcut"] = shortcut
+        if "ocr_provider" in settings:
+            provider = str(settings["ocr_provider"]).strip().lower()
+            if provider not in {"local", "google_vision"}:
+                raise ValueError("unsupported ocr_provider")
+            payload["ocr_provider"] = provider
+        if "online_ocr_timeout" in settings:
+            try:
+                online_timeout = float(settings["online_ocr_timeout"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("online_ocr_timeout must be a number") from exc
+            if online_timeout <= 0 or online_timeout > 15:
+                raise ValueError("online_ocr_timeout must be between 0 and 15 seconds")
+            payload["online_ocr_timeout"] = online_timeout
         if "answer_window_geometry" in settings:
             geometry = self._normalize_geometry(settings["answer_window_geometry"])
             if geometry is None:

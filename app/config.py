@@ -27,6 +27,9 @@ class AppConfig:
     request_timeout: float = 60.0
     ocr_language: str = "japan"
     global_shortcut: str = DEFAULT_SHORTCUT
+    ocr_provider: str = "local"
+    google_vision_api_key: str = field(default="", repr=False)
+    online_ocr_timeout: float = 15.0
 
 
 class ConfigManager:
@@ -47,6 +50,9 @@ class ConfigManager:
         """Return whether a real OS environment variable overrides stored settings."""
 
         return bool(os.environ.get("DEEPSEEK_API_KEY", "").strip())
+
+    def has_explicit_google_vision_api_key(self) -> bool:
+        return bool(os.environ.get("GOOGLE_VISION_API_KEY", "").strip())
 
     def load(self, require_api_key: bool = True) -> AppConfig:
         """Return one immutable runtime configuration without logging secrets."""
@@ -76,6 +82,35 @@ class ConfigManager:
             raise ConfigError("DEEPSEEK_TIMEOUT 必须是正数") from exc
         if request_timeout <= 0:
             raise ConfigError("DEEPSEEK_TIMEOUT 必须是正数")
+
+        try:
+            online_ocr_timeout = float(
+                self._os_value("ONLINE_OCR_TIMEOUT")
+                or saved_settings.get(
+                    "online_ocr_timeout",
+                    self._file_value(dotenv_config, "ONLINE_OCR_TIMEOUT") or 15,
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("ONLINE_OCR_TIMEOUT must be a positive number") from exc
+        if online_ocr_timeout <= 0 or online_ocr_timeout > 15:
+            raise ConfigError("ONLINE_OCR_TIMEOUT must be between 0 and 15 seconds")
+
+        google_vision_api_key = self._os_value("GOOGLE_VISION_API_KEY")
+        if google_vision_api_key is None:
+            google_vision_api_key = self._stored_google_vision_key()
+        if not google_vision_api_key:
+            google_vision_api_key = self._file_value(dotenv_config, "GOOGLE_VISION_API_KEY") or ""
+
+        ocr_provider = (
+            self._os_value("OCR_PROVIDER")
+            or saved_settings.get(
+                "ocr_provider",
+                self._file_value(dotenv_config, "OCR_PROVIDER") or "local",
+            )
+        ).strip().lower()
+        if ocr_provider not in {"local", "google_vision"}:
+            raise ConfigError(f"Unsupported OCR provider: {ocr_provider}")
 
         return AppConfig(
             api_key=api_key,
@@ -109,7 +144,19 @@ class ConfigManager:
                     self._file_value(dotenv_config, "GLOBAL_SHORTCUT") or DEFAULT_SHORTCUT,
                 )
             ),
+            ocr_provider=ocr_provider,
+            google_vision_api_key=google_vision_api_key,
+            online_ocr_timeout=online_ocr_timeout,
         )
+
+    def _stored_google_vision_key(self) -> str:
+        getter = getattr(self.secret_store, "get_google_vision_api_key", None)
+        if callable(getter):
+            value = getter()
+        else:
+            generic = getattr(self.secret_store, "get_secret", None)
+            value = generic("google-vision-api-key") if callable(generic) else ""
+        return value.strip() if isinstance(value, str) else ""
 
     @staticmethod
     def _normalized_shortcut(value: str) -> str:
