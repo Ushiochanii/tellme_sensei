@@ -7,8 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.ocr.base import OCRProvider
+from app.ocr.types import OCRError, OCRResult
 from app.services.deepseek_service import DeepSeekError, DeepSeekService
-from app.services.ocr_service import OCRError, OCRResult, OCRService
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class PipelineResult:
 class StudyPipeline:
     """Coordinate OCR and DeepSeek without coupling either service to the CLI."""
 
-    def __init__(self, ocr_service: OCRService, deepseek_service: DeepSeekService) -> None:
+    def __init__(self, ocr_service: OCRProvider, deepseek_service: DeepSeekService) -> None:
         self.ocr_service = ocr_service
         self.deepseek_service = deepseek_service
 

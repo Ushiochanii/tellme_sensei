@@ -10,9 +10,10 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from app.ocr.base import OCRProvider
+from app.ocr.types import OCRError, OCRLine, OCRResult
 from app.pipeline import PipelineError, PipelineResult
 from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
-from app.services.ocr_service import OCRError, OCRLine, OCRResult, OCRService
 from app.thread_info import current_thread_info
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ class ProcessingWorker(QObject):
     def __init__(
         self,
         image: Any | None,
-        ocr_service: OCRService,
+        ocr_service: OCRProvider,
         deepseek_service: DeepSeekService,
         ocr_text: str | None = None,
         job_id: str | None = None,
