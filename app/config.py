@@ -54,6 +54,11 @@ class ConfigManager:
     def has_explicit_google_vision_api_key(self) -> bool:
         return bool(os.environ.get("GOOGLE_VISION_API_KEY", "").strip())
 
+    def has_explicit_ocr_provider(self) -> bool:
+        """Return whether OCR_PROVIDER is set in the real OS environment."""
+
+        return bool(os.environ.get("OCR_PROVIDER", "").strip())
+
     def load(self, require_api_key: bool = True) -> AppConfig:
         """Return one immutable runtime configuration without logging secrets."""
 

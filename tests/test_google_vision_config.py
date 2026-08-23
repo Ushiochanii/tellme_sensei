@@ -68,6 +68,15 @@ def test_provider_precedence_and_default(tmp_path, monkeypatch) -> None:
     (tmp_path / ".env").write_text("OCR_PROVIDER=google_vision\n", encoding="utf-8")
     assert _manager(tmp_path, _Secrets()).load(False).ocr_provider == "google_vision"
 
+
+def test_explicit_ocr_provider_only_means_os_environment(tmp_path, monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    (tmp_path / ".env").write_text("OCR_PROVIDER=google_vision\n", encoding="utf-8")
+    manager = _manager(tmp_path, _Secrets())
+    assert not manager.has_explicit_ocr_provider()
+    monkeypatch.setenv("OCR_PROVIDER", "local")
+    assert manager.has_explicit_ocr_provider()
+
     SettingsRepository(tmp_path / "settings.json").update({"ocr_provider": "local"})
     assert _manager(tmp_path, _Secrets()).load(False).ocr_provider == "local"
 

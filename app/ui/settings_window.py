@@ -172,12 +172,18 @@ class SettingsWindow(QWidget):
         self.ocr_provider_combo.addItem("Local OCR", "local")
         self.ocr_provider_combo.addItem("Google Cloud Vision", "google_vision")
         self.ocr_provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        self.ocr_provider_override_label = QLabel(
+            "OCR Provider is controlled by the OCR_PROVIDER environment variable."
+        )
+        self.ocr_provider_override_label.setWordWrap(True)
+        self.ocr_provider_override_label.setVisible(False)
         form.addRow("DeepSeek API Key", self.api_key_edit)
         form.addRow("Model", self.model_edit)
         form.addRow("Request timeout", self.timeout_edit)
         form.addRow("Global shortcut", self.shortcut_edit)
         form.addRow("OCR Provider", self.ocr_provider_combo)
         root.addLayout(form)
+        root.addWidget(self.ocr_provider_override_label)
 
         self.local_ocr_group = QGroupBox("Local OCR")
         ocr_layout = QVBoxLayout(self.local_ocr_group)
@@ -273,6 +279,9 @@ class SettingsWindow(QWidget):
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
         provider_index = self.ocr_provider_combo.findData(config.ocr_provider)
+        provider_env_override = self.config_manager.has_explicit_ocr_provider()
+        self.ocr_provider_combo.setEnabled(not provider_env_override)
+        self.ocr_provider_override_label.setVisible(provider_env_override)
         self.ocr_provider_combo.blockSignals(True)
         self.ocr_provider_combo.setCurrentIndex(provider_index if provider_index >= 0 else 0)
         self.ocr_provider_combo.blockSignals(False)
@@ -338,7 +347,9 @@ class SettingsWindow(QWidget):
         )
         self.test_button.setEnabled(not busy)
         self.google_vision_test_button.setEnabled(not busy)
-        self.ocr_provider_combo.setEnabled(not busy)
+        self.ocr_provider_combo.setEnabled(
+            not busy and not self.config_manager.has_explicit_ocr_provider()
+        )
         self.cancel_download_button.setVisible(download_running)
         self.cancel_download_button.setEnabled(download_running)
         self.local_ocr_progress.setVisible(download_running)
@@ -619,6 +630,9 @@ class SettingsWindow(QWidget):
                     self._set_status("快捷键注册失败，可能已被其他程序占用。")
                     return
                 rebound = True
+            provider_to_save = None
+            if not self.config_manager.has_explicit_ocr_provider():
+                provider_to_save = config.ocr_provider
             google_key_to_save = None
             if not self.config_manager.has_explicit_google_vision_api_key():
                 google_key_to_save = config.google_vision_api_key
@@ -627,7 +641,7 @@ class SettingsWindow(QWidget):
                 config.model,
                 config.request_timeout,
                 config.global_shortcut,
-                ocr_provider=config.ocr_provider,
+                ocr_provider=provider_to_save,
                 google_vision_api_key=google_key_to_save,
                 online_ocr_timeout=config.online_ocr_timeout,
             )

@@ -85,6 +85,42 @@ def test_provider_defaults_local_and_saved_google_is_loaded(qt_app, tmp_path) ->
     window.close()
 
 
+def test_ocr_provider_environment_override_locks_google_and_preserves_saved_value(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OCR_PROVIDER", "google_vision")
+    window, _ = _window(tmp_path)
+    assert window.ocr_provider_combo.currentData() == "google_vision"
+    assert not window.ocr_provider_combo.isEnabled()
+    assert not window.ocr_provider_override_label.isHidden()
+    window.close()
+
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.update({"ocr_provider": "local"})
+    window, _ = _window(tmp_path)
+    window.save()
+    assert repository.load()["ocr_provider"] == "local"
+    window.close()
+
+
+def test_ocr_provider_environment_override_locks_local(qt_app, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OCR_PROVIDER", "local")
+    SettingsRepository(tmp_path / "settings.json").update({"ocr_provider": "google_vision"})
+    window, _ = _window(tmp_path)
+    assert window.ocr_provider_combo.currentData() == "local"
+    assert not window.ocr_provider_combo.isEnabled()
+    assert not window.ocr_provider_override_label.isHidden()
+    window.close()
+
+
+def test_ocr_provider_selector_enabled_without_environment_override(qt_app, tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("OCR_PROVIDER", raising=False)
+    window, _ = _window(tmp_path)
+    assert window.ocr_provider_combo.isEnabled()
+    assert window.ocr_provider_override_label.isHidden()
+    window.close()
+
+
 def test_provider_save_and_cancel_semantics(qt_app, tmp_path) -> None:
     window, secrets = _window(tmp_path)
     window.ocr_provider_combo.setCurrentIndex(window.ocr_provider_combo.findData("google_vision"))
