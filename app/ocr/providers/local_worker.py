@@ -38,14 +38,22 @@ class LocalOCRProvider:
         self,
         image: Any,
         cancel_event: threading.Event | None = None,
+        profile_output: str | Path | None = None,
+        profile_timings: dict[str, float] | None = None,
     ) -> OCRResult:
         """Save the input safely, invoke the worker, and validate its response."""
 
         with tempfile.TemporaryDirectory(prefix="tellme-sensei-ocr-") as temp_dir:
             temp_path = Path(temp_dir)
+            input_started = time.perf_counter() if profile_timings is not None else 0.0
             input_path = self._prepare_input(image, temp_path / "input.png")
+            if profile_timings is not None:
+                profile_timings["input_prepare_ms"] = (
+                    time.perf_counter() - input_started
+                ) * 1000.0
             output_path = temp_path / "result.json"
-            command = self._command(input_path, output_path)
+            command = self._command(input_path, output_path, profile_output=profile_output)
+            process_started = time.perf_counter() if profile_timings is not None else 0.0
             process = self._start_process(command)
             try:
                 self._wait_for_process(process, cancel_event)
@@ -53,6 +61,10 @@ class LocalOCRProvider:
                 self._stop_process(process)
                 raise OCRError("本地 OCR 请求超时。") from exc
 
+            if profile_timings is not None:
+                profile_timings["process_wall_ms"] = (
+                    time.perf_counter() - process_started
+                ) * 1000.0
             if cancel_event is not None and cancel_event.is_set():
                 raise OCRCancelled("本地 OCR 已取消。")
 
@@ -69,7 +81,13 @@ class LocalOCRProvider:
                 raise OCRError("本地 OCR 进程执行失败。")
             if not output_path.is_file():
                 raise OCRError("本地 OCR 未返回结果文件。")
-            return read_result(output_path)
+            result_started = time.perf_counter() if profile_timings is not None else 0.0
+            result = read_result(output_path)
+            if profile_timings is not None:
+                profile_timings["result_read_ms"] = (
+                    time.perf_counter() - result_started
+                ) * 1000.0
+            return result
 
     def _wait_for_process(
         self,
@@ -90,15 +108,31 @@ class LocalOCRProvider:
             except subprocess.TimeoutExpired:
                 continue
 
-    def _command(self, input_path: Path, output_path: Path) -> list[str]:
+    def _command(
+        self,
+        input_path: Path,
+        output_path: Path,
+        *,
+        profile_output: str | Path | None = None,
+    ) -> list[str]:
         if self.executable is not None:
             if not self.executable.is_file():
                 raise OCRError(f"找不到本地 OCR 组件：{self.executable}")
-            return self._arguments(str(self.executable), input_path, output_path)
+            return self._arguments(
+                str(self.executable),
+                input_path,
+                output_path,
+                profile_output=profile_output,
+            )
 
         for candidate in worker_executable_candidates():
             if candidate.is_file():
-                return self._arguments(str(candidate), input_path, output_path)
+                return self._arguments(
+                    str(candidate),
+                    input_path,
+                    output_path,
+                    profile_output=profile_output,
+                )
 
         if getattr(sys, "frozen", False):
             raise OCRError("找不到本地 OCR 组件，请确认 TellMeSenseiOCR 已安装。")
@@ -106,7 +140,13 @@ class LocalOCRProvider:
         script = worker_script_path()
         if not script.is_file():
             raise OCRError(f"找不到本地 OCR worker：{script}")
-        return self._arguments(sys.executable, input_path, output_path, script=script)
+        return self._arguments(
+            sys.executable,
+            input_path,
+            output_path,
+            script=script,
+            profile_output=profile_output,
+        )
 
     def _arguments(
         self,
@@ -115,6 +155,7 @@ class LocalOCRProvider:
         output_path: Path,
         *,
         script: Path | None = None,
+        profile_output: str | Path | None = None,
     ) -> list[str]:
         command = [executable]
         if script is not None:
@@ -129,6 +170,8 @@ class LocalOCRProvider:
                 self.language,
             ]
         )
+        if profile_output is not None:
+            command.extend(["--profile-output", str(profile_output), "--profile-runs", "1"])
         return command
 
     def _start_process(self, command: list[str]) -> Any:

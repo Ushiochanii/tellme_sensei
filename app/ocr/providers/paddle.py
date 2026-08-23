@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
+from app.ocr.profiling import make_profile_run
 from app.ocr.types import OCRError, OCRLine, OCRResult
 from app.ocr.utils import normalize_ocr_text
 from app.thread_info import current_thread_info
@@ -46,6 +48,53 @@ class PaddleOCRProvider:
         normalized = normalize_ocr_text(lines)
         logger.info("OCR 完成（识别行数=%d，文本长度=%d）", len(lines), len(normalized))
         return OCRResult(text=normalized, lines=tuple(lines))
+
+    def recognize_profiled(self, image: str | Path | Any) -> tuple[OCRResult, dict[str, float]]:
+        """Run OCR with opt-in timing instrumentation for the diagnostic worker."""
+
+        started = time.perf_counter()
+        if isinstance(image, (str, Path)) and not Path(image).exists():
+            raise OCRError(f"图片文件不存在：{image}")
+
+        engine_init_ms = 0.0
+        if self._engine is None:
+            init_started = time.perf_counter()
+            engine = self._get_engine()
+            engine_init_ms = (time.perf_counter() - init_started) * 1000.0
+        else:
+            engine = self._get_engine()
+
+        input_started = time.perf_counter()
+        prepared_image = self._prepare_image(image)
+        input_prepare_ms = (time.perf_counter() - input_started) * 1000.0
+        engine_started = time.perf_counter()
+        if hasattr(engine, "predict"):
+            raw = engine.predict(prepared_image)
+        else:
+            raw = engine.ocr(prepared_image, cls=False)
+        engine_call_ms = (time.perf_counter() - engine_started) * 1000.0
+
+        parse_started = time.perf_counter()
+        lines = self._extract_lines(raw)
+        result_parse_ms = (time.perf_counter() - parse_started) * 1000.0
+        normalize_started = time.perf_counter()
+        normalized = normalize_ocr_text(lines)
+        normalize_ms = (time.perf_counter() - normalize_started) * 1000.0
+        result = OCRResult(text=normalized, lines=tuple(lines))
+        timings = make_profile_run(
+            1,
+            {
+                "engine_init_ms": engine_init_ms,
+                "input_prepare_ms": input_prepare_ms,
+                "engine_call_ms": engine_call_ms,
+                "result_parse_ms": result_parse_ms,
+                "normalize_ms": normalize_ms,
+                "total_ms": (time.perf_counter() - started) * 1000.0,
+            },
+        )
+        return result, {
+            key: float(value) for key, value in timings.items() if key != "index"
+        }
 
     @staticmethod
     def _restore_application_logging() -> None:
