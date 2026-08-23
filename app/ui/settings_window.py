@@ -198,15 +198,20 @@ class SettingsWindow(QWidget):
             self.remove_ocr_button.setEnabled(False)
 
     def _set_download_state(self, running: bool) -> None:
-        self.download_ocr_button.setEnabled(not running)
-        self.verify_ocr_button.setEnabled(not running and self.component_manager.is_installed())
-        self.remove_ocr_button.setEnabled(not running and self.component_manager.is_installed())
+        connection_running = self.is_connection_running()
+        self.download_ocr_button.setEnabled(not running and not connection_running)
+        self.verify_ocr_button.setEnabled(not running and not connection_running and self.component_manager.is_installed())
+        self.remove_ocr_button.setEnabled(not running and not connection_running and self.component_manager.is_installed())
+        self.test_button.setEnabled(not running)
         self.cancel_download_button.setVisible(running)
         self.local_ocr_progress.setVisible(running)
 
     @Slot()
     def download_local_ocr(self) -> None:
         if self._download_thread is not None and self._download_thread.isRunning():
+            return
+        if self.is_connection_running():
+            self._set_status("Wait for the connection test to finish before downloading Local OCR.")
             return
         manifest_url = resolve_manifest_url(self.config_manager.project_root)
         if "example.invalid" in manifest_url:
@@ -264,8 +269,7 @@ class SettingsWindow(QWidget):
         self._download_cancel_event = None
         self._set_download_state(False)
         self._refresh_local_ocr_state()
-        if self._shutdown_requested:
-            self._emit_shutdown_ready()
+        self._maybe_emit_shutdown_ready()
 
     @Slot()
     def verify_local_ocr(self) -> None:
@@ -327,6 +331,9 @@ class SettingsWindow(QWidget):
     def test_connection(self) -> None:
         if self._connection_thread is not None and self._connection_thread.isRunning():
             return
+        if self._download_thread is not None and self._download_thread.isRunning():
+            self._set_status("Wait for the Local OCR download to finish before testing the connection.")
+            return
         try:
             config = self._read_config_from_fields()
         except (ConfigError, ValueError) as exc:
@@ -353,6 +360,9 @@ class SettingsWindow(QWidget):
         self._connection_worker = worker
         self._connection_thread = thread
         self.test_button.setEnabled(False)
+        self.download_ocr_button.setEnabled(False)
+        self.verify_ocr_button.setEnabled(False)
+        self.remove_ocr_button.setEnabled(False)
         self._set_status("正在测试连接...")
         thread.start()
 
@@ -374,8 +384,8 @@ class SettingsWindow(QWidget):
         self.test_button.setEnabled(True)
         if self._close_requested or self._shutdown_requested:
             self.hide()
-        if self._shutdown_requested:
-            self._emit_shutdown_ready()
+        self._set_download_state(False)
+        self._maybe_emit_shutdown_ready()
 
     @Slot()
     def save(self) -> None:
@@ -416,22 +426,27 @@ class SettingsWindow(QWidget):
     def is_connection_running(self) -> bool:
         return self._connection_thread is not None and self._connection_thread.isRunning()
 
+    def is_download_running(self) -> bool:
+        return self._download_thread is not None and self._download_thread.isRunning()
+
+    def has_running_background_operations(self) -> bool:
+        return self.is_connection_running() or self.is_download_running()
+
     @Slot()
     def request_shutdown(self) -> None:
         self._shutdown_requested = True
-        if self._download_thread is not None and self._download_thread.isRunning():
+        self._close_requested = True
+        if self.is_download_running():
             self.cancel_local_ocr_download()
-            self._close_requested = True
-            self.hide()
-            return
         if self.is_connection_running():
             if self._connection_worker is not None:
                 self._connection_worker.request_cancel()
-            self._close_requested = True
-            self.hide()
-            return
         self.hide()
-        self._emit_shutdown_ready()
+        self._maybe_emit_shutdown_ready()
+
+    def _maybe_emit_shutdown_ready(self) -> None:
+        if self._shutdown_requested and not self.has_running_background_operations():
+            self._emit_shutdown_ready()
 
     def _emit_shutdown_ready(self) -> None:
         if self._shutdown_ready_emitted:
@@ -440,16 +455,16 @@ class SettingsWindow(QWidget):
         self.shutdown_ready.emit()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
-        if self._download_thread is not None and self._download_thread.isRunning():
-            self._close_requested = True
+        self._close_requested = True
+        if self.is_download_running():
             self.cancel_local_ocr_download()
+        if self.is_connection_running():
+            if self._connection_worker is not None:
+                self._connection_worker.request_cancel()
             self.hide()
             event.accept()
             return
-        if self.is_connection_running():
-            self._close_requested = True
-            if self._connection_worker is not None:
-                self._connection_worker.request_cancel()
+        if self.is_download_running():
             self.hide()
             event.accept()
             return

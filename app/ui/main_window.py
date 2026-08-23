@@ -128,8 +128,8 @@ class MainWindow(QWidget):
             logger.info("shutdown waiting for processing thread to finish")
             return
 
-        if self._settings_window is not None and self._settings_window.is_connection_running():
-            logger.info("shutdown waiting for settings connection test to finish")
+        if self._settings_window is not None and self._settings_window.has_running_background_operations():
+            logger.info("shutdown waiting for settings background operations to finish")
             return
 
         self._emit_shutdown_ready()
@@ -331,7 +331,7 @@ class MainWindow(QWidget):
         if self._shutting_down:
             if self.processing_thread is not None and self.processing_thread.isRunning():
                 return
-            if self._settings_window is not None and self._settings_window.is_connection_running():
+            if self._settings_window is not None and self._settings_window.has_running_background_operations():
                 return
             self._emit_shutdown_ready()
 
