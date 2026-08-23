@@ -44,12 +44,37 @@ class _ComponentManager:
         return True
 
 
-def _window(tmp_path: Path, manager: _ComponentManager) -> SettingsWindow:
+class _PreparingSession:
+    def __init__(self) -> None:
+        self.stop_calls = 0
+
+    def is_preparing(self) -> bool:
+        return True
+
+    def is_busy(self) -> bool:
+        return True
+
+    def stop(self) -> None:
+        self.stop_calls += 1
+
+    def reset_capability(self) -> None:
+        pass
+
+
+def _window(
+    tmp_path: Path,
+    manager: _ComponentManager,
+    session: _PreparingSession | None = None,
+) -> SettingsWindow:
     config = ConfigManager(
         settings_repository=SettingsRepository(tmp_path / "settings.json"),
         secret_store=_SecretStore(),
     )
-    return SettingsWindow(config_manager=config, component_manager=manager)
+    return SettingsWindow(
+        config_manager=config,
+        component_manager=manager,
+        local_ocr_session=session,
+    )
 
 
 def test_settings_shows_local_ocr_not_installed(qt_app, tmp_path: Path) -> None:
@@ -120,4 +145,32 @@ def test_remove_local_ocr_error_is_visible(qt_app, tmp_path: Path, monkeypatch) 
     assert manager.remove_calls == 1
     assert "Failed to remove Local OCR" in window.local_ocr_status_label.text()
     assert "permission denied" in window.local_ocr_status_label.text()
+    window.close()
+
+
+def test_download_is_rejected_during_local_ocr_prepare(qt_app, tmp_path: Path) -> None:
+    manager = _ComponentManager(False)
+    session = _PreparingSession()
+    window = _window(tmp_path, manager, session)
+
+    window.download_local_ocr()
+
+    assert "Local OCR is preparing" in window.status_label.text()
+    assert session.stop_calls == 0
+    assert manager.remove_calls == 0
+    assert window._download_thread is None
+    window.close()
+
+
+def test_remove_is_rejected_during_local_ocr_prepare(qt_app, tmp_path: Path) -> None:
+    manager = _ComponentManager(True)
+    session = _PreparingSession()
+    window = _window(tmp_path, manager, session)
+
+    window.remove_local_ocr()
+
+    assert "Local OCR is preparing" in window.local_ocr_status_label.text()
+    assert manager.remove_calls == 0
+    assert session.stop_calls == 0
+    assert manager.is_installed()
     window.close()

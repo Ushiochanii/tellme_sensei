@@ -132,6 +132,7 @@ class SettingsWindow(QWidget):
     """A single-instance settings window owned by MainWindow."""
 
     settings_saved = Signal()
+    local_ocr_component_changed = Signal()
     shutdown_ready = Signal()
 
     def __init__(
@@ -401,10 +402,20 @@ class SettingsWindow(QWidget):
     def download_local_ocr(self) -> None:
         if self._download_thread is not None and self._download_thread.isRunning():
             return
+        if (
+            self.local_ocr_session is not None
+            and getattr(self.local_ocr_session, "is_preparing", lambda: False)()
+        ):
+            self._set_status("Local OCR is preparing. Please try again in a moment.")
+            return
         if self.is_connection_running() or self.is_google_test_running():
             self._set_status("Wait for the active OCR or connection test to finish before downloading Local OCR.")
             return
-        if self.local_ocr_session is not None and self.local_ocr_session.is_busy():
+        session_preparing = bool(
+            self.local_ocr_session is not None
+            and getattr(self.local_ocr_session, "is_preparing", lambda: False)()
+        )
+        if self.local_ocr_session is not None and self.local_ocr_session.is_busy() and not session_preparing:
             self._set_status("Local OCR is currently in use. Please wait for recognition to finish.")
             return
         if self.local_ocr_session is not None:
@@ -447,6 +458,7 @@ class SettingsWindow(QWidget):
             self.local_ocr_session.reset_capability()
         self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version}")
         self.local_ocr_size_label.setText("")
+        self.local_ocr_component_changed.emit()
 
     @Slot(int)
     def _on_local_ocr_manifest_loaded(self, size: int) -> None:
@@ -485,6 +497,14 @@ class SettingsWindow(QWidget):
         if not self.component_manager.is_installed():
             self._refresh_local_ocr_state()
             return
+        if (
+            self.local_ocr_session is not None
+            and getattr(self.local_ocr_session, "is_preparing", lambda: False)()
+        ):
+            self.local_ocr_status_label.setText(
+                "Local OCR is preparing. Please try again in a moment."
+            )
+            return
         answer = QMessageBox.question(
             self,
             "Remove Local OCR",
@@ -495,7 +515,15 @@ class SettingsWindow(QWidget):
         if answer == QMessageBox.StandardButton.Yes:
             try:
                 if self.local_ocr_session is not None:
-                    if self.local_ocr_session.is_busy():
+                    session_preparing = bool(
+                        getattr(self.local_ocr_session, "is_preparing", lambda: False)()
+                    )
+                    if session_preparing:
+                        self.local_ocr_status_label.setText(
+                            "Local OCR is preparing. Please try again in a moment."
+                        )
+                        return
+                    if self.local_ocr_session.is_busy() and not session_preparing:
                         self.local_ocr_status_label.setText(
                             "Local OCR is currently in use. Please wait for recognition to finish."
                         )
@@ -509,6 +537,7 @@ class SettingsWindow(QWidget):
             if self.local_ocr_session is not None:
                 self.local_ocr_session.reset_capability()
             self._refresh_local_ocr_state()
+            self.local_ocr_component_changed.emit()
 
     def _read_config_from_fields(self) -> AppConfig:
         model = self.model_edit.text().strip()
