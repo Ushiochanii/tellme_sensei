@@ -14,10 +14,12 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from app.local_ocr.component_manager import ComponentCancelled, ComponentError, LocalOCRComponentManager
 from app.local_ocr.manifest import ComponentManifest
+from app.version import __version__
 
 logger = logging.getLogger(__name__)
 DOWNLOAD_TIMEOUT = 30.0
 CHUNK_SIZE = 1024 * 1024
+USER_AGENT = f"TellMeSensei/{__version__}"
 
 
 class LocalOCRDownloadWorker(QObject):
@@ -84,7 +86,7 @@ class LocalOCRDownloadWorker(QObject):
     def _fetch_manifest(self) -> ComponentManifest:
         if self.cancel_event.is_set():
             raise ComponentCancelled("Local OCR download cancelled.")
-        request = urllib.request.Request(self.manifest_url, headers={"User-Agent": "TellMeSensei/0.4.0"})
+        request = urllib.request.Request(self.manifest_url, headers={"User-Agent": USER_AGENT})
         try:
             with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as response:
                 payload = response.read()
@@ -103,7 +105,7 @@ class LocalOCRDownloadWorker(QObject):
         total = 0
         try:
             with open(fd, "wb", closefd=True) as output:
-                request = urllib.request.Request(manifest.url, headers={"User-Agent": "TellMeSensei/0.4.0"})
+                request = urllib.request.Request(manifest.url, headers={"User-Agent": USER_AGENT})
                 try:
                     with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as response:
                         expected = response.headers.get("Content-Length")

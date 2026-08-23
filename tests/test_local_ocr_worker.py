@@ -16,6 +16,7 @@ from app.ocr.profiling import read_profile
 from app.ocr.types import OCRCancelled, OCRError, OCRLine, OCRResult
 from app.ocr.worker_protocol import error_payload, parse_result, result_payload
 from app.local_ocr import worker_main
+from app.local_ocr.version import LOCAL_OCR_VERSION
 
 
 def test_worker_success_serialization(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -425,7 +426,7 @@ def test_local_component_versioned_user_path_is_first(
     candidates = local_runtime.worker_executable_candidates()
 
     assert candidates[0] == (
-        runtime / "components" / "local-ocr" / "1.0.0" / "TellMeSenseiOCR.exe"
+        runtime / "components" / "local-ocr" / LOCAL_OCR_VERSION / "TellMeSenseiOCR.exe"
     )
 
 

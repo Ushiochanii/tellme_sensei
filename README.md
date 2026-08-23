@@ -151,7 +151,20 @@ logs, or OCR model caches when uninstalled.
 The executable and installer are currently unsigned. Windows SmartScreen may
 therefore show an unknown-publisher warning.
 
-## External local OCR component
+## OCR modes and the external Local OCR component
+
+TellMeSensei supports two OCR modes:
+
+- **Local OCR** uses PaddleOCR on this device. The optional component is
+  downloaded from the public distribution release by opening Settings > Local
+  OCR > Download Local OCR. The download is approximately 240 MB compressed
+  and is larger after installation; screenshots remain on the device.
+- **Google Cloud Vision** is an optional BYOK online backend. When selected,
+  screenshots are uploaded to Google Cloud Vision for recognition.
+
+The default remains Local OCR. The Core application does not bundle PaddleOCR.
+If the Local OCR component is missing, Settings can install it without
+installing anything into the Core application directory.
 
 The Core application no longer bundles PaddleOCR. Core development dependencies
 are installed with `requirements.txt`; a complete development environment also
@@ -169,18 +182,20 @@ not include or download this component; if it is missing, the application shows
 a local OCR component error. PaddleOCR and its model cache remain outside the
 Core installation.
 
-For a distributable component archive, run:
+For a developer-only component build or archive, run:
 
 ```powershell
-.\scripts\package_local_ocr.ps1 -BaseUrl "https://your-host.example/components"
+.\scripts\build_local_ocr.ps1
+.\scripts\package_local_ocr.ps1
 ```
 
-The archive and `local-ocr-manifest.json` are written to `dist\components`.
-The Settings window can download a hosted manifest when
-`LOCAL_OCR_MANIFEST_URL` is supplied as an environment variable or `.env`
-development override. Downloads are checked with SHA-256, safely extracted,
-smoke-tested, and installed atomically. Removing the component does not remove
-settings, API keys, logs, or model caches.
+The archive and `local-ocr-manifest.json` are written to `dist\components`
+with immutable public GitHub Release URLs. The developer-only
+`scripts\install_local_ocr_dev.ps1` helper remains available for local builds;
+normal users should use Settings. `LOCAL_OCR_MANIFEST_URL` can still override
+the production URL for development and tests. Downloads are checked with
+SHA-256, safely extracted, smoke-tested, and installed atomically. Removing
+the component does not remove settings, API keys, logs, or model caches.
 
 For developer-only Local OCR performance diagnostics, use the packaged worker
 with `scripts/profile_local_ocr.py`. This is opt-in instrumentation; normal OCR

@@ -10,6 +10,7 @@ import pytest
 
 from app.local_ocr.component_manager import ComponentError, LocalOCRComponentManager
 from app.local_ocr.manifest import ComponentManifest, ManifestError
+from app.local_ocr.version import LOCAL_OCR_VERSION
 
 
 def _manifest_for(archive: Path, *, platform: str = "windows", arch: str = "x86_64") -> ComponentManifest:
@@ -17,7 +18,7 @@ def _manifest_for(archive: Path, *, platform: str = "windows", arch: str = "x86_
     return ComponentManifest.from_dict(
         {
             "component": "local-ocr",
-            "version": "1.0.0",
+            "version": LOCAL_OCR_VERSION,
             "platform": platform,
             "arch": arch,
             "url": "https://example.test/local-ocr.zip",
@@ -70,7 +71,7 @@ def test_install_archive_success_and_remove(tmp_path: Path, monkeypatch: pytest.
 
     assert installed == manager.installed_path()
     assert manager.is_installed()
-    assert manager.installed_version() == "1.0.0"
+    assert manager.installed_version() == LOCAL_OCR_VERSION
     assert manager.remove() is True
     assert manager.is_installed() is False
 
@@ -80,7 +81,7 @@ def test_checksum_mismatch_deletes_archive(tmp_path: Path) -> None:
     manifest = ComponentManifest.from_dict(
         {
             "component": "local-ocr",
-            "version": "1.0.0",
+            "version": LOCAL_OCR_VERSION,
             "platform": "windows",
             "arch": "x86_64",
             "url": "https://example.test/component.zip",

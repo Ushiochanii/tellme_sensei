@@ -421,9 +421,6 @@ class SettingsWindow(QWidget):
         if self.local_ocr_session is not None:
             self.local_ocr_session.stop()
         manifest_url = resolve_manifest_url(self.config_manager.project_root)
-        if "example.invalid" in manifest_url:
-            self.local_ocr_status_label.setText("Download URL is not configured.")
-            return
         self._download_cancel_event = threading.Event()
         worker = LocalOCRDownloadWorker(manifest_url, self.component_manager, self._download_cancel_event)
         thread = QThread(self)

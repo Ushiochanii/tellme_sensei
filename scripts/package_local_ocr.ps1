@@ -1,6 +1,6 @@
 param(
-    [string]$DownloadUrl = "",
-    [string]$BaseUrl = ""
+    [string]$DistributionRepository = "Ushiochanii/tellme-sensei-releases",
+    [string]$DownloadUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +28,7 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) {
     throw "Could not read the Local OCR component version."
 }
 $archiveName = "TellMeSensei-LocalOCR-$version-win-x64.zip"
+$releaseTag = "local-ocr-v$version"
 $archivePath = Join-Path $outputPath $archiveName
 $manifestPath = Join-Path $outputPath "local-ocr-manifest.json"
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
@@ -37,13 +38,9 @@ Compress-Archive -Path (Join-Path $sourcePath "*") -DestinationPath $archivePath
 $archive = Get-Item -LiteralPath $archivePath
 $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ([string]::IsNullOrWhiteSpace($DownloadUrl)) {
-    if (-not [string]::IsNullOrWhiteSpace($BaseUrl)) {
-        $DownloadUrl = $BaseUrl.TrimEnd('/') + "/" + $archiveName
-    } else {
-        $DownloadUrl = "https://downloads.example.invalid/tellme-sensei/$archiveName"
-        Write-Warning "No download URL supplied; manifest contains the distribution placeholder URL."
-    }
+    $DownloadUrl = "https://github.com/$DistributionRepository/releases/download/$releaseTag/$archiveName"
 }
+$manifestUrl = "https://github.com/$DistributionRepository/releases/download/$releaseTag/local-ocr-manifest.json"
 $manifest = [ordered]@{
     schema_version = 1
     component = "local-ocr"
@@ -57,8 +54,11 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
-Write-Host "Local OCR archive: $($archive.FullName)"
-Write-Host "Archive size: $([math]::Round($archive.Length / 1MB, 2)) MB"
-Write-Host "SHA-256: $hash"
-Write-Host "Manifest: $manifestPath"
 Write-Host "Version: $version"
+Write-Host "Release tag: $releaseTag"
+Write-Host "Archive path: $($archive.FullName)"
+Write-Host "Archive size: $([math]::Round($archive.Length / 1MB, 2)) MB ($($archive.Length) bytes)"
+Write-Host "SHA256: $hash"
+Write-Host "Manifest path: $manifestPath"
+Write-Host "Manifest URL: $manifestUrl"
+Write-Host "Archive URL: $DownloadUrl"
