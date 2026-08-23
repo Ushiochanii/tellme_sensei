@@ -30,3 +30,16 @@ def test_windows_packaging_metadata_is_present() -> None:
     assert "OutputBaseFilename=TellMeSensei-Setup-{#VersionLabel}" in iss
     assert "ISCC.exe not found" in build_script
     assert "build_windows.ps1" in build_script
+
+
+def test_local_ocr_distribution_metadata_is_versioned_and_public() -> None:
+    package_script = (ROOT / "scripts" / "package_local_ocr.ps1").read_text(encoding="utf-8")
+    publish_script = (ROOT / "scripts" / "publish_local_ocr.ps1").read_text(encoding="utf-8")
+    manifest = (ROOT / "app" / "local_ocr" / "manifest.py").read_text(encoding="utf-8")
+
+    assert "Ushiochanii/tellme-sensei-releases" in manifest
+    assert "local-ocr-v{LOCAL_OCR_VERSION}" in manifest
+    assert "downloads.example.invalid" not in package_script
+    assert "schema_version = 1" in package_script
+    assert "release create" in publish_script
+    assert "Release already exists. Bump the component version" in publish_script

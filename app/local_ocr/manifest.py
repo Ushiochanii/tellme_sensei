@@ -12,9 +12,15 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import dotenv_values
+from app.local_ocr.version import LOCAL_OCR_VERSION
 
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
-DEFAULT_MANIFEST_URL = "https://downloads.example.invalid/tellme-sensei/local-ocr-manifest.json"
+DISTRIBUTION_REPOSITORY = "Ushiochanii/tellme-sensei-releases"
+DISTRIBUTION_RELEASE_TAG = f"local-ocr-v{LOCAL_OCR_VERSION}"
+DEFAULT_MANIFEST_URL = (
+    f"https://github.com/{DISTRIBUTION_REPOSITORY}/releases/download/"
+    f"{DISTRIBUTION_RELEASE_TAG}/local-ocr-manifest.json"
+)
 
 
 class ManifestError(ValueError):
