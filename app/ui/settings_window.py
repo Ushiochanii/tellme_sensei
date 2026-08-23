@@ -402,6 +402,12 @@ class SettingsWindow(QWidget):
     def download_local_ocr(self) -> None:
         if self._download_thread is not None and self._download_thread.isRunning():
             return
+        if (
+            self.local_ocr_session is not None
+            and getattr(self.local_ocr_session, "is_preparing", lambda: False)()
+        ):
+            self._set_status("Local OCR is preparing. Please try again in a moment.")
+            return
         if self.is_connection_running() or self.is_google_test_running():
             self._set_status("Wait for the active OCR or connection test to finish before downloading Local OCR.")
             return
@@ -491,6 +497,14 @@ class SettingsWindow(QWidget):
         if not self.component_manager.is_installed():
             self._refresh_local_ocr_state()
             return
+        if (
+            self.local_ocr_session is not None
+            and getattr(self.local_ocr_session, "is_preparing", lambda: False)()
+        ):
+            self.local_ocr_status_label.setText(
+                "Local OCR is preparing. Please try again in a moment."
+            )
+            return
         answer = QMessageBox.question(
             self,
             "Remove Local OCR",
@@ -504,6 +518,11 @@ class SettingsWindow(QWidget):
                     session_preparing = bool(
                         getattr(self.local_ocr_session, "is_preparing", lambda: False)()
                     )
+                    if session_preparing:
+                        self.local_ocr_status_label.setText(
+                            "Local OCR is preparing. Please try again in a moment."
+                        )
+                        return
                     if self.local_ocr_session.is_busy() and not session_preparing:
                         self.local_ocr_status_label.setText(
                             "Local OCR is currently in use. Please wait for recognition to finish."
