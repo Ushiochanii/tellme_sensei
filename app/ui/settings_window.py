@@ -10,16 +10,22 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QKeySequenceEdit,
     QLineEdit,
+    QMessageBox,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from app.config import AppConfig, ConfigError, ConfigManager
+from app.local_ocr.component_manager import LocalOCRComponentManager
+from app.local_ocr.download import LocalOCRDownloadWorker
+from app.local_ocr.manifest import resolve_manifest_url
 from app.platform.base import GlobalHotkeyManager
 from app.platform.hotkey import DEFAULT_SHORTCUT, HotkeySpec, HotkeySpecError
 from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
@@ -76,17 +82,22 @@ class SettingsWindow(QWidget):
         self,
         config_manager: ConfigManager | None = None,
         hotkey_manager: GlobalHotkeyManager | None = None,
+        component_manager: LocalOCRComponentManager | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.config_manager = config_manager or ConfigManager()
         self.hotkey_manager = hotkey_manager
+        self.component_manager = component_manager or LocalOCRComponentManager()
         self._connection_thread: QThread | None = None
         self._connection_worker: ConnectionTestWorker | None = None
         self._connection_cancel_event: threading.Event | None = None
         self._close_requested = False
         self._shutdown_requested = False
         self._shutdown_ready_emitted = False
+        self._download_thread: QThread | None = None
+        self._download_worker: LocalOCRDownloadWorker | None = None
+        self._download_cancel_event: threading.Event | None = None
 
         self.setWindowTitle("设置")
         self.setMinimumWidth(430)
@@ -107,6 +118,33 @@ class SettingsWindow(QWidget):
         form.addRow("Global shortcut", self.shortcut_edit)
         root.addLayout(form)
 
+        ocr_group = QGroupBox("Local OCR")
+        ocr_layout = QVBoxLayout(ocr_group)
+        self.local_ocr_status_label = QLabel()
+        self.local_ocr_size_label = QLabel()
+        self.local_ocr_progress = QProgressBar()
+        self.local_ocr_progress.setRange(0, 100)
+        self.local_ocr_progress.setVisible(False)
+        ocr_buttons = QHBoxLayout()
+        self.download_ocr_button = QPushButton("Download Local OCR")
+        self.cancel_download_button = QPushButton("Cancel")
+        self.verify_ocr_button = QPushButton("Verify")
+        self.remove_ocr_button = QPushButton("Remove Local OCR")
+        self.cancel_download_button.setVisible(False)
+        self.download_ocr_button.clicked.connect(self.download_local_ocr)
+        self.cancel_download_button.clicked.connect(self.cancel_local_ocr_download)
+        self.verify_ocr_button.clicked.connect(self.verify_local_ocr)
+        self.remove_ocr_button.clicked.connect(self.remove_local_ocr)
+        ocr_buttons.addWidget(self.download_ocr_button)
+        ocr_buttons.addWidget(self.cancel_download_button)
+        ocr_buttons.addWidget(self.verify_ocr_button)
+        ocr_buttons.addWidget(self.remove_ocr_button)
+        ocr_layout.addWidget(self.local_ocr_status_label)
+        ocr_layout.addWidget(self.local_ocr_size_label)
+        ocr_layout.addWidget(self.local_ocr_progress)
+        ocr_layout.addLayout(ocr_buttons)
+        root.addWidget(ocr_group)
+
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
         root.addWidget(self.status_label)
@@ -125,6 +163,7 @@ class SettingsWindow(QWidget):
         root.addLayout(buttons)
 
         self._load_current_values()
+        self._refresh_local_ocr_state()
 
     def _load_current_values(self) -> None:
         try:
@@ -143,6 +182,117 @@ class SettingsWindow(QWidget):
 
         if not self.is_connection_running():
             self._load_current_values()
+        if self._download_thread is None or not self._download_thread.isRunning():
+            self._refresh_local_ocr_state()
+
+    def _refresh_local_ocr_state(self) -> None:
+        if self.component_manager.is_installed():
+            self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version}")
+            self.download_ocr_button.setVisible(False)
+            self.verify_ocr_button.setEnabled(True)
+            self.remove_ocr_button.setEnabled(True)
+        else:
+            self.local_ocr_status_label.setText("Not installed")
+            self.download_ocr_button.setVisible(True)
+            self.verify_ocr_button.setEnabled(False)
+            self.remove_ocr_button.setEnabled(False)
+
+    def _set_download_state(self, running: bool) -> None:
+        self.download_ocr_button.setEnabled(not running)
+        self.verify_ocr_button.setEnabled(not running and self.component_manager.is_installed())
+        self.remove_ocr_button.setEnabled(not running and self.component_manager.is_installed())
+        self.cancel_download_button.setVisible(running)
+        self.local_ocr_progress.setVisible(running)
+
+    @Slot()
+    def download_local_ocr(self) -> None:
+        if self._download_thread is not None and self._download_thread.isRunning():
+            return
+        manifest_url = resolve_manifest_url(self.config_manager.project_root)
+        if "example.invalid" in manifest_url:
+            self.local_ocr_status_label.setText("Download URL is not configured.")
+            return
+        self._download_cancel_event = threading.Event()
+        worker = LocalOCRDownloadWorker(manifest_url, self.component_manager, self._download_cancel_event)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress_changed.connect(self.local_ocr_progress.setValue)
+        worker.manifest_loaded.connect(self._on_local_ocr_manifest_loaded)
+        worker.status_changed.connect(self.local_ocr_status_label.setText)
+        worker.succeeded.connect(self._on_local_ocr_download_succeeded)
+        worker.failed.connect(self._on_local_ocr_download_failed)
+        worker.cancelled.connect(self._on_local_ocr_download_cancelled)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_local_ocr_download_finished)
+        self._download_worker = worker
+        self._download_thread = thread
+        self._set_download_state(True)
+        self.local_ocr_progress.setValue(0)
+        thread.start()
+
+    @Slot()
+    def cancel_local_ocr_download(self) -> None:
+        if self._download_worker is not None:
+            self._download_worker.request_cancel()
+            self.local_ocr_status_label.setText("Cancelling...")
+            self.cancel_download_button.setEnabled(False)
+
+    @Slot(str)
+    def _on_local_ocr_download_succeeded(self, installed_path: str) -> None:
+        self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version}")
+        self.local_ocr_size_label.setText("")
+
+    @Slot(int)
+    def _on_local_ocr_manifest_loaded(self, size: int) -> None:
+        self.local_ocr_size_label.setText(f"Download size: {size / (1024 * 1024):.1f} MB")
+
+    @Slot(str)
+    def _on_local_ocr_download_failed(self, message: str) -> None:
+        self.local_ocr_status_label.setText(f"Error: {message}")
+
+    @Slot()
+    def _on_local_ocr_download_cancelled(self) -> None:
+        self.local_ocr_status_label.setText("Download cancelled")
+
+    @Slot()
+    def _on_local_ocr_download_finished(self) -> None:
+        self._download_thread = None
+        self._download_worker = None
+        self._download_cancel_event = None
+        self._set_download_state(False)
+        self._refresh_local_ocr_state()
+        if self._shutdown_requested:
+            self._emit_shutdown_ready()
+
+    @Slot()
+    def verify_local_ocr(self) -> None:
+        if not self.component_manager.verify_installation():
+            self.local_ocr_status_label.setText("Local OCR installation is incomplete.")
+            return
+        self.local_ocr_status_label.setText("Verifying...")
+        if self.component_manager.smoke_test():
+            self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version} · verified")
+        else:
+            self.local_ocr_status_label.setText("Local OCR smoke test failed.")
+
+    @Slot()
+    def remove_local_ocr(self) -> None:
+        if not self.component_manager.is_installed():
+            self._refresh_local_ocr_state()
+            return
+        answer = QMessageBox.question(
+            self,
+            "Remove Local OCR",
+            "Remove the installed Local OCR component?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer is QMessageBox.StandardButton.Yes:
+            self.component_manager.remove()
+            self._refresh_local_ocr_state()
 
     def _read_config_from_fields(self) -> AppConfig:
         model = self.model_edit.text().strip()
@@ -269,6 +419,11 @@ class SettingsWindow(QWidget):
     @Slot()
     def request_shutdown(self) -> None:
         self._shutdown_requested = True
+        if self._download_thread is not None and self._download_thread.isRunning():
+            self.cancel_local_ocr_download()
+            self._close_requested = True
+            self.hide()
+            return
         if self.is_connection_running():
             if self._connection_worker is not None:
                 self._connection_worker.request_cancel()
@@ -285,6 +440,12 @@ class SettingsWindow(QWidget):
         self.shutdown_ready.emit()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
+        if self._download_thread is not None and self._download_thread.isRunning():
+            self._close_requested = True
+            self.cancel_local_ocr_download()
+            self.hide()
+            event.accept()
+            return
         if self.is_connection_running():
             self._close_requested = True
             if self._connection_worker is not None:

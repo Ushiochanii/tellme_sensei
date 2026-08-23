@@ -160,6 +160,19 @@ not include or download this component; if it is missing, the application shows
 a local OCR component error. PaddleOCR and its model cache remain outside the
 Core installation.
 
+For a distributable component archive, run:
+
+```powershell
+.\scripts\package_local_ocr.ps1 -BaseUrl "https://your-host.example/components"
+```
+
+The archive and `local-ocr-manifest.json` are written to `dist\components`.
+The Settings window can download a hosted manifest when
+`LOCAL_OCR_MANIFEST_URL` is supplied as an environment variable or `.env`
+development override. Downloads are checked with SHA-256, safely extracted,
+smoke-tested, and installed atomically. Removing the component does not remove
+settings, API keys, logs, or model caches.
+
 ## Windows portable build
 
 Build prerequisites: Windows, Python 3.12, and the project `.venv` with
