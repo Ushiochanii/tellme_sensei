@@ -11,7 +11,7 @@ import threading
 
 from PySide6.QtCore import QThread, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from app.capture.overlay import CaptureOverlay
 from app.config import ConfigError, ConfigManager
@@ -19,6 +19,7 @@ from app.local_ocr.component_manager import LocalOCRComponentManager
 from app.ocr.factory import create_ocr_provider
 from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
+from app.platform import screen_permissions
 from app.services.deepseek_service import DeepSeekService
 from app.state import AppState
 from app.thread_info import current_thread_info
@@ -62,6 +63,7 @@ class MainWindow(QWidget):
         self._active_job_id: str | None = None
         self._cancelled_job_id: str | None = None
         self._busy = False
+        self._screen_permission_request_attempted = False
         self._last_ocr_text = ""
         self._shutdown_ready_emitted = False
         self._prewarm_thread: QThread | None = None
@@ -87,6 +89,9 @@ class MainWindow(QWidget):
             logger.info("capture ignored: application busy")
             return False
 
+        if not self._ensure_screen_recording_permission():
+            return False
+
         logger.info("capture requested")
         self.state = AppState.CAPTURING
         self._busy = True
@@ -109,6 +114,37 @@ class MainWindow(QWidget):
         self._overlay.cancelled.connect(self._on_capture_cancelled)
         self._overlay.begin()
         return True
+
+    def _ensure_screen_recording_permission(self) -> bool:
+        """Check permission before changing capture state or creating an overlay."""
+
+        try:
+            if screen_permissions.has_screen_recording_permission():
+                return True
+            if not self._screen_permission_request_attempted:
+                self._screen_permission_request_attempted = True
+                logger.info("screen capture permission request initiated")
+                screen_permissions.request_screen_recording_permission()
+                if screen_permissions.has_screen_recording_permission():
+                    return True
+            logger.info("screen capture permission unavailable")
+        except Exception:
+            logger.exception("screen capture permission check failed")
+        self._show_screen_recording_permission_error()
+        return False
+
+    def _show_screen_recording_permission_error(self) -> None:
+        QMessageBox.warning(
+            None,
+            "Screen Recording Permission Required",
+            "TellMeSensei needs Screen Recording permission to capture the screen.\n\n"
+            "Please enable TellMeSensei in:\n"
+            "System Settings / System Preferences\n"
+            "→ Privacy & Security\n"
+            "→ Screen Recording\n\n"
+            "Then restart TellMeSensei.",
+            QMessageBox.StandardButton.Ok,
+        )
 
     @Slot()
     def request_shutdown(self) -> None:

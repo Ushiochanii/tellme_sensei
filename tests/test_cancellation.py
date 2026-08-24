@@ -289,6 +289,7 @@ def test_new_capture_works_after_cancellation(qt_app, monkeypatch) -> None:
             pass
 
     monkeypatch.setattr(main_window_module, "CaptureOverlay", FakeOverlay)
+    monkeypatch.setattr(main_window_module.screen_permissions, "has_screen_recording_permission", lambda: True)
     window = MainWindow(tray_mode=True)
     window._active_job_id = "old-job"
     window._busy = True

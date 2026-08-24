@@ -94,5 +94,7 @@ if [[ -n "$identity" ]]; then
     echo "Code signing identity: $identity"
 else
     echo "Code signing identity: ad-hoc"
+    echo "Screen Recording permission may need re-authorization after rebuilding."
+    echo "Development reset command: tccutil reset ScreenCapture com.tellmesensei.app"
 fi
 echo "$signature_details"
