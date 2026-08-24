@@ -116,7 +116,7 @@ class PaddleOCRProvider:
             from paddleocr import PaddleOCR
         except ImportError as exc:
             raise OCRError(
-                "未安装 PaddleOCR 依赖，请先执行 python -m pip install -r requirements.txt。"
+                "未安装 PaddleOCR 依赖，请先执行 python -m pip install -r requirements-local-ocr.txt。"
             ) from exc
 
         try:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QEventLoop, QPoint, QTimer, Qt
@@ -14,7 +15,8 @@ from app.capture.overlay import CaptureOverlay
 from app.config import AppConfig
 from app.state import AppState
 from app.services.deepseek_service import DeepSeekError, DeepSeekService
-from app.services.ocr_service import OCRLine, OCRResult, OCRService
+from app.services.ocr_service import OCRLine, OCRResult
+from app.ocr.providers.local_worker import LocalOCRProvider
 from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
 from app.ui.answer_window import AnswerWindow
@@ -27,11 +29,20 @@ def qt_app():
     return app
 
 
-def test_qimage_is_supported_by_ocr_service(qt_app) -> None:
+def test_qimage_is_supported_by_local_ocr_provider(qt_app) -> None:
     image = QImage(32, 24, QImage.Format.Format_RGBA8888)
     image.fill(0xFFFFFFFF)
-    array = OCRService._prepare_image(image)
-    assert array.shape == (24, 32, 3)
+
+    class FakeSession:
+        def recognize(self, input_path: str | Path, cancel_event=None) -> OCRResult:
+            path = Path(input_path)
+            assert path.suffix == ".png"
+            assert QImage(str(path)).isNull() is False
+            return OCRResult("题目", (OCRLine("题目"),))
+
+    result = LocalOCRProvider(session=FakeSession()).recognize(image)
+
+    assert result.text == "题目"
 
 
 def test_processing_worker_emits_result_without_touching_widgets(qt_app) -> None:

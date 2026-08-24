@@ -9,6 +9,7 @@ from pathlib import Path
 
 from app.local_ocr.component_manager import LocalOCRComponentManager
 from app.local_ocr.download import LocalOCRDownloadWorker
+from app.local_ocr.manifest import current_arch, current_platform
 from app.local_ocr.version import LOCAL_OCR_VERSION
 
 
@@ -50,8 +51,8 @@ def _manifest(archive: bytes) -> bytes:
         {
             "component": "local-ocr",
             "version": LOCAL_OCR_VERSION,
-            "platform": "windows",
-            "arch": "x86_64",
+            "platform": current_platform(),
+            "arch": current_arch(),
             "url": "https://example.test/local.zip",
             "sha256": hashlib.sha256(archive).hexdigest(),
             "size": len(archive),

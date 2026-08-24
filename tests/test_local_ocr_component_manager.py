@@ -25,7 +25,9 @@ def _manifest_for(archive: Path, *, platform: str = "windows", arch: str = "x86_
             "sha256": digest,
             "size": archive.stat().st_size,
             "archive_format": "zip",
-        }
+        },
+        expected_platform=platform,
+        expected_arch=arch,
     )
 
 
@@ -56,6 +58,30 @@ def test_manifest_validates_platform_arch_and_sha() -> None:
         ComponentManifest.from_dict({**payload, "platform": "linux"}, expected_platform="windows", expected_arch="x86_64")
     with pytest.raises(ManifestError):
         ComponentManifest.from_dict({**payload, "arch": "arm64"}, expected_platform="windows", expected_arch="x86_64")
+
+
+def test_manifest_rejects_windows_and_darwin_cross_platform_payloads() -> None:
+    payload = {
+        "component": "local-ocr",
+        "version": "1.0.0",
+        "platform": "windows",
+        "arch": "x86_64",
+        "url": "https://example.test/component.zip",
+        "sha256": "a" * 64,
+        "size": 10,
+        "archive_format": "zip",
+    }
+
+    with pytest.raises(ManifestError):
+        ComponentManifest.from_dict(payload, expected_platform="darwin", expected_arch="x86_64")
+    with pytest.raises(ManifestError):
+        ComponentManifest.from_dict(
+            {**payload, "platform": "darwin"},
+            expected_platform="windows",
+            expected_arch="x86_64",
+        )
+    with pytest.raises(ManifestError):
+        ComponentManifest.from_dict(payload, expected_platform="windows", expected_arch="arm64")
 
 
 def test_install_archive_success_and_remove(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
