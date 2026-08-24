@@ -9,6 +9,7 @@ from PyInstaller.utils.hooks import (
     collect_data_files,
     collect_dynamic_libs,
     collect_submodules,
+    copy_metadata,
 )
 
 
@@ -20,7 +21,11 @@ paddleocr_package_path = site_packages / "paddleocr"
 paddleocr_e2e_path = paddleocr_package_path / "ppocr" / "utils" / "e2e_utils"
 paddleocr_datas = collect_data_files("paddleocr", include_py_files=True)
 cython_datas = collect_data_files("Cython", includes=["Utility/**/*"])
-datas = paddleocr_datas + cython_datas
+metadata_datas = []
+if sys.platform == "darwin":
+    for distribution in ("imageio", "matplotlib"):
+        metadata_datas.extend(copy_metadata(distribution))
+datas = paddleocr_datas + cython_datas + metadata_datas
 sys.path.insert(0, str(paddleocr_package_path))
 
 # PaddleOCR 2.x imports these directories as top-level modules at runtime.
@@ -55,7 +60,11 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=(
+        [str(ROOT / "packaging" / "local_ocr_macos_runtime_hook.py")]
+        if sys.platform == "darwin"
+        else []
+    ),
     excludes=[],
     noarchive=False,
 )
