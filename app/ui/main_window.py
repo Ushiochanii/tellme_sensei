@@ -67,7 +67,6 @@ class MainWindow(QWidget):
         self._prewarm_thread: QThread | None = None
         self._prewarm_worker: LocalOCRPrewarmWorker | None = None
         self._prewarm_cancel_event: threading.Event | None = None
-
         self.setWindowTitle("AI 学习助手")
         self.setFixedSize(260, 140)
         layout = QVBoxLayout(self)

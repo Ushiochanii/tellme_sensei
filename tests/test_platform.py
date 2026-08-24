@@ -93,6 +93,7 @@ def test_macos_hotkey_rebind_success(qt_app) -> None:
     assert manager.rebind("Ctrl+Alt+A") is True
     assert manager.shortcut == "Ctrl+Alt+A"
     assert manager.registered is True
+    assert [call[2] for call in backend.calls] == [0x5341, 0x5341]
     manager.unregister()
 
 

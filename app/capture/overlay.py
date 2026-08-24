@@ -59,9 +59,6 @@ class CaptureOverlay(QWidget):
         """Show the overlay after the screen image has been captured."""
 
         if sys.platform == "darwin":
-            # Force the native NSWindow to exist before showing it. The Cocoa
-            # collection behavior is also applied after show as Qt may create
-            # the NSWindow lazily on some Qt/macOS combinations.
             if configure_macos_overlay_window is not None:
                 configure_macos_overlay_window(self)
             self.show()

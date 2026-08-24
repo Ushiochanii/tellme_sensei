@@ -172,11 +172,12 @@ class _CarbonHotkeyBackend:
             byref(native_ref),
         )
         logger.debug(
-            "macOS RegisterEventHotKey shortcut key_code=%s modifiers=%s id=%s status=%s",
+            "macOS RegisterEventHotKey key_code=%s modifiers=%s id=%s status=%s ref=%s",
             key_code,
             modifiers,
             hotkey_id,
             status,
+            native_ref.value,
         )
         if status != NO_ERR:
             logger.warning("macOS hotkey registration failed: status=%s", status)
@@ -186,6 +187,11 @@ class _CarbonHotkeyBackend:
             logger.error("macOS hotkey registration returned no EventHotKeyRef")
             self._remove_handler()
             return None
+        logger.debug(
+            "macOS hotkey registration active id=%s ref=%s",
+            hotkey_id,
+            native_ref.value,
+        )
         return native_ref
 
     def unregister(self, native_ref: c_void_p) -> bool:
@@ -204,6 +210,7 @@ class _CarbonHotkeyBackend:
         self._callback = None
 
     def _handle_event(self, _next_handler, event, _user_data) -> int:
+        logger.debug("macOS Carbon hotkey callback entered event=%s", event)
         hotkey = _EventHotKeyID()
         status = self._carbon.GetEventParameter(
             event,
@@ -214,11 +221,26 @@ class _CarbonHotkeyBackend:
             None,
             byref(hotkey),
         )
-        if status == NO_ERR and hotkey.signature == HOTKEY_SIGNATURE and self._callback:
-            try:
-                self._callback(hotkey.id)
-            except Exception:
-                logger.exception("macOS hotkey callback failed")
+        logger.debug(
+            "macOS Carbon hotkey event parameter status=%s signature=%s id=%s expected_signature=%s",
+            status,
+            hotkey.signature,
+            hotkey.id,
+            HOTKEY_SIGNATURE,
+        )
+        if status != NO_ERR:
+            logger.debug("macOS Carbon hotkey callback ignored: parameter read failed")
+            return NO_ERR
+        if hotkey.signature != HOTKEY_SIGNATURE:
+            logger.debug("macOS Carbon hotkey callback ignored: signature mismatch")
+            return NO_ERR
+        if self._callback is None:
+            logger.debug("macOS Carbon hotkey callback ignored: callback is not active")
+            return NO_ERR
+        try:
+            self._callback(hotkey.id)
+        except Exception:
+            logger.exception("macOS hotkey callback failed")
         return NO_ERR
 
 
@@ -241,8 +263,6 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
         self._backend = backend
         self._native_handle: c_void_p | object | None = None
         self._registered = False
-        self._active_hotkey_id: int | None = None
-        self._next_hotkey_id = HOTKEY_ID
 
     @property
     def registered(self) -> bool:
@@ -257,11 +277,19 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
             return True
         try:
             backend = self._backend_instance()
-            hotkey_id = self._next_hotkey_id
-            self._next_hotkey_id = (self._next_hotkey_id + 1) & 0xFFFFFFFF
+            hotkey_id = HOTKEY_ID
+            key_code = _KEY_CODES[self._spec.key]
+            modifiers = self._modifier_mask(self._spec)
+            logger.debug(
+                "macOS hotkey register requested shortcut=%s key_code=%s modifiers=%s id=%s",
+                self.shortcut,
+                key_code,
+                modifiers,
+                hotkey_id,
+            )
             handle = backend.register(
-                _KEY_CODES[self._spec.key],
-                self._modifier_mask(self._spec),
+                key_code,
+                modifiers,
                 hotkey_id,
                 self._on_native_hotkey,
             )
@@ -273,7 +301,6 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
             return False
         self._native_handle = handle
         self._registered = True
-        self._active_hotkey_id = hotkey_id
         return True
 
     def unregister(self) -> None:
@@ -308,7 +335,6 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
         if not self._registered or self._native_handle is None:
             self._native_handle = None
             self._registered = False
-            self._active_hotkey_id = None
             return True
         try:
             result = self._backend_instance().unregister(self._native_handle)
@@ -319,7 +345,6 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
             return False
         self._native_handle = None
         self._registered = False
-        self._active_hotkey_id = None
         return True
 
     def _backend_instance(self):
@@ -332,9 +357,18 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
         return sum(_MODIFIER_BITS[modifier] for modifier in spec.modifiers)
 
     def _on_native_hotkey(self, hotkey_id: int) -> None:
-        if hotkey_id == self._active_hotkey_id and self._registered:
-            logger.info("macOS global hotkey triggered")
-            self.triggered.emit()
+        if not self._registered:
+            logger.debug("macOS hotkey callback ignored: manager is not registered")
+            return
+        if hotkey_id != HOTKEY_ID:
+            logger.debug(
+                "macOS hotkey callback ignored: id=%s expected_id=%s",
+                hotkey_id,
+                HOTKEY_ID,
+            )
+            return
+        logger.info("macOS global hotkey triggered id=%s", hotkey_id)
+        self.triggered.emit()
 
 
 __all__ = ["MacOSGlobalHotkey"]
