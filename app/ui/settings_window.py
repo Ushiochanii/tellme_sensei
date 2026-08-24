@@ -34,6 +34,7 @@ from app.platform.base import GlobalHotkeyManager
 from app.platform.hotkey import DEFAULT_SHORTCUT, HotkeySpec, HotkeySpecError
 from app.ocr.providers.google_vision import GoogleVisionOCRProvider
 from app.ocr.types import OCRCancelled, OCRError
+from app.platform.ocr import is_local_ocr_supported
 from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
 from app.settings.secret_store import SecretStoreError
 
@@ -142,12 +143,16 @@ class SettingsWindow(QWidget):
         component_manager: LocalOCRComponentManager | None = None,
         local_ocr_session: LocalOCRSession | None = None,
         parent: QWidget | None = None,
+        local_ocr_supported: bool | None = None,
     ) -> None:
         super().__init__(parent)
         self.config_manager = config_manager or ConfigManager()
         self.hotkey_manager = hotkey_manager
         self.component_manager = component_manager or LocalOCRComponentManager()
         self.local_ocr_session = local_ocr_session
+        self._local_ocr_supported = (
+            is_local_ocr_supported() if local_ocr_supported is None else local_ocr_supported
+        )
         self._connection_thread: QThread | None = None
         self._connection_worker: ConnectionTestWorker | None = None
         self._connection_cancel_event: threading.Event | None = None
@@ -197,6 +202,11 @@ class SettingsWindow(QWidget):
         )
         self.ocr_provider_override_label.setWordWrap(True)
         self.ocr_provider_override_label.setVisible(False)
+        self.local_ocr_unsupported_label = QLabel(
+            "Local OCR for macOS is not installed/supported in this build."
+        )
+        self.local_ocr_unsupported_label.setWordWrap(True)
+        self.local_ocr_unsupported_label.setVisible(False)
         form.addRow("DeepSeek API Key", self.api_key_edit)
         form.addRow("Model", self.model_edit)
         form.addRow("Request timeout", self.timeout_edit)
@@ -204,6 +214,7 @@ class SettingsWindow(QWidget):
         form.addRow("OCR Mode", mode_widget)
         root.addLayout(form)
         root.addWidget(self.ocr_provider_override_label)
+        root.addWidget(self.local_ocr_unsupported_label)
 
         self.local_ocr_group = QGroupBox("Local OCR Engine")
         ocr_layout = QVBoxLayout(self.local_ocr_group)
@@ -289,6 +300,25 @@ class SettingsWindow(QWidget):
 
         self._load_current_values()
         self._refresh_local_ocr_state()
+        self._apply_local_ocr_capability()
+
+    def _apply_local_ocr_capability(self) -> None:
+        """Keep the unsupported Local OCR component out of the macOS UX."""
+
+        if self._local_ocr_supported:
+            self.local_ocr_unsupported_label.setVisible(False)
+            return
+        self.local_mode_radio.setChecked(False)
+        self.local_mode_radio.setEnabled(False)
+        self.local_engine_combo.setEnabled(False)
+        self.download_ocr_button.setVisible(False)
+        self.cancel_download_button.setVisible(False)
+        self.verify_ocr_button.setVisible(False)
+        self.remove_ocr_button.setVisible(False)
+        self.local_ocr_size_label.setVisible(False)
+        self.local_ocr_progress.setVisible(False)
+        self.local_ocr_unsupported_label.setVisible(True)
+        self._on_provider_changed()
 
     def _load_current_values(self) -> None:
         try:
@@ -304,7 +334,7 @@ class SettingsWindow(QWidget):
         self.model_edit.setText(config.model)
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
-        is_online = config.ocr_provider == "google_vision"
+        is_online = config.ocr_provider == "google_vision" or not self._local_ocr_supported
         provider_env_override = self.config_manager.has_explicit_ocr_provider()
         self.local_mode_radio.setChecked(not is_online)
         self.online_mode_radio.setChecked(is_online)
@@ -352,6 +382,12 @@ class SettingsWindow(QWidget):
             self._set_status("\n".join(warnings))
 
     def _refresh_local_ocr_state(self) -> None:
+        if not self._local_ocr_supported:
+            self.local_ocr_status_label.setText(
+                "Local OCR for macOS is not installed/supported in this build."
+            )
+            self._apply_local_ocr_capability()
+            return
         if self.component_manager.is_installed():
             self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version}")
             self.download_ocr_button.setVisible(False)
@@ -377,12 +413,12 @@ class SettingsWindow(QWidget):
             self.is_google_test_running() if google_running is None else google_running
         )
         busy = connection_running or download_running or google_running
-        self.download_ocr_button.setEnabled(not busy)
+        self.download_ocr_button.setEnabled(self._local_ocr_supported and not busy)
         self.verify_ocr_button.setEnabled(
-            not busy and self.component_manager.is_installed()
+            self._local_ocr_supported and not busy and self.component_manager.is_installed()
         )
         self.remove_ocr_button.setEnabled(
-            not busy and self.component_manager.is_installed()
+            self._local_ocr_supported and not busy and self.component_manager.is_installed()
         )
         self.test_button.setEnabled(not busy)
         self.google_vision_test_button.setEnabled(not busy)
@@ -394,12 +430,23 @@ class SettingsWindow(QWidget):
         self.cancel_download_button.setVisible(download_running)
         self.cancel_download_button.setEnabled(download_running)
         self.local_ocr_progress.setVisible(download_running)
+        if not self._local_ocr_supported:
+            self.local_mode_radio.setEnabled(False)
+            self.local_engine_combo.setEnabled(False)
+            self.download_ocr_button.setVisible(False)
+            self.cancel_download_button.setVisible(False)
+            self.verify_ocr_button.setVisible(False)
+            self.remove_ocr_button.setVisible(False)
+            self.local_ocr_progress.setVisible(False)
 
     def _set_download_state(self, running: bool) -> None:
         self._refresh_operation_controls(download_running=running)
 
     @Slot()
     def download_local_ocr(self) -> None:
+        if not self._local_ocr_supported:
+            self._set_status("Local OCR for macOS is not installed/supported in this build.")
+            return
         if self._download_thread is not None and self._download_thread.isRunning():
             return
         if (
@@ -480,6 +527,11 @@ class SettingsWindow(QWidget):
 
     @Slot()
     def verify_local_ocr(self) -> None:
+        if not self._local_ocr_supported:
+            self.local_ocr_status_label.setText(
+                "Local OCR for macOS is not installed/supported in this build."
+            )
+            return
         if not self.component_manager.verify_installation():
             self.local_ocr_status_label.setText("Local OCR installation is incomplete.")
             return
@@ -491,6 +543,11 @@ class SettingsWindow(QWidget):
 
     @Slot()
     def remove_local_ocr(self) -> None:
+        if not self._local_ocr_supported:
+            self.local_ocr_status_label.setText(
+                "Local OCR for macOS is not installed/supported in this build."
+            )
+            return
         if not self.component_manager.is_installed():
             self._refresh_local_ocr_state()
             return
