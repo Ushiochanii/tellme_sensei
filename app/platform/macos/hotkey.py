@@ -171,15 +171,31 @@ class _CarbonHotkeyBackend:
             0,
             byref(native_ref),
         )
+        logger.debug(
+            "macOS RegisterEventHotKey shortcut key_code=%s modifiers=%s id=%s status=%s",
+            key_code,
+            modifiers,
+            hotkey_id,
+            status,
+        )
         if status != NO_ERR:
             logger.warning("macOS hotkey registration failed: status=%s", status)
             self._remove_handler()
             return None
+        if not native_ref.value:
+            logger.error("macOS hotkey registration returned no EventHotKeyRef")
+            self._remove_handler()
+            return None
         return native_ref
 
-    def unregister(self, native_ref: c_void_p) -> None:
-        self._carbon.UnregisterEventHotKey(native_ref)
+    def unregister(self, native_ref: c_void_p) -> bool:
+        status = self._carbon.UnregisterEventHotKey(native_ref)
+        logger.debug("macOS UnregisterEventHotKey status=%s", status)
+        if status != NO_ERR:
+            logger.warning("macOS hotkey unregister failed: status=%s", status)
+            return False
         self._remove_handler()
+        return True
 
     def _remove_handler(self) -> None:
         if self._handler_ref.value:
@@ -225,6 +241,8 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
         self._backend = backend
         self._native_handle: c_void_p | object | None = None
         self._registered = False
+        self._active_hotkey_id: int | None = None
+        self._next_hotkey_id = HOTKEY_ID
 
     @property
     def registered(self) -> bool:
@@ -239,30 +257,28 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
             return True
         try:
             backend = self._backend_instance()
+            hotkey_id = self._next_hotkey_id
+            self._next_hotkey_id = (self._next_hotkey_id + 1) & 0xFFFFFFFF
             handle = backend.register(
                 _KEY_CODES[self._spec.key],
                 self._modifier_mask(self._spec),
-                HOTKEY_ID,
+                hotkey_id,
                 self._on_native_hotkey,
             )
         except (OSError, RuntimeError, KeyError) as exc:
             logger.warning("macOS global hotkey registration unavailable: %s", type(exc).__name__)
             return False
-        if handle is None:
+        if handle is None or (isinstance(handle, c_void_p) and not handle.value):
             logger.warning("macOS global hotkey registration failed: %s", self.shortcut)
             return False
         self._native_handle = handle
         self._registered = True
+        self._active_hotkey_id = hotkey_id
         return True
 
     def unregister(self) -> None:
-        if self._registered and self._native_handle is not None:
-            try:
-                self._backend_instance().unregister(self._native_handle)
-            except (OSError, RuntimeError) as exc:
-                logger.warning("macOS global hotkey unregister failed: %s", type(exc).__name__)
-        self._native_handle = None
-        self._registered = False
+        if not self._release_native_registration():
+            logger.warning("macOS global hotkey remains registered after unregister failure")
 
     def rebind(self, shortcut: str) -> bool:
         try:
@@ -276,8 +292,9 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
 
         old_spec = self._spec
         was_registered = self._registered
-        if was_registered:
-            self.unregister()
+        if was_registered and not self._release_native_registration():
+            logger.error("macOS global hotkey rebind could not release the old registration")
+            return False
         self._spec = new_spec
         if self.register():
             return True
@@ -286,6 +303,24 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
         if was_registered and not self.register():
             logger.error("macOS global hotkey rollback failed: %s", old_spec.canonical)
         return False
+
+    def _release_native_registration(self) -> bool:
+        if not self._registered or self._native_handle is None:
+            self._native_handle = None
+            self._registered = False
+            self._active_hotkey_id = None
+            return True
+        try:
+            result = self._backend_instance().unregister(self._native_handle)
+        except (OSError, RuntimeError) as exc:
+            logger.warning("macOS global hotkey unregister failed: %s", type(exc).__name__)
+            return False
+        if result is False:
+            return False
+        self._native_handle = None
+        self._registered = False
+        self._active_hotkey_id = None
+        return True
 
     def _backend_instance(self):
         if self._backend is None:
@@ -297,7 +332,7 @@ class MacOSGlobalHotkey(GlobalHotkeyManager):
         return sum(_MODIFIER_BITS[modifier] for modifier in spec.modifiers)
 
     def _on_native_hotkey(self, hotkey_id: int) -> None:
-        if hotkey_id == HOTKEY_ID and self._registered:
+        if hotkey_id == self._active_hotkey_id and self._registered:
             logger.info("macOS global hotkey triggered")
             self.triggered.emit()
 

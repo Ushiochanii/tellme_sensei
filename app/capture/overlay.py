@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import sys
 
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QImage, QPainter, QPen
 from PySide6.QtWidgets import QWidget
+
+if sys.platform == "darwin":
+    from app.platform.macos.window import configure_macos_overlay_window
+else:
+    configure_macos_overlay_window = None
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +41,9 @@ class CaptureOverlay(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
         )
+        if sys.platform == "darwin":
+            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setMouseTracking(True)
@@ -49,6 +58,16 @@ class CaptureOverlay(QWidget):
     def begin(self) -> None:
         """Show the overlay after the screen image has been captured."""
 
+        if sys.platform == "darwin":
+            # Force the native NSWindow to exist before showing it. The Cocoa
+            # collection behavior is also applied after show as Qt may create
+            # the NSWindow lazily on some Qt/macOS combinations.
+            if configure_macos_overlay_window is not None:
+                configure_macos_overlay_window(self)
+            self.show()
+            if configure_macos_overlay_window is not None:
+                configure_macos_overlay_window(self)
+            return
         self.show()
         self.raise_()
         self.activateWindow()

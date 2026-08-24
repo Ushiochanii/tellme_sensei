@@ -37,8 +37,13 @@ def test_factory_returns_predictable_unsupported_platform(qt_app) -> None:
 
 
 class _FakeMacHotkeyBackend:
-    def __init__(self, results: list[object | None] | None = None) -> None:
+    def __init__(
+        self,
+        results: list[object | None] | None = None,
+        unregister_result: bool = True,
+    ) -> None:
         self.results = list(results or [object()])
+        self.unregister_result = unregister_result
         self.calls: list[tuple[int, int, int]] = []
         self.unregister_calls: list[object] = []
         self.callback = None
@@ -48,8 +53,9 @@ class _FakeMacHotkeyBackend:
         self.callback = callback
         return self.results.pop(0) if self.results else object()
 
-    def unregister(self, handle) -> None:
+    def unregister(self, handle) -> bool:
         self.unregister_calls.append(handle)
+        return self.unregister_result
 
 
 def test_factory_selects_macos_implementation(qt_app) -> None:
@@ -71,7 +77,7 @@ def test_macos_hotkey_register_success_and_trigger(qt_app) -> None:
     assert manager.shortcut == "Ctrl+Shift+Q"
     assert backend.calls[0][0] == 12
     assert backend.calls[0][1] == (1 << 12) | (1 << 9)
-    backend.callback(0x5341)
+    backend.callback(backend.calls[0][2])
     assert triggered == [True]
 
     manager.unregister()
@@ -104,6 +110,45 @@ def test_macos_hotkey_rebind_failure_restores_previous_shortcut(qt_app) -> None:
 
 def test_macos_hotkey_registration_conflict_is_predictable(qt_app) -> None:
     manager = MacOSGlobalHotkey(qt_app, backend=_FakeMacHotkeyBackend([None]))
+
+    assert manager.register() is False
+    assert manager.registered is False
+
+
+def test_macos_hotkey_supported_keys_use_carbon_virtual_key_codes(qt_app) -> None:
+    expected = {
+        "Ctrl+Shift+Q": (12, (1 << 12) | (1 << 9)),
+        "Ctrl+Shift+A": (0, (1 << 12) | (1 << 9)),
+        "Ctrl+Shift+W": (13, (1 << 12) | (1 << 9)),
+        "Ctrl+Alt+A": (0, (1 << 12) | (1 << 11)),
+        "Ctrl+Shift+1": (18, (1 << 12) | (1 << 9)),
+        "Ctrl+Shift+F2": (120, (1 << 12) | (1 << 9)),
+    }
+
+    for shortcut, registration in expected.items():
+        backend = _FakeMacHotkeyBackend()
+        manager = MacOSGlobalHotkey(qt_app, shortcut=shortcut, backend=backend)
+        assert manager.register() is True
+        assert backend.calls[0][:2] == registration
+        manager.unregister()
+
+
+def test_macos_hotkey_rebind_keeps_old_registration_when_unregistration_fails(qt_app) -> None:
+    backend = _FakeMacHotkeyBackend(unregister_result=False)
+    manager = MacOSGlobalHotkey(qt_app, backend=backend)
+
+    assert manager.register() is True
+    assert manager.rebind("Ctrl+Alt+A") is False
+    assert manager.shortcut == "Ctrl+Shift+Q"
+    assert manager.registered is True
+    assert len(backend.calls) == 1
+    manager.unregister()
+
+
+def test_macos_hotkey_rejects_empty_native_registration_handle(qt_app) -> None:
+    from ctypes import c_void_p
+
+    manager = MacOSGlobalHotkey(qt_app, backend=_FakeMacHotkeyBackend([c_void_p()]))
 
     assert manager.register() is False
     assert manager.registered is False
