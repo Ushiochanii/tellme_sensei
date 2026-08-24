@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from app.local_ocr.platform import current_spec
-from app.local_ocr.version import LOCAL_OCR_VERSION
+from app.local_ocr.version import current_local_ocr_version
 from app.runtime_paths import user_runtime_directory
 
 def worker_script_path() -> Path:
@@ -23,7 +23,7 @@ def worker_executable_candidates() -> tuple[Path, ...]:
         user_runtime_directory()
         / "components"
         / "local-ocr"
-        / LOCAL_OCR_VERSION
+        / current_local_ocr_version()
         / executable_name
     )
     repo_root = worker_script_path().parent

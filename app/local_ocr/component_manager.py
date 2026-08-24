@@ -15,7 +15,7 @@ from typing import Callable
 
 from app.local_ocr.manifest import ComponentManifest, ManifestError
 from app.local_ocr.platform import LocalOCRPlatformSpec, current_spec, spec_for_manifest
-from app.local_ocr.version import LOCAL_OCR_VERSION
+from app.local_ocr.version import current_local_ocr_version
 from app.runtime_paths import user_runtime_directory
 
 
@@ -36,11 +36,11 @@ class LocalOCRComponentManager:
     def __init__(
         self,
         runtime_root: Path | str | None = None,
-        version: str = LOCAL_OCR_VERSION,
+        version: str | None = None,
         platform_spec: LocalOCRPlatformSpec | None = None,
     ) -> None:
         self.runtime_root = Path(runtime_root) if runtime_root is not None else user_runtime_directory()
-        self.version = version
+        self.version = version or current_local_ocr_version()
         self._platform_spec_explicit = platform_spec is not None
         self.platform_spec = platform_spec or current_spec()
 

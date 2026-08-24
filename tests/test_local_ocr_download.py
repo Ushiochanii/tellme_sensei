@@ -10,7 +10,7 @@ from pathlib import Path
 from app.local_ocr.component_manager import LocalOCRComponentManager
 from app.local_ocr.download import LocalOCRDownloadWorker
 from app.local_ocr.manifest import current_arch, current_platform
-from app.local_ocr.version import LOCAL_OCR_VERSION
+from app.local_ocr.version import current_local_ocr_version
 from app.local_ocr.platform import current_spec
 
 
@@ -55,7 +55,7 @@ def _manifest(archive: bytes) -> bytes:
     return json.dumps(
         {
             "component": "local-ocr",
-            "version": LOCAL_OCR_VERSION,
+            "version": current_local_ocr_version(),
             "platform": current_platform(),
             "arch": current_arch(),
             "url": "https://example.test/local.zip",

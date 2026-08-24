@@ -16,7 +16,7 @@ from app.ocr.profiling import read_profile
 from app.ocr.types import OCRCancelled, OCRError, OCRLine, OCRResult
 from app.ocr.worker_protocol import error_payload, parse_result, result_payload
 from app.local_ocr import worker_main
-from app.local_ocr.version import LOCAL_OCR_VERSION
+from app.local_ocr.version import current_local_ocr_version
 from app.local_ocr.platform import current_spec
 
 
@@ -467,7 +467,7 @@ def test_local_component_versioned_user_path_is_first(
     candidates = local_runtime.worker_executable_candidates()
 
     assert candidates[0] == (
-        runtime / "components" / "local-ocr" / LOCAL_OCR_VERSION / current_spec().executable_name
+        runtime / "components" / "local-ocr" / current_local_ocr_version() / current_spec().executable_name
     )
 
 

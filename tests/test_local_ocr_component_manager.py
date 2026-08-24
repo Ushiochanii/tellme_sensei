@@ -11,7 +11,7 @@ import pytest
 
 from app.local_ocr.component_manager import ComponentError, LocalOCRComponentManager
 from app.local_ocr.manifest import ComponentManifest, ManifestError
-from app.local_ocr.version import LOCAL_OCR_VERSION
+from app.local_ocr.version import LOCAL_OCR_VERSION, MACOS_LOCAL_OCR_VERSION
 from app.local_ocr.platform import spec_for_manifest
 
 
@@ -20,7 +20,7 @@ def _manifest_for(archive: Path, *, platform: str = "windows", arch: str = "x86_
     return ComponentManifest.from_dict(
         {
             "component": "local-ocr",
-            "version": LOCAL_OCR_VERSION,
+            "version": LOCAL_OCR_VERSION if platform == "windows" else MACOS_LOCAL_OCR_VERSION,
             "platform": platform,
             "arch": arch,
             "url": "https://example.test/local-ocr.zip",
@@ -90,7 +90,8 @@ def test_install_archive_success_and_remove(tmp_path: Path, monkeypatch: pytest.
     archive = _archive(tmp_path / "local.zip")
     manifest = _manifest_for(archive)
     manager = LocalOCRComponentManager(
-        tmp_path / "runtime", platform_spec=spec_for_manifest("windows", "x86_64")
+        tmp_path / "runtime", version=LOCAL_OCR_VERSION,
+        platform_spec=spec_for_manifest("windows", "x86_64")
     )
     monkeypatch.setattr(
         "app.local_ocr.component_manager.subprocess.run",
@@ -124,7 +125,8 @@ def test_checksum_mismatch_deletes_archive(tmp_path: Path) -> None:
     )
     with pytest.raises(ComponentError, match="checksum"):
         LocalOCRComponentManager(
-            tmp_path / "runtime", platform_spec=spec_for_manifest("windows", "x86_64")
+            tmp_path / "runtime", version=LOCAL_OCR_VERSION,
+            platform_spec=spec_for_manifest("windows", "x86_64")
         ).install_archive(archive, manifest)
     assert not archive.exists()
 
@@ -133,7 +135,8 @@ def test_zip_slip_is_rejected(tmp_path: Path) -> None:
     archive = _archive(tmp_path / "unsafe.zip", unsafe="../outside.exe")
     manifest = _manifest_for(archive)
     manager = LocalOCRComponentManager(
-        tmp_path / "runtime", platform_spec=spec_for_manifest("windows", "x86_64")
+        tmp_path / "runtime", version=LOCAL_OCR_VERSION,
+        platform_spec=spec_for_manifest("windows", "x86_64")
     )
     with pytest.raises(ComponentError, match="unsafe"):
         manager.install_archive(archive, manifest)
@@ -142,7 +145,8 @@ def test_zip_slip_is_rejected(tmp_path: Path) -> None:
 
 def test_failed_smoke_preserves_existing_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     manager = LocalOCRComponentManager(
-        tmp_path / "runtime", platform_spec=spec_for_manifest("windows", "x86_64")
+        tmp_path / "runtime", version=LOCAL_OCR_VERSION,
+        platform_spec=spec_for_manifest("windows", "x86_64")
     )
     old = manager.installed_path()
     old.mkdir(parents=True)
@@ -167,7 +171,8 @@ def test_install_cancellation_does_not_activate(tmp_path: Path) -> None:
     event.set()
     with pytest.raises(Exception):
         LocalOCRComponentManager(
-            tmp_path / "runtime", platform_spec=spec_for_manifest("windows", "x86_64")
+            tmp_path / "runtime", version=LOCAL_OCR_VERSION,
+            platform_spec=spec_for_manifest("windows", "x86_64")
         ).install_archive(archive, manifest, cancel_event=event)
     assert not (tmp_path / "runtime" / "components").exists()
 

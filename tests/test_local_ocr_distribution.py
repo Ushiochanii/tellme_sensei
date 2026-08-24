@@ -5,18 +5,42 @@ from app.local_ocr.manifest import (
     DEFAULT_MANIFEST_URL,
     DISTRIBUTION_RELEASE_TAG,
     DISTRIBUTION_REPOSITORY,
+    production_manifest_url,
     resolve_manifest_url,
 )
-from app.local_ocr.version import LOCAL_OCR_VERSION
+from app.local_ocr.platform import spec_for_manifest
+from app.local_ocr.version import (
+    LOCAL_OCR_VERSION,
+    MACOS_LOCAL_OCR_RELEASE_TAG,
+    MACOS_LOCAL_OCR_VERSION,
+    current_local_ocr_version,
+)
 from app.version import __version__
 from app.local_ocr.component_manager import LocalOCRComponentManager
 
 
 def test_local_ocr_version_and_production_manifest_url() -> None:
     assert LOCAL_OCR_VERSION == "1.1.0"
+    assert MACOS_LOCAL_OCR_VERSION == "1.2.0"
+    assert MACOS_LOCAL_OCR_RELEASE_TAG == "local-ocr-v1.2.0-macos-x64"
     assert DISTRIBUTION_REPOSITORY == "Ushiochanii/tellme-sensei-releases"
-    assert DISTRIBUTION_RELEASE_TAG == "local-ocr-v1.1.0"
+    assert DISTRIBUTION_RELEASE_TAG == "local-ocr-v1.2.0-macos-x64"
     assert DEFAULT_MANIFEST_URL == (
+        "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
+        "local-ocr-v1.2.0-macos-x64/local-ocr-manifest.json"
+    )
+
+
+def test_platform_production_manifest_routes_are_pinned() -> None:
+    assert production_manifest_url(spec_for_manifest("windows", "x86_64")) == (
+        "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
+        "local-ocr-v1.1.0/local-ocr-manifest.json"
+    )
+    assert production_manifest_url(spec_for_manifest("macos", "x86_64")) == (
+        "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
+        "local-ocr-v1.2.0-macos-x64/local-ocr-manifest.json"
+    )
+    assert production_manifest_url(spec_for_manifest("macos", "arm64")) == (
         "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
         "local-ocr-v1.1.0/local-ocr-manifest.json"
     )
@@ -48,5 +72,5 @@ def test_old_local_ocr_component_directory_does_not_satisfy_new_version(tmp_path
     (old / "_internal").mkdir(parents=True)
     (old / "TellMeSenseiOCR.exe").write_bytes(b"old")
 
-    assert manager.installed_path().name == "1.1.0"
+    assert manager.installed_path().name == current_local_ocr_version()
     assert manager.is_installed() is False

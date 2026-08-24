@@ -21,7 +21,7 @@ if [[ -z "$python_path" || ! -x "$python_path" ]]; then
 fi
 
 mkdir -p "$output_path"
-version="$($python_path -c 'from app.local_ocr.version import LOCAL_OCR_VERSION; print(LOCAL_OCR_VERSION)')"
+version="$($python_path -c 'from app.local_ocr.version import current_local_ocr_version; print(current_local_ocr_version())')"
 archive="$output_path/TellMeSensei-LocalOCR-${version}-macos-x64-dev.zip"
 manifest="$output_path/local-ocr-manifest-macos-x64-dev.json"
 rm -f "$archive" "$manifest"

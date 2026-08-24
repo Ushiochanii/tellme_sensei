@@ -11,15 +11,25 @@ from urllib.parse import urlparse
 
 from dotenv import dotenv_values
 from app.local_ocr.platform import current_spec
-from app.local_ocr.version import LOCAL_OCR_VERSION
+from app.local_ocr.version import local_ocr_release_tag_for_spec
 
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 DISTRIBUTION_REPOSITORY = "Ushiochanii/tellme-sensei-releases"
-DISTRIBUTION_RELEASE_TAG = f"local-ocr-v{LOCAL_OCR_VERSION}"
+DISTRIBUTION_RELEASE_TAG = local_ocr_release_tag_for_spec()
 DEFAULT_MANIFEST_URL = (
     f"https://github.com/{DISTRIBUTION_REPOSITORY}/releases/download/"
     f"{DISTRIBUTION_RELEASE_TAG}/local-ocr-manifest.json"
 )
+
+
+def production_manifest_url(platform_spec: object | None = None) -> str:
+    """Return the pinned production manifest URL for a normalized platform spec."""
+
+    release_tag = local_ocr_release_tag_for_spec(platform_spec)
+    return (
+        f"https://github.com/{DISTRIBUTION_REPOSITORY}/releases/download/"
+        f"{release_tag}/local-ocr-manifest.json"
+    )
 
 
 class ManifestError(ValueError):
