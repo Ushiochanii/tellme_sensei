@@ -17,6 +17,7 @@ dist_path="$repo_root/dist/macos"
 work_path="$repo_root/build/macos"
 app_path="$dist_path/TellMeSensei.app"
 identity="${TELLME_MACOS_CODESIGN_IDENTITY:-}"
+expected_version="$("$python_path" -c 'from app.version import __version__; print(__version__)')"
 
 if [[ ! -f "$spec_path" ]]; then
     echo "PyInstaller spec was not found: $spec_path" >&2
@@ -62,7 +63,7 @@ ls_ui_element="$(plutil -extract LSUIElement raw -o - "$plist_path")"
 bundle_identifier="$(plutil -extract CFBundleIdentifier raw -o - "$plist_path")"
 bundle_version="$(plutil -extract CFBundleVersion raw -o - "$plist_path")"
 if [[ "$ls_ui_element" != "1" && "$ls_ui_element" != "true" ]] || \
-    [[ "$bundle_identifier" != "com.tellmesensei.app" || "$bundle_version" != "0.5.0" ]]; then
+    [[ "$bundle_identifier" != "com.tellmesensei.app" || "$bundle_version" != "$expected_version" ]]; then
     echo "Unexpected macOS bundle metadata in $plist_path" >&2
     plutil -p "$plist_path" >&2
     exit 1

@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_packaging_uses_single_release_version_source() -> None:
-    assert __version__ == "0.5.0"
+    assert __version__ == "0.6.0"
     assert LOCAL_OCR_VERSION == "1.1.0"
     spec = (ROOT / "packaging" / "tellme_sensei.spec").read_text(encoding="utf-8")
     assert "from app.version import __version__" in spec
@@ -42,8 +42,8 @@ def test_rc_versions_are_independent_and_installer_fallback_is_current() -> None
     iss = (ROOT / "packaging" / "windows" / "tellme_sensei.iss").read_text(encoding="utf-8")
     build_script = (ROOT / "scripts" / "build_installer.ps1").read_text(encoding="utf-8")
 
-    assert 'VersionLabel "0.5.0"' in iss
-    assert 'AppVersion "0.5.0"' in iss
+    assert 'VersionLabel "0.6.0"' in iss
+    assert 'AppVersion "0.6.0"' in iss
     assert 'from app.version import __version__' in build_script
 
 
