@@ -57,8 +57,7 @@ def test_stale_endpoint_is_recovered(qt_app) -> None:
 
 
 def test_core_diagnostic_bypasses_single_instance_guard(monkeypatch) -> None:
-    def guard_must_not_be_created(*_args, **_kwargs):
-        raise AssertionError("diagnostic CLI must bypass the single-instance guard")
-
-    monkeypatch.setattr(gui, "SingleInstanceGuard", guard_must_not_be_created)
+    called = []
+    monkeypatch.setattr(gui, "_smoke_core", lambda: called.append("smoke") or 0)
     assert gui.main(["--smoke-core"]) == 0
+    assert called == ["smoke"]

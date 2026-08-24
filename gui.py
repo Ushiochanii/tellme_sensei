@@ -3,24 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import logging
 import sys
-import traceback
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
-
-from app.config import ConfigError, ConfigManager
-from app.logging_config import configure_logging
-from app.platform.factory import create_global_hotkey_manager
-from app.platform.hotkey import DEFAULT_SHORTCUT
-from app.runtime_paths import APPLICATION_DIRECTORY
-from app.single_instance import SingleInstanceGuard
-from app.ui.application_controller import ApplicationController
-from app.ui.main_window import MainWindow
-from app.ui.tray import SystemTrayController
-from app.version import __version__
+from app.core_smoke import run_core_smoke
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +33,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.smoke_core:
         return _smoke_core()
+
+    from PySide6.QtWidgets import QApplication
+
+    from app.config import ConfigError, ConfigManager
+    from app.logging_config import configure_logging
+    from app.platform.factory import create_global_hotkey_manager
+    from app.platform.hotkey import DEFAULT_SHORTCUT
+    from app.runtime_paths import APPLICATION_DIRECTORY
+    from app.single_instance import SingleInstanceGuard
+    from app.ui.application_controller import ApplicationController
+    from app.ui.main_window import MainWindow
+    from app.ui.tray import SystemTrayController
+    from app.version import __version__
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APPLICATION_DIRECTORY)
@@ -83,37 +83,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _smoke_core() -> int:
-    """Validate the frozen Core import graph without starting the GUI loop."""
+    """Run the packaged Core integrity check without starting the GUI."""
 
-    try:
-        app = QApplication.instance() or QApplication([])
-        app.setApplicationName(APPLICATION_DIRECTORY)
-        app.setOrganizationName(APPLICATION_DIRECTORY)
-        from app.config import ConfigManager
-        from app.ocr.factory import create_ocr_provider
-        from app.ocr.providers.google_vision import GoogleVisionOCRProvider
-        from app.platform.factory import create_global_hotkey_manager
-        from app.platform.hotkey import DEFAULT_SHORTCUT
-        from app.services.deepseek_service import DeepSeekService
-
-        config = ConfigManager().load(require_api_key=False)
-        create_ocr_provider(config)
-        GoogleVisionOCRProvider(api_key="diagnostic-key")
-        DeepSeekService(config)
-        create_global_hotkey_manager(parent=app, shortcut=DEFAULT_SHORTCUT)
-
-        if getattr(sys, "frozen", False):
-            for module_name in ("paddle", "paddleocr"):
-                try:
-                    importlib.import_module(module_name)
-                except ModuleNotFoundError:
-                    continue
-                raise RuntimeError(f"forbidden Core dependency was bundled: {module_name}")
-        return 0
-    except Exception:
-        if sys.stderr is not None:
-            traceback.print_exc()
-        return 1
+    return run_core_smoke()
 
 
 if __name__ == "__main__":

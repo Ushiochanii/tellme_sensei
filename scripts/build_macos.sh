@@ -74,7 +74,43 @@ if [[ -n "$forbidden_path" ]]; then
     exit 1
 fi
 
-"$app_path/Contents/MacOS/TellMeSensei" --smoke-core
+echo "Running packaged Core smoke (non-GUI integrity check; timeout=30s)..."
+set +e
+"$python_path" - "$app_path/Contents/MacOS/TellMeSensei" <<'PY'
+import subprocess
+import sys
+
+executable = sys.argv[1]
+try:
+    result = subprocess.run(
+        [executable, "--smoke-core"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+except subprocess.TimeoutExpired:
+    print("CORE_SMOKE_TIMEOUT: packaged Core smoke exceeded 30 seconds", file=sys.stderr)
+    raise SystemExit(124)
+
+if result.stdout:
+    print(result.stdout, end="")
+if result.stderr:
+    print(result.stderr, end="", file=sys.stderr)
+if result.returncode != 0:
+    if result.returncode < 0:
+        detail = f"signal {-result.returncode}"
+    else:
+        detail = f"exit code {result.returncode}"
+    print(f"CORE_SMOKE_FAILED: packaged Core smoke exited with {detail}", file=sys.stderr)
+    raise SystemExit(result.returncode if result.returncode > 0 else 1)
+PY
+smoke_status=$?
+set -e
+if [[ "$smoke_status" -ne 0 ]]; then
+    echo "macOS Core smoke failed; refusing to mark the build successful." >&2
+    exit "$smoke_status"
+fi
 "$codesign_path" --verify --deep --strict --verbose=2 "$app_path"
 
 signature_details="$("$codesign_path" -dv --verbose=4 "$app_path" 2>&1)"
