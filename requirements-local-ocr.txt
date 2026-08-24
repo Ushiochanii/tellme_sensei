@@ -1,6 +1,6 @@
 # Dependencies used only by the external TellMeSenseiOCR component.
 Pillow>=10.0.0,<12.0.0
-numpy>=1.26.0,<3.0.0
+numpy>=1.26.0,<2.0.0
 setuptools>=65.0.0
 paddlepaddle>=2.6.2,<3.0.0
 paddleocr>=2.7.3,<3.0.0
