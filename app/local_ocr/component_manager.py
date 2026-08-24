@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable
 
 from app.local_ocr.manifest import ComponentManifest, ManifestError
+from app.local_ocr.platform import LocalOCRPlatformSpec, current_spec, spec_for_manifest
 from app.local_ocr.version import LOCAL_OCR_VERSION
 from app.runtime_paths import user_runtime_directory
 
@@ -32,9 +33,16 @@ ProgressCallback = Callable[[int], None]
 class LocalOCRComponentManager:
     """Manage one versioned, user-writable Local OCR installation."""
 
-    def __init__(self, runtime_root: Path | str | None = None, version: str = LOCAL_OCR_VERSION) -> None:
+    def __init__(
+        self,
+        runtime_root: Path | str | None = None,
+        version: str = LOCAL_OCR_VERSION,
+        platform_spec: LocalOCRPlatformSpec | None = None,
+    ) -> None:
         self.runtime_root = Path(runtime_root) if runtime_root is not None else user_runtime_directory()
         self.version = version
+        self._platform_spec_explicit = platform_spec is not None
+        self.platform_spec = platform_spec or current_spec()
 
     @property
     def components_root(self) -> Path:
@@ -44,7 +52,7 @@ class LocalOCRComponentManager:
         return self.components_root / self.version
 
     def installed_executable(self) -> Path:
-        return self.installed_path() / "TellMeSenseiOCR.exe"
+        return self.installed_path() / self.platform_spec.executable_name
 
     def is_installed(self) -> bool:
         return self.verify_installation()
@@ -54,16 +62,28 @@ class LocalOCRComponentManager:
 
     def verify_installation(self, path: Path | None = None) -> bool:
         root = path or self.installed_path()
-        return (root / "TellMeSenseiOCR.exe").is_file() and (root / "_internal").is_dir()
-
-    def smoke_test(self, path: Path | None = None, timeout: float = 30.0) -> bool:
-        root = path or self.installed_path()
-        executable = root / "TellMeSenseiOCR.exe"
-        if not executable.is_file():
+        executable = root / self.platform_spec.executable_name
+        if not executable.is_file() or not (root / "_internal").is_dir():
             return False
+        if self.platform_spec.platform_id.startswith("macos"):
+            if not os.access(executable, os.X_OK):
+                return False
+            return self._models_are_complete(root / "models")
+        return True
+
+    def smoke_test(self, path: Path | None = None, timeout: float | None = None) -> bool:
+        root = path or self.installed_path()
+        executable = root / self.platform_spec.executable_name
+        if not self.verify_installation(root):
+            return False
+        if timeout is None:
+            timeout = 120.0 if self.platform_spec.platform_id.startswith("macos") else 30.0
+        command = [str(executable), "--smoke"]
+        if self.platform_spec.platform_id.startswith("macos"):
+            command.extend(["--model-root", str(root / "models")])
         try:
             completed = subprocess.run(
-                [str(executable), "--smoke"],
+                command,
                 cwd=str(root),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
@@ -86,6 +106,14 @@ class LocalOCRComponentManager:
     ) -> Path:
         if manifest.version != self.version:
             raise ComponentError("Local OCR component version is not supported by this application.")
+        manifest_spec = spec_for_manifest(manifest.platform, manifest.arch)
+        if manifest_spec is None:
+            raise ComponentError("Local OCR component platform or architecture is unsupported.")
+        if not self._platform_spec_explicit and manifest_spec.platform_id != current_spec().platform_id:
+            raise ComponentError("Local OCR component platform or architecture is unsupported on this host.")
+        # ComponentManifest has already performed host validation. Selecting
+        # from its normalized values keeps explicit fixture managers stable.
+        self.platform_spec = manifest_spec
         archive = Path(archive_path)
         if not archive.is_file():
             raise ComponentError("Local OCR download file is missing.")
@@ -102,6 +130,7 @@ class LocalOCRComponentManager:
             self.components_root.mkdir(parents=True, exist_ok=True)
             staging = Path(tempfile.mkdtemp(prefix=f".{self.version}-staging-", dir=self.components_root))
             self._safe_extract(archive, staging, cancel_event)
+            self._ensure_expected_executable(staging)
             if not self.verify_installation(staging):
                 raise ComponentError("Local OCR package layout is invalid.")
             if progress:
@@ -170,8 +199,35 @@ class LocalOCRComponentManager:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with bundle.open(member) as source, target.open("wb") as output:
                         shutil.copyfileobj(source, output, length=1024 * 1024)
+                    # Preserve only executable bits recorded by the archive.
+                    # PyInstaller macOS onedir components need these bits on
+                    # the worker and bundled Mach-O dylibs after extraction.
+                    mode = (member.external_attr >> 16) & 0o777
+                    if mode & 0o111:
+                        target.chmod(target.stat().st_mode | (mode & 0o111))
         except zipfile.BadZipFile as exc:
             raise ComponentError("Local OCR download is not a valid ZIP archive.") from exc
+
+    def _ensure_expected_executable(self, root: Path) -> None:
+        executable = root / self.platform_spec.executable_name
+        if not executable.is_file():
+            return
+        if self.platform_spec.platform_id.startswith("macos"):
+            executable.chmod(executable.stat().st_mode | 0o111)
+
+    @staticmethod
+    def _models_are_complete(model_root: Path) -> bool:
+        if not model_root.is_dir():
+            return False
+        for kind in ("det", "rec"):
+            directory = model_root / kind
+            if not directory.is_dir():
+                return False
+            if not any(directory.rglob("inference.pdmodel")):
+                return False
+            if not any(directory.rglob("inference.pdiparams")):
+                return False
+        return True
 
     def _atomic_activate(self, staging: Path) -> Path:
         target = self.installed_path()

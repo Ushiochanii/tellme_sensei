@@ -11,6 +11,7 @@ from app.local_ocr.component_manager import LocalOCRComponentManager
 from app.local_ocr.download import LocalOCRDownloadWorker
 from app.local_ocr.manifest import current_arch, current_platform
 from app.local_ocr.version import LOCAL_OCR_VERSION
+from app.local_ocr.platform import current_spec
 
 
 class _Response:
@@ -41,8 +42,12 @@ class _Response:
 def _zip_bytes() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as bundle:
-        bundle.writestr("TellMeSenseiOCR.exe", b"worker")
+        bundle.writestr(current_spec().executable_name, b"worker")
         bundle.writestr("_internal/runtime.dll", b"runtime")
+        if current_spec().platform_id.startswith("macos"):
+            for kind in ("det", "rec"):
+                bundle.writestr(f"models/{kind}/inference.pdmodel", b"model")
+                bundle.writestr(f"models/{kind}/inference.pdiparams", b"params")
     return buffer.getvalue()
 
 

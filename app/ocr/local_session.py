@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from app.ocr.local_runtime import worker_executable_candidates, worker_script_path
+from app.ocr.local_runtime import component_model_root, worker_executable_candidates, worker_script_path
 from app.ocr.persistent_protocol import (
     PersistentProtocolError,
     read_persistent_response,
@@ -38,6 +38,7 @@ class LocalOCRSession:
         timeout: float = 60.0,
         startup_timeout: float | None = None,
         process_factory: ProcessFactory | None = None,
+        model_root: str | Path | None = None,
     ) -> None:
         if timeout <= 0:
             raise ValueError("timeout must be positive")
@@ -46,6 +47,7 @@ class LocalOCRSession:
         self.timeout = timeout
         self.startup_timeout = startup_timeout or timeout
         self._process_factory = process_factory or subprocess.Popen
+        self.model_root = Path(model_root) if model_root is not None else None
         self._request_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._process: Any | None = None
@@ -296,32 +298,35 @@ class LocalOCRSession:
             if not self.executable.is_file():
                 raise OCRError(f"找不到本地 OCR 组件：{self.executable}")
             executable = str(self.executable.resolve())
-            return [executable, "--serve", "--ready-file", self._ready_placeholder(), "--language", self.language]
+            return self._serve_arguments(executable, component_model_root(self.executable))
 
         for candidate in worker_executable_candidates():
             if candidate.is_file():
-                return [
-                    str(candidate.resolve()),
-                    "--serve",
-                    "--ready-file",
-                    self._ready_placeholder(),
-                    "--language",
-                    self.language,
-                ]
+                return self._serve_arguments(str(candidate.resolve()), component_model_root(candidate))
         if getattr(sys, "frozen", False):
             raise OCRError("找不到本地 OCR 组件，请先安装 Local OCR。")
         script = worker_script_path()
         if not script.is_file():
             raise OCRError("找不到本地 OCR worker。")
-        return [
-            sys.executable,
-            str(script.resolve()),
-            "--serve",
-            "--ready-file",
-            self._ready_placeholder(),
-            "--language",
-            self.language,
-        ]
+        return self._serve_arguments(sys.executable, None, script=script)
+
+    def _serve_arguments(
+        self,
+        executable: str,
+        installed_model_root: Path | None,
+        *,
+        script: Path | None = None,
+    ) -> list[str]:
+        command = [executable]
+        if script is not None:
+            command.append(str(script.resolve()))
+        command.extend(
+            ["--serve", "--ready-file", self._ready_placeholder(), "--language", self.language]
+        )
+        model_root = self.model_root or installed_model_root
+        if model_root is not None:
+            command.extend(["--model-root", str(model_root.resolve())])
+        return command
 
     def _ready_placeholder(self) -> str:
         with self._state_lock:

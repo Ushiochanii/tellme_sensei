@@ -19,9 +19,17 @@ logger = logging.getLogger(__name__)
 class PaddleOCRProvider:
     """Lazy PaddleOCR wrapper supporting PaddleOCR 2.x and 3.x result shapes."""
 
-    def __init__(self, language: str = "japan", engine: Any | None = None) -> None:
+    def __init__(
+        self,
+        language: str = "japan",
+        engine: Any | None = None,
+        det_model_dir: str | Path | None = None,
+        rec_model_dir: str | Path | None = None,
+    ) -> None:
         self.language = language
         self._engine = engine
+        self.det_model_dir = Path(det_model_dir) if det_model_dir is not None else None
+        self.rec_model_dir = Path(rec_model_dir) if rec_model_dir is not None else None
 
     def recognize(self, image: str | Path | Any) -> OCRResult:
         """Recognize text from an image path or an image object."""
@@ -121,15 +129,30 @@ class PaddleOCRProvider:
 
         try:
             # PaddleOCR 3.x uses these options; they also avoid unnecessary document analysis.
-            self._engine = PaddleOCR(
-                lang=self.language,
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                use_textline_orientation=False,
-            )
+            options: dict[str, Any] = {
+                "lang": self.language,
+                "use_doc_orientation_classify": False,
+                "use_doc_unwarping": False,
+                "use_textline_orientation": False,
+            }
+            if self.det_model_dir is not None:
+                options["det_model_dir"] = str(self.det_model_dir)
+            if self.rec_model_dir is not None:
+                options["rec_model_dir"] = str(self.rec_model_dir)
+            self._engine = PaddleOCR(**options)
         except TypeError:
             # PaddleOCR 2.x compatibility.
-            self._engine = PaddleOCR(use_angle_cls=False, lang=self.language)
+            options = {"use_angle_cls": False, "lang": self.language}
+            if self.det_model_dir is not None:
+                options["det_model_dir"] = str(self.det_model_dir)
+            if self.rec_model_dir is not None:
+                options["rec_model_dir"] = str(self.rec_model_dir)
+                # PaddleOCR 2.7.3 downloads the default classifier even when
+                # use_angle_cls=False. Reusing the validated det directory
+                # prevents an unused network fallback without bundling cls.
+                if self.det_model_dir is not None:
+                    options["cls_model_dir"] = str(self.det_model_dir)
+            self._engine = PaddleOCR(**options)
         return self._engine
 
     @staticmethod

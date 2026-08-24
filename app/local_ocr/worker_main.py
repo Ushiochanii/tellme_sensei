@@ -33,13 +33,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile-runs", type=int, default=1)
     parser.add_argument("--serve", action="store_true", help="run as a persistent OCR sidecar")
     parser.add_argument("--ready-file", type=Path)
+    parser.add_argument("--model-root", type=Path, help="component-owned PaddleOCR model root")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.smoke:
-        return _smoke_import()
+        try:
+            model_dirs = _resolve_model_dirs(args.model_root)
+            return _smoke_import(model_dirs)
+        except OCRError as exc:
+            _log_error("Local OCR model validation failed: %s", exc)
+            return 1
     if args.serve:
         if args.ready_file is None:
             _log_error("--ready-file is required with --serve")
@@ -55,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not args.input.is_file():
             raise OCRError("输入图片不存在。")
-        provider = PaddleOCRProvider(language=args.language)
+        provider = _provider(args)
         if args.profile_output is None:
             result = provider.recognize(args.input)
             write_payload(args.output, result_payload(result))
@@ -103,8 +109,8 @@ def _run_profile(
 
 
 def _serve(args: argparse.Namespace) -> int:
-    provider = PaddleOCRProvider(language=args.language)
     try:
+        provider = _provider(args)
         provider.initialize()
         from app.ocr.worker_protocol import write_payload_atomic
 
@@ -112,7 +118,16 @@ def _serve(args: argparse.Namespace) -> int:
             args.ready_file,
             {"schema_version": 1, "ok": True, "mode": "persistent"},
         )
-    except Exception:
+    except Exception as exc:
+        try:
+            from app.ocr.worker_protocol import write_payload_atomic
+
+            write_payload_atomic(
+                args.ready_file,
+                {"schema_version": 1, "ok": False, "error": str(exc) or "Local OCR startup failed."},
+            )
+        except OSError:
+            pass
         _log_exception("persistent Local OCR worker initialization failed")
         return 1
 
@@ -154,9 +169,44 @@ def _serve(args: argparse.Namespace) -> int:
     return 0
 
 
-def _smoke_import() -> int:
+def _provider(args: argparse.Namespace) -> PaddleOCRProvider:
+    model_dirs = _resolve_model_dirs(args.model_root)
+    if model_dirs is None:
+        return PaddleOCRProvider(language=args.language)
+    return PaddleOCRProvider(
+        language=args.language,
+        det_model_dir=model_dirs[0],
+        rec_model_dir=model_dirs[1],
+    )
+
+
+def _resolve_model_dirs(model_root: Path | None) -> tuple[Path, Path] | None:
+    if model_root is None:
+        return None
+    if not model_root.is_dir():
+        raise OCRError(f"Local OCR model root does not exist: {model_root}")
+    resolved: list[Path] = []
+    for kind in ("det", "rec"):
+        candidates = sorted(
+            path.parent
+            for path in (model_root / kind).rglob("inference.pdmodel")
+            if (path.parent / "inference.pdiparams").is_file()
+        ) if (model_root / kind).is_dir() else []
+        if not candidates:
+            raise OCRError(f"Local OCR {kind} model files are missing.")
+        resolved.append(candidates[0])
+    return resolved[0], resolved[1]
+
+
+def _smoke_import(model_dirs: tuple[Path, Path] | None = None) -> int:
     try:
-        from paddleocr import PaddleOCR  # noqa: F401
+        if model_dirs is None:
+            from paddleocr import PaddleOCR  # noqa: F401
+        else:
+            PaddleOCRProvider(
+                det_model_dir=model_dirs[0],
+                rec_model_dir=model_dirs[1],
+            ).initialize()
     except Exception:
         _log_exception("PaddleOCR import smoke failed")
         return 1

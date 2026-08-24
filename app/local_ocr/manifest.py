@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import dotenv_values
+from app.local_ocr.platform import current_spec
 from app.local_ocr.version import LOCAL_OCR_VERSION
 
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -28,16 +27,11 @@ class ManifestError(ValueError):
 
 
 def current_platform() -> str:
-    return "windows" if sys.platform == "win32" else sys.platform
+    return current_spec().manifest_platform
 
 
 def current_arch() -> str:
-    value = platform.machine().lower()
-    if value in {"amd64", "x86_64", "x64"}:
-        return "x86_64"
-    if value in {"arm64", "aarch64"}:
-        return "arm64"
-    return value
+    return current_spec().manifest_arch
 
 
 @dataclass(frozen=True)

@@ -17,6 +17,7 @@ from app.ocr.types import OCRCancelled, OCRError, OCRLine, OCRResult
 from app.ocr.worker_protocol import error_payload, parse_result, result_payload
 from app.local_ocr import worker_main
 from app.local_ocr.version import LOCAL_OCR_VERSION
+from app.local_ocr.platform import current_spec
 
 
 def test_worker_success_serialization(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,6 +111,46 @@ def test_worker_serve_initializes_provider_once_and_reuses_it(
     }
     assert json.loads(response_one.read_text(encoding="utf-8"))["request_id"] == "request-1"
     assert json.loads(response_two.read_text(encoding="utf-8"))["request_id"] == "request-2"
+
+
+def test_worker_passes_component_model_directories_to_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_root = tmp_path / "models"
+    for kind in ("det", "rec"):
+        model_dir = model_root / kind / f"{kind}-model"
+        model_dir.mkdir(parents=True)
+        (model_dir / "inference.pdmodel").write_bytes(b"model")
+        (model_dir / "inference.pdiparams").write_bytes(b"params")
+
+    received: list[tuple[Path, Path]] = []
+
+    class FakeProvider:
+        def __init__(self, language: str, det_model_dir=None, rec_model_dir=None) -> None:
+            assert language == "japan"
+            received.append((Path(det_model_dir), Path(rec_model_dir)))
+
+        def initialize(self) -> None:
+            pass
+
+    monkeypatch.setattr(worker_main, "PaddleOCRProvider", FakeProvider)
+    ready = tmp_path / "ready.json"
+    monkeypatch.setattr(
+        worker_main,
+        "sys",
+        type("FakeSys", (), {"stdin": io.StringIO('{"schema_version": 1, "type": "shutdown"}\n'), "stderr": None})(),
+    )
+    args = worker_main.build_parser().parse_args(
+        ["--serve", "--ready-file", str(ready), "--model-root", str(model_root)]
+    )
+    assert worker_main._serve(args) == 0
+    assert received == [
+        (model_root / "det" / "det-model", model_root / "rec" / "rec-model")
+    ]
+
+
+def test_worker_model_root_missing_fails_without_fallback(tmp_path: Path) -> None:
+    assert worker_main.main(["--smoke", "--model-root", str(tmp_path / "missing")]) == 1
 
 
 def test_worker_serve_writes_error_response_for_ocr_failure(
@@ -426,7 +467,7 @@ def test_local_component_versioned_user_path_is_first(
     candidates = local_runtime.worker_executable_candidates()
 
     assert candidates[0] == (
-        runtime / "components" / "local-ocr" / LOCAL_OCR_VERSION / "TellMeSenseiOCR.exe"
+        runtime / "components" / "local-ocr" / LOCAL_OCR_VERSION / current_spec().executable_name
     )
 
 

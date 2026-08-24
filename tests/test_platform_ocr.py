@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.config import ConfigManager
 from app.platform import ocr as ocr_platform
+from app.local_ocr import platform as local_ocr_platform
 from app.settings.repository import SettingsRepository
 from app.ui import settings_window as settings_window_module
 from app.ui.settings_window import SettingsWindow
@@ -31,12 +32,16 @@ class _ComponentManager:
         return True
 
 
-def test_local_ocr_capability_only_supports_windows(monkeypatch) -> None:
-    monkeypatch.setattr(ocr_platform.sys, "platform", "darwin")
-    assert not ocr_platform.is_local_ocr_supported()
-
-    monkeypatch.setattr(ocr_platform.sys, "platform", "win32")
+def test_local_ocr_capability_supports_windows_and_macos_intel(monkeypatch) -> None:
+    monkeypatch.setattr(local_ocr_platform.sys, "platform", "darwin")
+    monkeypatch.setattr(local_ocr_platform.host_platform, "machine", lambda: "x86_64")
     assert ocr_platform.is_local_ocr_supported()
+
+    monkeypatch.setattr(local_ocr_platform.sys, "platform", "win32")
+    assert ocr_platform.is_local_ocr_supported()
+
+    monkeypatch.setattr(local_ocr_platform.host_platform, "machine", lambda: "arm64")
+    assert not ocr_platform.is_local_ocr_supported()
 
 
 def test_macos_settings_hide_windows_local_ocr_controls(

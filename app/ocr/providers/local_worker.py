@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from app.ocr.local_runtime import worker_executable_candidates, worker_script_path
+from app.ocr.local_runtime import component_model_root, worker_executable_candidates, worker_script_path
 from app.ocr.local_session import LocalOCRSession, PersistentWorkerUnsupported
 from app.ocr.types import OCRCancelled, OCRError, OCRResult
 from app.ocr.worker_protocol import read_error_message, read_result
@@ -135,6 +135,7 @@ class LocalOCRProvider:
                 str(self.executable),
                 input_path,
                 output_path,
+                model_root=component_model_root(self.executable),
                 profile_output=profile_output,
             )
 
@@ -144,6 +145,7 @@ class LocalOCRProvider:
                     str(candidate),
                     input_path,
                     output_path,
+                    model_root=component_model_root(candidate),
                     profile_output=profile_output,
                 )
 
@@ -168,6 +170,7 @@ class LocalOCRProvider:
         output_path: Path,
         *,
         script: Path | None = None,
+        model_root: Path | None = None,
         profile_output: str | Path | None = None,
     ) -> list[str]:
         command = [executable]
@@ -183,6 +186,8 @@ class LocalOCRProvider:
                 self.language,
             ]
         )
+        if model_root is not None:
+            command.extend(["--model-root", str(model_root.resolve())])
         if profile_output is not None:
             command.extend(["--profile-output", str(profile_output), "--profile-runs", "1"])
         return command

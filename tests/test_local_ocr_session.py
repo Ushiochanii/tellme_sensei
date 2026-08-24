@@ -122,6 +122,14 @@ def test_prepare_starts_worker_and_recognize_reuses_it(tmp_path: Path):
     session.stop()
 
 
+def test_session_includes_explicit_component_model_root(tmp_path: Path):
+    executable = tmp_path / "TellMeSenseiOCR"
+    executable.write_bytes(b"fake")
+    session = LocalOCRSession(executable=executable, model_root=tmp_path / "models")
+    command = session._serve_command()
+    assert command[command.index("--model-root") + 1] == str((tmp_path / "models").resolve())
+
+
 def test_prepare_failure_allows_later_retry(tmp_path: Path):
     executable = tmp_path / "TellMeSenseiOCR.exe"
     executable.write_bytes(b"fake")

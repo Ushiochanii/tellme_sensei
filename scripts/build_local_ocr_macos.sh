@@ -108,7 +108,35 @@ fi
 
 clean_env=(env -i PATH="/usr/bin:/bin:/usr/sbin:/sbin" HOME="${HOME:-/tmp}")
 "${clean_env[@]}" "$worker_path" --help >/dev/null
-"${clean_env[@]}" "$worker_path" --smoke
+
+model_source="${TELLME_LOCAL_OCR_MODEL_ROOT:-$HOME/.paddleocr}"
+model_target="$dist_path/LocalOCR/models"
+MODEL_SOURCE="$model_source" MODEL_TARGET="$model_target" "$python_path" - <<'PY'
+from pathlib import Path
+import os
+import shutil
+
+source = Path(os.environ["MODEL_SOURCE"])
+target = Path(os.environ["MODEL_TARGET"])
+if not source.is_dir():
+    raise SystemExit(f"PaddleOCR model cache was not found: {source}")
+for kind in ("det", "rec"):
+    matches = sorted(
+        path.parent
+        for path in source.rglob("inference.pdmodel")
+        if kind in path.parts and (path.parent / "inference.pdiparams").is_file()
+    )
+    if not matches:
+        raise SystemExit(f"Japanese {kind} model was not found below {source}")
+    destination = target / kind / matches[0].name
+    shutil.copytree(matches[0], destination, dirs_exist_ok=True)
+    print(f"Bundled {kind} model: {destination}")
+PY
+
+build_home="${TMPDIR:-/tmp}/tellmesensei-local-ocr-build-home"
+mkdir -p "$build_home"
+env -i PATH="/usr/bin:/bin:/usr/sbin:/sbin" HOME="$build_home" \
+    "$worker_path" --smoke --model-root "$model_target"
 
 "$codesign_path" -d -v "$worker_path" 2>&1 | sed -n '1,8p'
 "$codesign_path" --verify "$worker_path"
