@@ -121,6 +121,6 @@ def test_macos_overlay_begin_configures_native_window_without_activation(monkeyp
     overlay_module.CaptureOverlay.begin(overlay)
 
     assert overlay.show_calls == 1
-    assert configure_calls == [overlay, overlay]
+    assert configure_calls == [overlay]
     assert overlay.raise_calls == 0
     assert overlay.activate_calls == 0

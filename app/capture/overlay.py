@@ -62,8 +62,6 @@ class CaptureOverlay(QWidget):
             if configure_macos_overlay_window is not None:
                 configure_macos_overlay_window(self)
             self.show()
-            if configure_macos_overlay_window is not None:
-                configure_macos_overlay_window(self)
             return
         self.show()
         self.raise_()
