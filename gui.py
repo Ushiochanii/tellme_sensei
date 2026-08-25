@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--show-window",
         action="store_true",
-        help="显示保留的开发窗口；默认仅运行系统托盘模式。",
+        help="兼容旧参数；浮动控制器现在默认显示。",
     )
     parser.add_argument(
         "--debug-capture",
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     window = MainWindow(
         debug_capture_path=args.debug_capture,
-        tray_mode=not args.show_window,
+        tray_mode=False,
         config_manager=config_manager,
         hotkey_manager=text_hotkey,
         vision_hotkey_manager=vision_hotkey,
@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     controller.single_instance_guard = single_instance
     app.aboutToQuit.connect(controller.cleanup)
     app.aboutToQuit.connect(single_instance.release)
-    controller.start(show_window=args.show_window)
+    controller.start(show_window=True)
     return app.exec()
 
 

@@ -113,7 +113,8 @@ class DeepSeekService:
                 },
             ],
             cancel_event=cancel_event,
-            log_context=f"image_bytes={len(image_bytes)} model={VISION_MODEL}",
+            log_context=f"mode=vision image_bytes={len(image_bytes)} model={VISION_MODEL}",
+            extra_body={"thinking": {"type": "enabled"}},
         )
 
     def _stream_completion(
@@ -123,24 +124,36 @@ class DeepSeekService:
         messages: list[dict[str, Any]],
         cancel_event: threading.Event | None,
         log_context: str,
+        extra_body: dict[str, Any] | None = None,
     ) -> str:
         client = self._get_client()
         logger.info("DeepSeek API request started %s", log_context)
         response = None
+        visible_content_chars = 0
+        reasoning_content_chars = 0
+        finish_reasons: set[str] = set()
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.2,
-                timeout=self.config.request_timeout,
-                stream=True,
-            )
+            request_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.2,
+                "timeout": self.config.request_timeout,
+                "stream": True,
+            }
+            if extra_body is not None:
+                request_kwargs["extra_body"] = extra_body
+            response = client.chat.completions.create(**request_kwargs)
             answer_parts: list[str] = []
             for chunk in response:
                 self._raise_if_cancelled(cancel_event)
-                content = self._chunk_content(chunk)
+                content, reasoning, finish_reason = self._chunk_metadata(chunk)
                 if content:
                     answer_parts.append(content)
+                    visible_content_chars += len(content.strip())
+                if reasoning:
+                    reasoning_content_chars += len(reasoning)
+                if finish_reason:
+                    finish_reasons.add(finish_reason)
             self._raise_if_cancelled(cancel_event)
             answer = "".join(answer_parts)
         except DeepSeekCancelled:
@@ -154,8 +167,26 @@ class DeepSeekService:
             self._close_stream(response)
 
         if not isinstance(answer, str) or not answer.strip():
+            logger.error(
+                "DeepSeek API response had no visible content model=%s "
+                "visible_content_chars=%d reasoning_content_present=%s "
+                "reasoning_content_chars=%d finish_reasons=%s",
+                model,
+                visible_content_chars,
+                reasoning_content_chars > 0,
+                reasoning_content_chars,
+                sorted(finish_reasons),
+            )
             raise DeepSeekError("DeepSeek 返回了空答案。")
-        logger.info("DeepSeek API request completed")
+        logger.info(
+            "DeepSeek API request completed model=%s visible_content_chars=%d "
+            "reasoning_content_present=%s reasoning_content_chars=%d finish_reasons=%s",
+            model,
+            len(answer.strip()),
+            reasoning_content_chars > 0,
+            reasoning_content_chars,
+            sorted(finish_reasons),
+        )
         return answer.strip()
 
     def test_connection(self, cancel_event: threading.Event | None = None) -> bool:
@@ -194,14 +225,40 @@ class DeepSeekService:
     def _chunk_content(chunk: Any) -> str:
         """Extract text from OpenAI SDK chunks and simple test doubles."""
 
+        return DeepSeekService._chunk_metadata(chunk)[0]
+
+    @staticmethod
+    def _chunk_metadata(chunk: Any) -> tuple[str, str, str | None]:
+        """Extract visible/reasoning content and finish metadata from a chunk."""
+
         try:
             choices = chunk["choices"] if isinstance(chunk, dict) else chunk.choices
             choice = choices[0]
             delta = choice.get("delta") if isinstance(choice, dict) else choice.delta
             content = delta.get("content") if isinstance(delta, dict) else delta.content
+            reasoning = (
+                delta.get("reasoning_content")
+                if isinstance(delta, dict)
+                else getattr(delta, "reasoning_content", None)
+            )
+            if reasoning is None:
+                reasoning = (
+                    choice.get("reasoning_content")
+                    if isinstance(choice, dict)
+                    else getattr(choice, "reasoning_content", None)
+                )
+            finish_reason = (
+                choice.get("finish_reason")
+                if isinstance(choice, dict)
+                else getattr(choice, "finish_reason", None)
+            )
         except (AttributeError, IndexError, KeyError, TypeError):
-            return ""
-        return content if isinstance(content, str) else ""
+            return "", "", None
+        return (
+            content if isinstance(content, str) else "",
+            reasoning if isinstance(reasoning, str) else "",
+            finish_reason if isinstance(finish_reason, str) else None,
+        )
 
     @staticmethod
     def _close_stream(response: Any) -> None:

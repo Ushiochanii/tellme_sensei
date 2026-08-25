@@ -152,12 +152,12 @@ class AnswerWindow(QWidget):
         self.setStyleSheet(
             """
             AnswerWindow { background: #f7f8fa; border: 1px solid #8b95a5; }
-            #titleLabel { font-size: 15px; font-weight: 600; color: #ffffff; }
-            #closeButton { color: #ffffff; border: none; font-size: 20px; padding: 0 7px; }
+            #titleLabel { font-size: 15px; font-weight: 600; color: #000000; }
+            #closeButton { color: #000000; border: none; font-size: 20px; padding: 0 7px; }
             #closeButton:hover { background: #d9534f; }
-            _TitleBar { background: #2f4057; }
+            _TitleBar { background: #ffffff; }
             #statusLabel { color: #335c8a; font-weight: 600; }
-            QPlainTextEdit { background: #ffffff; border: 1px solid #d4d9e1; border-radius: 4px; padding: 5px; }
+            QPlainTextEdit { background: #ffffff; color: #000000; border: 1px solid #d4d9e1; border-radius: 4px; padding: 5px; }
             QPushButton { min-height: 28px; padding: 2px 10px; }
             """
         )

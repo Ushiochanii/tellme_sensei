@@ -52,7 +52,7 @@ class ApplicationController(QObject):
         if hasattr(self.window, "shutdown_ready"):
             self.window.shutdown_ready.connect(self._on_shutdown_ready)
 
-    def start(self, show_window: bool = False) -> None:
+    def start(self, show_window: bool = True) -> None:
         self.tray.show()
         if not self.text_hotkey.register():
             logger.warning("Text Mode global hotkey registration failed; open Settings to change it")

@@ -7,6 +7,7 @@ import logging
 from PySide6.QtCore import QObject
 
 from app.platform.base import GlobalHotkeyManager
+from app.platform.hotkey import DEFAULT_SHORTCUT
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ class UnsupportedGlobalHotkey(GlobalHotkeyManager):
         self,
         parent: QObject | None = None,
         platform_name: str = "unknown",
-        shortcut: str = "Ctrl+Shift+Q",
+        shortcut: str = DEFAULT_SHORTCUT,
         hotkey_id: int | None = None,
     ) -> None:
         super().__init__(parent)

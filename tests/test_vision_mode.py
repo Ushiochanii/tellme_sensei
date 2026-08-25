@@ -6,6 +6,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QImage
 
 from app.analysis import AnalysisMode
@@ -31,6 +32,28 @@ def _image() -> QImage:
 def _chunk(text: str):
     return SimpleNamespace(
         choices=[SimpleNamespace(delta=SimpleNamespace(content=text))]
+    )
+
+
+def _reasoning_chunk(text: str):
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(content=None, reasoning_content=text),
+                finish_reason=None,
+            )
+        ]
+    )
+
+
+def _finish_chunk(reason: str = "stop"):
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(content=None),
+                finish_reason=reason,
+            )
+        ]
     )
 
 
@@ -70,6 +93,7 @@ def test_vision_request_uses_fixed_model_and_png_data_url() -> None:
 
     assert service.analyze_image(image_bytes) == "第一段第二段"
     assert client.kwargs["model"] == VISION_MODEL
+    assert client.kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
     content = client.kwargs["messages"][1]["content"]
     assert content[0]["type"] == "text"
     assert content[1]["type"] == "image_url"
@@ -79,6 +103,23 @@ def test_vision_request_uses_fixed_model_and_png_data_url() -> None:
     assert decoded == image_bytes
     assert "下面是 OCR 识别到的题目" not in json.dumps(client.kwargs, ensure_ascii=False)
     assert stream.closed is True
+
+
+def test_text_request_does_not_enable_vision_thinking_override() -> None:
+    stream = _Stream([_chunk("文字答案"), _finish_chunk()])
+    client = _Client(stream)
+    service = DeepSeekService(AppConfig(api_key="test"), client=client)
+
+    assert service.analyze("题目文字") == "文字答案"
+    assert "extra_body" not in client.kwargs
+
+
+def test_vision_reasoning_without_final_content_is_empty_answer_error() -> None:
+    stream = _Stream([_reasoning_chunk("内部推理，不是最终答案"), _finish_chunk()])
+    service = DeepSeekService(AppConfig(api_key="test"), client=_Client(stream))
+
+    with pytest.raises(DeepSeekError, match="空答案"):
+        service.analyze_image(VisionProcessingWorker.encode_png(_image()))
 
 
 def test_vision_request_cancellation_and_empty_response() -> None:
@@ -187,4 +228,91 @@ def test_vision_reanalyze_and_recapture_preserve_mode(monkeypatch, qt_app) -> No
     window._recapture_requested()
     assert requested == [True]
     window.shutdown()
+    qt_app.processEvents()
+
+
+def test_main_window_radio_routes_physical_capture_without_starting_on_toggle(qt_app, monkeypatch) -> None:
+    window = MainWindow(tray_mode=True)
+    calls: list[AnalysisMode] = []
+    monkeypatch.setattr(window, "start_text_capture", lambda: calls.append(AnalysisMode.TEXT) or True)
+    monkeypatch.setattr(window, "start_vision_capture", lambda: calls.append(AnalysisMode.VISION) or True)
+
+    window.vision_mode_radio.click()
+    assert calls == []
+    assert window.capture_button.text() == "截图分析"
+    window.capture_button.click()
+    assert calls == [AnalysisMode.VISION]
+
+    window.text_mode_radio.click()
+    assert calls == [AnalysisMode.VISION]
+    assert window.capture_button.text() == "截图识别"
+    window.capture_button.click()
+    assert calls == [AnalysisMode.VISION, AnalysisMode.TEXT]
+    window.close()
+    qt_app.processEvents()
+
+
+def test_explicit_mode_entrypoints_override_radio_and_sync_selection(qt_app, monkeypatch) -> None:
+    window = MainWindow(tray_mode=True)
+    calls: list[AnalysisMode] = []
+    monkeypatch.setattr(window, "_start_capture", lambda mode: calls.append(mode) or True)
+
+    window.vision_mode_radio.setChecked(True)
+    window.start_text_capture()
+    assert calls == [AnalysisMode.TEXT]
+    assert window.text_mode_radio.isChecked()
+
+    window.start_vision_capture()
+    assert calls == [AnalysisMode.TEXT, AnalysisMode.VISION]
+    assert window.vision_mode_radio.isChecked()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_floating_controller_hides_for_capture_and_returns_after_completion_or_cancel(
+    qt_app, monkeypatch
+) -> None:
+    class FakeOverlay(QObject):
+        captured = Signal(QImage)
+        cancelled = Signal()
+
+        def __init__(self, **_kwargs) -> None:
+            super().__init__()
+
+        def begin(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(main_window_module, "CaptureOverlay", FakeOverlay)
+
+    completed = MainWindow(tray_mode=False)
+    completed.show()
+    completed._ensure_screen_recording_permission = lambda: True
+    monkeypatch.setattr(completed, "_launch_vision_worker", lambda _image: None)
+    assert completed.start_vision_capture() is True
+    assert completed.isVisible() is False
+    overlay = completed._overlay
+    assert overlay is not None
+    overlay.captured.emit(_image())
+    qt_app.processEvents()
+    assert completed.isVisible() is True
+    completed._busy = False
+    completed.state = AppState.IDLE
+    completed.shutdown()
+    completed.close()
+
+    cancelled = MainWindow(tray_mode=False)
+    cancelled.show()
+    cancelled._ensure_screen_recording_permission = lambda: True
+    assert cancelled.start_text_capture() is True
+    assert cancelled.isVisible() is False
+    overlay = cancelled._overlay
+    assert overlay is not None
+    overlay.cancelled.emit()
+    qt_app.processEvents()
+    assert cancelled.isVisible() is True
+    cancelled.shutdown()
+    cancelled.close()
     qt_app.processEvents()

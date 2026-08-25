@@ -15,8 +15,8 @@
 
 ## Features
 
-- Text Mode screenshot hotkey (`Ctrl+Shift+Q` by default)
-- Vision Mode screenshot hotkey (`Ctrl+Shift+W` by default)
+- Text Mode screenshot hotkey (`Ctrl+Shift+A` by default)
+- Vision Mode screenshot hotkey (`Ctrl+Shift+S` by default)
 - Drag-to-select screen capture, including macOS fullscreen and Spaces
 - Floating answer window with streaming DeepSeek output
 - **Local OCR** with PaddleOCR, processed on-device
@@ -44,14 +44,14 @@ macOS builds are ad-hoc signed and not notarized. macOS may require **Open Anywa
 3. Choose an OCR mode:
    - **Local OCR:** click **Download Local OCR** in Settings.
    - **Google Cloud Vision:** enter your own Google Vision API key and test the connection.
-4. Press `Ctrl+Shift+Q` for a text/OCR question or `Ctrl+Shift+W` for a diagram-heavy Vision question, drag over the question, and wait for the answer window.
+4. Press `Ctrl+Shift+A` for a text/OCR question or `Ctrl+Shift+S` for a diagram-heavy Vision question, drag over the question, and wait for the answer window.
 
 ## Analysis modes
 
 | Mode | Shortcut | Pipeline | Best for |
 |---|---|---|---|
-| Text Mode | `Ctrl+Shift+Q` | Screenshot → configured OCR → DeepSeek text analysis | Text-heavy questions |
-| Vision Mode | `Ctrl+Shift+W` | Screenshot → DeepSeek Vision | Diagrams, charts, geometry, flowcharts, and graphical questions |
+| Text Mode | `Ctrl+Shift+A` | Screenshot → configured OCR → DeepSeek text analysis | Text-heavy questions |
+| Vision Mode | `Ctrl+Shift+S` | Screenshot → DeepSeek Vision | Diagrams, charts, geometry, flowcharts, and graphical questions |
 
 Vision Mode always uses `deepseek-v4-flash-vision-exp` and sends the captured screenshot directly to DeepSeek. The user explicitly chooses the mode; TellMeSensei does not automatically switch or fall back between Text and Vision.
 

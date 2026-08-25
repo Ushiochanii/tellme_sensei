@@ -11,7 +11,16 @@ import threading
 
 from PySide6.QtCore import QThread, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QRadioButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.analysis import AnalysisMode
 from app.capture.overlay import CaptureOverlay
@@ -77,16 +86,47 @@ class MainWindow(QWidget):
         self._prewarm_worker: LocalOCRPrewarmWorker | None = None
         self._prewarm_cancel_event: threading.Event | None = None
         self.setWindowTitle("AI 学习助手")
-        self.setFixedSize(260, 140)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        self.setFixedSize(280, 170)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
         label = QLabel("TellMeSensei")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mode_layout = QHBoxLayout()
+        self.mode_group = QButtonGroup(self)
+        self.text_mode_radio = QRadioButton("OCR / Text")
+        self.vision_mode_radio = QRadioButton("AI Vision")
+        self.mode_group.addButton(self.text_mode_radio)
+        self.mode_group.addButton(self.vision_mode_radio)
+        self.text_mode_radio.setChecked(True)
+        self.text_mode_radio.toggled.connect(self._on_mode_radio_toggled)
+        mode_layout.addWidget(self.text_mode_radio)
+        mode_layout.addWidget(self.vision_mode_radio)
         self.capture_button = QPushButton("截图识别")
         self.capture_button.setMinimumHeight(38)
-        self.capture_button.clicked.connect(self.start_capture)
+        self.capture_button.clicked.connect(self._start_selected_capture)
         layout.addWidget(label)
+        layout.addLayout(mode_layout)
         layout.addWidget(self.capture_button)
+
+    @Slot(bool)
+    def _on_mode_radio_toggled(self, checked: bool) -> None:
+        if checked:
+            self.capture_button.setText("截图识别")
+        elif self.vision_mode_radio.isChecked():
+            self.capture_button.setText("截图分析")
+
+    def _set_selected_mode(self, mode: AnalysisMode) -> None:
+        self.text_mode_radio.setChecked(mode is AnalysisMode.TEXT)
+        self.vision_mode_radio.setChecked(mode is AnalysisMode.VISION)
+        self._on_mode_radio_toggled(mode is AnalysisMode.TEXT)
+
+    @Slot()
+    def _start_selected_capture(self) -> bool:
+        if self.vision_mode_radio.isChecked():
+            return self.start_vision_capture()
+        return self.start_text_capture()
 
     @Slot()
     def start_capture(self) -> bool:
@@ -98,12 +138,14 @@ class MainWindow(QWidget):
     def start_text_capture(self) -> bool:
         """Start one Text Mode capture."""
 
+        self._set_selected_mode(AnalysisMode.TEXT)
         return self._start_capture(AnalysisMode.TEXT)
 
     @Slot()
     def start_vision_capture(self) -> bool:
         """Start one Vision Mode capture using the shared overlay."""
 
+        self._set_selected_mode(AnalysisMode.VISION)
         return self._start_capture(AnalysisMode.VISION)
 
     def _start_capture(self, mode: AnalysisMode) -> bool:
@@ -235,11 +277,15 @@ class MainWindow(QWidget):
         self._overlay = None
         self._busy = True
         mode = self._capture_mode
+        self._set_selected_mode(mode)
         self._active_mode = mode
         self.state = AppState.OCR_PROCESSING if mode is AnalysisMode.TEXT else AppState.AI_PROCESSING
         self.capture_button.setEnabled(False)
         self._last_ocr_text = ""
         self._last_vision_image = image.copy() if mode is AnalysisMode.VISION else None
+        if not self.tray_mode:
+            self.show()
+            self.raise_()
         self._show_or_create_answer()
         self._answer_window.set_mode(mode)
         if mode is AnalysisMode.VISION:
@@ -556,7 +602,7 @@ class MainWindow(QWidget):
             self.activateWindow()
 
     def show_launcher(self) -> None:
-        """Show the small development window from the tray Settings action."""
+        """Show the persistent floating capture controller."""
 
         self.show()
         self.raise_()

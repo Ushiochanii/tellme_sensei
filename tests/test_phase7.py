@@ -143,6 +143,7 @@ def test_application_controller_routes_and_cleans_up(qt_app) -> None:
     assert fake_window.capture_count == 2
     assert fake_window.settings_count == 1
     assert fake_hotkey.register_count == 1
+    assert fake_window.visible is False
     controller.cleanup()
     controller.cleanup()
     assert fake_window.shutdown_count == 1
@@ -169,6 +170,7 @@ def test_application_controller_routes_two_hotkeys_and_shutdown(qt_app) -> None:
     vision_hotkey = FakeHotkey()
     controller = ApplicationController(qt_app, window, tray, text_hotkey, vision_hotkey)
     controller.start()
+    assert window.visible is True
 
     tray.trigger_text_capture()
     tray.trigger_vision_capture()

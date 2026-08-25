@@ -15,8 +15,8 @@
 
 ## 功能
 
-- 文字模式截图快捷键（默认 `Ctrl+Shift+Q`）
-- 视觉模式截图快捷键（默认 `Ctrl+Shift+W`）
+- 文字模式截图快捷键（默认 `Ctrl+Shift+A`）
+- 视觉模式截图快捷键（默认 `Ctrl+Shift+S`）
 - 鼠标拖拽框选屏幕区域，支持 macOS 全屏应用和多桌面
 - 悬浮窗口流式显示 DeepSeek 回答
 - **Local OCR**：PaddleOCR，本机处理
@@ -44,14 +44,14 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
 3. 选择 OCR 模式：
    - **Local OCR：** 在 Settings 中点击 **Download Local OCR**。
    - **Google Cloud Vision：** 填写自己的 Google Vision API Key 并测试连接。
-4. 文字题按 `Ctrl+Shift+Q`，图形题按 `Ctrl+Shift+W`，框选题目后等待答案窗口出现。
+4. 文字题按 `Ctrl+Shift+A`，图形题按 `Ctrl+Shift+S`，框选题目后等待答案窗口出现。
 
 ## 分析模式
 
 | 模式 | 快捷键 | 流程 | 适用场景 |
 |---|---|---|---|
-| 文字模式 | `Ctrl+Shift+Q` | 截图 → 配置的 OCR → DeepSeek 文本分析 | 文字为主的题目 |
-| 视觉模式 | `Ctrl+Shift+W` | 截图 → DeepSeek Vision | 图表、几何图形、流程图、网络拓扑等图形题 |
+| 文字模式 | `Ctrl+Shift+A` | 截图 → 配置的 OCR → DeepSeek 文本分析 | 文字为主的题目 |
+| 视觉模式 | `Ctrl+Shift+S` | 截图 → DeepSeek Vision | 图表、几何图形、流程图、网络拓扑等图形题 |
 
 视觉模式固定使用 `deepseek-v4-flash-vision-exp`，会把截图直接发送给 DeepSeek。模式由用户通过快捷键或托盘菜单明确选择，不会自动切换，也不会在两种模式之间回退。
 

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 CARBON_FRAMEWORK = "/System/Library/Frameworks/Carbon.framework/Carbon"
 NO_ERR = 0
+EVENT_NOT_HANDLED = -9874
 
 # Carbon Event Manager constants from HIToolbox/Events.h.
 K_EVENT_CLASS_KEYBOARD = int.from_bytes(b"keyb", "big")
@@ -102,6 +103,7 @@ class _CarbonHotkeyBackend:
         self._callback: Callable[[int], None] | None = None
         self._native_callback = _EventHandler(self._handle_event)
         self._handler_ref = c_void_p()
+        self._hotkey_id: int | None = None
 
     def _configure_functions(self) -> None:
         carbon = self._carbon
@@ -163,6 +165,7 @@ class _CarbonHotkeyBackend:
             return None
 
         native_ref = c_void_p()
+        self._hotkey_id = hotkey_id
         hotkey = _EventHotKeyID(HOTKEY_SIGNATURE, hotkey_id)
         status = self._carbon.RegisterEventHotKey(
             key_code,
@@ -209,6 +212,7 @@ class _CarbonHotkeyBackend:
             self._carbon.RemoveEventHandler(self._handler_ref)
             self._handler_ref = c_void_p()
         self._callback = None
+        self._hotkey_id = None
 
     def _handle_event(self, _next_handler, event, _user_data) -> int:
         logger.debug("macOS Carbon hotkey callback entered event=%s", event)
@@ -231,13 +235,20 @@ class _CarbonHotkeyBackend:
         )
         if status != NO_ERR:
             logger.debug("macOS Carbon hotkey callback ignored: parameter read failed")
-            return NO_ERR
+            return EVENT_NOT_HANDLED
         if hotkey.signature != HOTKEY_SIGNATURE:
             logger.debug("macOS Carbon hotkey callback ignored: signature mismatch")
-            return NO_ERR
+            return EVENT_NOT_HANDLED
+        if self._hotkey_id is not None and hotkey.id != self._hotkey_id:
+            logger.debug(
+                "macOS hotkey callback ignored: id=%s expected_id=%s",
+                hotkey.id,
+                self._hotkey_id,
+            )
+            return EVENT_NOT_HANDLED
         if self._callback is None:
             logger.debug("macOS Carbon hotkey callback ignored: callback is not active")
-            return NO_ERR
+            return EVENT_NOT_HANDLED
         try:
             self._callback(hotkey.id)
         except Exception:

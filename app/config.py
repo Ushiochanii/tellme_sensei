@@ -208,7 +208,7 @@ class ConfigManager:
 
     def save_settings(
         self,
-        api_key: str,
+        api_key: str | None,
         model: str,
         request_timeout: float,
         global_shortcut: str | None = None,
@@ -218,12 +218,13 @@ class ConfigManager:
         google_vision_api_key: str | None = None,
         online_ocr_timeout: float | None = None,
     ) -> None:
-        """Save API key and normal settings through their dedicated stores."""
+        """Save settings; a None secret value leaves that stored secret unchanged."""
 
-        if api_key.strip():
-            self.secret_store.set_api_key(api_key)
-        else:
-            self.secret_store.delete_api_key()
+        if api_key is not None:
+            if api_key.strip():
+                self.secret_store.set_api_key(api_key)
+            else:
+                self.secret_store.delete_api_key()
         settings = {"model": model, "request_timeout": request_timeout}
         if global_shortcut is not None:
             settings["global_shortcut"] = self._normalized_shortcut(global_shortcut)

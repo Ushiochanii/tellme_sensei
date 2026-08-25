@@ -167,6 +167,8 @@ class SettingsWindow(QWidget):
         self._google_thread: QThread | None = None
         self._google_worker: GoogleVisionTestWorker | None = None
         self._google_cancel_event: threading.Event | None = None
+        self._loaded_api_key = ""
+        self._loaded_google_vision_api_key = ""
 
         self.setWindowTitle("设置")
         self.setMinimumWidth(430)
@@ -354,6 +356,8 @@ class SettingsWindow(QWidget):
             config = self.config_manager.load(require_api_key=False)
         except ConfigError:
             config = AppConfig(api_key="")
+        self._loaded_api_key = config.api_key
+        self._loaded_google_vision_api_key = config.google_vision_api_key
         self.api_key_edit.setText(config.api_key)
         self.google_vision_api_key_edit.setText(config.google_vision_api_key)
         google_env_override = self.config_manager.has_explicit_google_vision_api_key()
@@ -837,11 +841,15 @@ class SettingsWindow(QWidget):
             provider_to_save = None
             if not self.config_manager.has_explicit_ocr_provider():
                 provider_to_save = config.ocr_provider
+            api_key_to_save = (
+                config.api_key if config.api_key != self._loaded_api_key else None
+            )
             google_key_to_save = None
             if not self.config_manager.has_explicit_google_vision_api_key():
-                google_key_to_save = config.google_vision_api_key
+                if config.google_vision_api_key != self._loaded_google_vision_api_key:
+                    google_key_to_save = config.google_vision_api_key
             self.config_manager.save_settings(
-                config.api_key,
+                api_key_to_save,
                 config.model,
                 config.request_timeout,
                 config.global_shortcut,
