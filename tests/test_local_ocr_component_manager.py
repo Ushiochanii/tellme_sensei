@@ -181,7 +181,7 @@ def test_size_mismatch_deletes_archive(tmp_path: Path) -> None:
     assert not archive.exists()
 
 
-def test_arm64_explicit_lifecycle_accepts_native_layout_while_unsupported(
+def test_arm64_explicit_lifecycle_accepts_native_layout_while_capability_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     archive_path = tmp_path / "arm64.zip"
@@ -210,7 +210,7 @@ def test_arm64_explicit_lifecycle_accepts_native_layout_while_unsupported(
     manifest = _manifest_for(archive_path, platform="macos", arch="arm64")
     arm_spec = spec_for_manifest("macos", "arm64")
     assert arm_spec is not None
-    assert arm_spec.supported is False
+    assert arm_spec.supported is True
     manager = LocalOCRComponentManager(
         tmp_path / "runtime",
         platform_spec=arm_spec,

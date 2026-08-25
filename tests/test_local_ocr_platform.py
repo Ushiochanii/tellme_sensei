@@ -6,7 +6,7 @@ def test_normalized_platform_specs_are_stable() -> None:
     assert spec_for_manifest("windows", "x86_64").executable_name == "TellMeSenseiOCR.exe"
     assert spec_for_manifest("macos", "x86_64").platform_id == "macos-x64"
     assert spec_for_manifest("macos", "x86_64").executable_name == "TellMeSenseiOCR"
-    assert spec_for_manifest("macos", "arm64").supported is False
+    assert spec_for_manifest("macos", "arm64").supported is True
 
 
 def test_architecture_aliases_are_normalized() -> None:

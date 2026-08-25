@@ -8,6 +8,7 @@ from app.local_ocr.manifest import (
     DEFAULT_MANIFEST_URL,
     DISTRIBUTION_REPOSITORY,
     ManifestError,
+    manifest_url_available,
     production_manifest_url,
     resolve_manifest_url,
 )
@@ -53,7 +54,7 @@ def test_platform_production_manifest_routes_are_pinned() -> None:
 def test_arm64_acceptance_version_is_not_a_production_route() -> None:
     arm_spec = spec_for_manifest("macos", "arm64")
     assert arm_spec is not None
-    assert arm_spec.supported is False
+    assert arm_spec.supported is True
     assert current_local_ocr_version() == ARM64_LOCAL_OCR_ACCEPTANCE_VERSION
 
 
@@ -98,6 +99,15 @@ def test_manifest_url_precedence_keeps_environment_and_dotenv_separate(
     monkeypatch.delenv("LOCAL_OCR_MANIFEST_URL", raising=False)
     env_file.unlink()
     assert resolve_manifest_url(tmp_path) == DEFAULT_MANIFEST_URL
+
+
+def test_arm_distribution_is_unavailable_without_override(tmp_path: Path) -> None:
+    assert manifest_url_available(tmp_path) is False
+    (tmp_path / ".env").write_text(
+        "LOCAL_OCR_MANIFEST_URL=http://127.0.0.1:8765/manifest.json\n",
+        encoding="utf-8",
+    )
+    assert manifest_url_available(tmp_path) is True
 
 
 def test_download_user_agent_follows_application_version() -> None:

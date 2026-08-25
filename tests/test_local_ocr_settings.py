@@ -65,8 +65,14 @@ def _window(
     tmp_path: Path,
     manager: _ComponentManager,
     session: _PreparingSession | None = None,
+    manifest_url: str | None = "https://example.test/manifest.json",
 ) -> SettingsWindow:
+    if manifest_url is not None:
+        (tmp_path / ".env").write_text(
+            f"LOCAL_OCR_MANIFEST_URL={manifest_url}\n", encoding="utf-8"
+        )
     config = ConfigManager(
+        project_root=tmp_path,
         settings_repository=SettingsRepository(tmp_path / "settings.json"),
         secret_store=_SecretStore(),
     )
@@ -82,6 +88,27 @@ def test_settings_shows_local_ocr_not_installed(qt_app, tmp_path: Path) -> None:
     assert window.local_ocr_status_label.text() == "Not installed"
     assert not window.download_ocr_button.isHidden()
     assert not window.remove_ocr_button.isEnabled()
+    window.close()
+
+
+def test_settings_shows_supported_but_unconfigured_distribution(
+    qt_app, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        settings_window_module, "manifest_url_available", lambda _root=None: False
+    )
+    window = _window(tmp_path, _ComponentManager(False), manifest_url=None)
+
+    assert window.online_mode_radio.isChecked()
+    assert not window.local_mode_radio.isEnabled()
+    assert not window.local_ocr_unsupported_label.isHidden()
+    assert "supported on this Mac" in window.local_ocr_unsupported_label.text()
+    assert window.download_ocr_button.isHidden()
+
+    window.download_local_ocr()
+
+    assert "supported on this Mac" in window.status_label.text()
+    assert window._download_thread is None
     window.close()
 
 

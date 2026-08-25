@@ -46,10 +46,10 @@ def test_core_smoke_accepts_intel_macos_core_spec() -> None:
     )
 
 
-def test_core_smoke_accepts_arm64_core_while_local_ocr_is_unsupported() -> None:
+def test_core_smoke_accepts_arm64_core_with_local_ocr_capability() -> None:
     spec = spec_for_manifest("macos", "arm64")
     assert spec is not None
-    assert spec.supported is False
+    assert spec.supported is True
     core_smoke._validate_macos_core_spec(
         spec,
         lambda value: "arm64" if value == "arm64" else value,

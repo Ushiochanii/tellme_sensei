@@ -30,8 +30,8 @@ def _production_url_for_spec(platform_spec: object | None = None) -> str:
 
 
 try:
-    # Unsupported development hosts (including ARM64 during A4.1) have no
-    # production manifest URL.  Keep import-time defaults harmless there.
+    # Hosts without a published component (including ARM64 before A5) have no
+    # production manifest URL. Keep import-time defaults harmless there.
     DISTRIBUTION_RELEASE_TAG = local_ocr_release_tag_for_spec()
 except ValueError:
     DISTRIBUTION_RELEASE_TAG = ""
@@ -137,3 +137,9 @@ def resolve_manifest_url(project_root: Path | None = None) -> str:
         values = {}
     fallback = values.get("LOCAL_OCR_MANIFEST_URL")
     return str(fallback).strip() if isinstance(fallback, str) and fallback.strip() else DEFAULT_MANIFEST_URL
+
+
+def manifest_url_available(project_root: Path | None = None) -> bool:
+    """Return whether this configuration has a manifest URL to download from."""
+
+    return bool(resolve_manifest_url(project_root))

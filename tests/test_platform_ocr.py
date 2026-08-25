@@ -40,8 +40,9 @@ def test_local_ocr_capability_supports_windows_and_macos_intel(monkeypatch) -> N
     monkeypatch.setattr(local_ocr_platform.sys, "platform", "win32")
     assert ocr_platform.is_local_ocr_supported()
 
+    monkeypatch.setattr(local_ocr_platform.sys, "platform", "darwin")
     monkeypatch.setattr(local_ocr_platform.host_platform, "machine", lambda: "arm64")
-    assert not ocr_platform.is_local_ocr_supported()
+    assert ocr_platform.is_local_ocr_supported()
 
 
 def test_macos_settings_hide_windows_local_ocr_controls(

@@ -34,7 +34,7 @@ def current_spec() -> LocalOCRPlatformSpec:
     if sys.platform == "darwin" and arch == "x64":
         return LocalOCRPlatformSpec("macos-x64", "macos", "x86_64", "TellMeSenseiOCR", True)
     if sys.platform == "darwin" and arch == "arm64":
-        return LocalOCRPlatformSpec("macos-arm64", "macos", "arm64", "TellMeSenseiOCR", False)
+        return LocalOCRPlatformSpec("macos-arm64", "macos", "arm64", "TellMeSenseiOCR", True)
     return LocalOCRPlatformSpec(f"{sys.platform}-{arch}", sys.platform, arch, "TellMeSenseiOCR", False)
 
 
@@ -45,7 +45,7 @@ def spec_for_manifest(platform: str, arch: str) -> LocalOCRPlatformSpec | None:
     if key == ("macos", "x86_64"):
         return LocalOCRPlatformSpec("macos-x64", "macos", "x86_64", "TellMeSenseiOCR", True)
     if key == ("macos", "arm64"):
-        return LocalOCRPlatformSpec("macos-arm64", "macos", "arm64", "TellMeSenseiOCR", False)
+        return LocalOCRPlatformSpec("macos-arm64", "macos", "arm64", "TellMeSenseiOCR", True)
     return None
 
 

@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from app.config import AppConfig, ConfigError, ConfigManager
 from app.local_ocr.component_manager import ComponentError, LocalOCRComponentManager
 from app.local_ocr.download import LocalOCRDownloadWorker
-from app.local_ocr.manifest import resolve_manifest_url
+from app.local_ocr.manifest import manifest_url_available, resolve_manifest_url
 from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
 from app.platform.hotkey import DEFAULT_SHORTCUT, HotkeySpec, HotkeySpecError
@@ -303,12 +303,23 @@ class SettingsWindow(QWidget):
         self._apply_local_ocr_capability()
 
     def _apply_local_ocr_capability(self) -> None:
-        """Keep the unsupported Local OCR component out of the macOS UX."""
+        """Apply separate platform-capability and distribution-availability states."""
 
-        if self._local_ocr_supported:
+        if self._local_ocr_supported and (
+            self.component_manager.is_installed()
+            or manifest_url_available(self.config_manager.project_root)
+        ):
             self.local_ocr_unsupported_label.setVisible(False)
             return
-        self.local_mode_radio.setChecked(False)
+        if self._local_ocr_supported:
+            self.local_ocr_unsupported_label.setText(
+                "Local OCR is supported on this Mac, but no component distribution is configured yet."
+            )
+        else:
+            self.local_ocr_unsupported_label.setText(
+                "Local OCR for macOS is not installed/supported in this build."
+            )
+        self.online_mode_radio.setChecked(True)
         self.local_mode_radio.setEnabled(False)
         self.local_engine_combo.setEnabled(False)
         self.download_ocr_button.setVisible(False)
@@ -319,6 +330,19 @@ class SettingsWindow(QWidget):
         self.local_ocr_progress.setVisible(False)
         self.local_ocr_unsupported_label.setVisible(True)
         self._on_provider_changed()
+
+    def _local_ocr_distribution_available(self) -> bool:
+        """Return whether download actions have a configured manifest source."""
+
+        return manifest_url_available(self.config_manager.project_root)
+
+    def _local_ocr_is_usable(self) -> bool:
+        """Return whether Local OCR is installed or can be downloaded here."""
+
+        return self._local_ocr_supported and (
+            self.component_manager.is_installed()
+            or self._local_ocr_distribution_available()
+        )
 
     def _load_current_values(self) -> None:
         try:
@@ -334,7 +358,7 @@ class SettingsWindow(QWidget):
         self.model_edit.setText(config.model)
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
-        is_online = config.ocr_provider == "google_vision" or not self._local_ocr_supported
+        is_online = config.ocr_provider == "google_vision" or not self._local_ocr_is_usable()
         provider_env_override = self.config_manager.has_explicit_ocr_provider()
         self.local_mode_radio.setChecked(not is_online)
         self.online_mode_radio.setChecked(is_online)
@@ -383,17 +407,22 @@ class SettingsWindow(QWidget):
 
     def _refresh_local_ocr_state(self) -> None:
         if not self._local_ocr_supported:
+            self._apply_local_ocr_capability()
             self.local_ocr_status_label.setText(
                 "Local OCR for macOS is not installed/supported in this build."
             )
-            self._apply_local_ocr_capability()
             return
         if self.component_manager.is_installed():
             self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version}")
             self.download_ocr_button.setVisible(False)
+        elif not self._local_ocr_distribution_available():
+            self.local_ocr_status_label.setText(
+                "Local OCR is supported on this Mac, but no component distribution is configured yet."
+            )
         else:
             self.local_ocr_status_label.setText("Not installed")
             self.download_ocr_button.setVisible(True)
+        self._apply_local_ocr_capability()
         self._refresh_operation_controls()
 
     def _refresh_operation_controls(
@@ -438,6 +467,14 @@ class SettingsWindow(QWidget):
             self.verify_ocr_button.setVisible(False)
             self.remove_ocr_button.setVisible(False)
             self.local_ocr_progress.setVisible(False)
+        elif not self._local_ocr_is_usable():
+            self.local_mode_radio.setEnabled(False)
+            self.local_engine_combo.setEnabled(False)
+            self.download_ocr_button.setVisible(False)
+            self.cancel_download_button.setVisible(False)
+            self.verify_ocr_button.setVisible(False)
+            self.remove_ocr_button.setVisible(False)
+            self.local_ocr_progress.setVisible(False)
 
     def _set_download_state(self, running: bool) -> None:
         self._refresh_operation_controls(download_running=running)
@@ -446,6 +483,13 @@ class SettingsWindow(QWidget):
     def download_local_ocr(self) -> None:
         if not self._local_ocr_supported:
             self._set_status("Local OCR for macOS is not installed/supported in this build.")
+            return
+        manifest_url = resolve_manifest_url(self.config_manager.project_root)
+        if not manifest_url:
+            self._set_status(
+                "Local OCR is supported on this Mac, but no component distribution is configured yet."
+            )
+            self._refresh_local_ocr_state()
             return
         if self._download_thread is not None and self._download_thread.isRunning():
             return
@@ -467,7 +511,6 @@ class SettingsWindow(QWidget):
             return
         if self.local_ocr_session is not None:
             self.local_ocr_session.stop()
-        manifest_url = resolve_manifest_url(self.config_manager.project_root)
         self._download_cancel_event = threading.Event()
         worker = LocalOCRDownloadWorker(manifest_url, self.component_manager, self._download_cancel_event)
         thread = QThread(self)
