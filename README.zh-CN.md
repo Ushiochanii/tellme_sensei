@@ -75,6 +75,8 @@ python -m pip install -r requirements-dev.txt
 python gui.py
 ```
 
+跨平台开发约定和构建命令见 [development.md](./docs/development.md)。
+
 Core/GUI 环境与 Local OCR worker 依赖刻意分开。只有开发 worker 时，才使用对应平台的 Local OCR 构建脚本和依赖文件。Apple Silicon 使用 `packaging/macos/local_ocr_arm64_requirements.txt`、`packaging/macos/local_ocr_arm64_constraints.txt` 和 `packaging/macos/local_ocr_arm64_build_requirements.txt` 中提交的 PaddleOCR 3.x ARM64 依赖集。
 
 ## 当前状态

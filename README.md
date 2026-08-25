@@ -75,6 +75,8 @@ python -m pip install -r requirements-dev.txt
 python gui.py
 ```
 
+See [development.md](./docs/development.md) for the cross-platform development contract and build commands.
+
 The Core/GUI environment is intentionally separate from Local OCR worker dependencies. Use the platform-specific Local OCR build scripts and requirements only when working on the worker. Apple Silicon uses the committed PaddleOCR 3.x ARM64 dependency set in `packaging/macos/local_ocr_arm64_requirements.txt`, `packaging/macos/local_ocr_arm64_constraints.txt`, and `packaging/macos/local_ocr_arm64_build_requirements.txt`.
 
 ## Status
