@@ -16,7 +16,7 @@ from typing import Callable
 from app.local_ocr.manifest import ComponentManifest, ManifestError
 from app.local_ocr.model_layout import model_root_is_complete
 from app.local_ocr.platform import LocalOCRPlatformSpec, current_spec, spec_for_manifest
-from app.local_ocr.version import current_local_ocr_version
+from app.local_ocr.version import local_ocr_version_for_spec
 from app.runtime_paths import user_runtime_directory
 
 
@@ -41,9 +41,9 @@ class LocalOCRComponentManager:
         platform_spec: LocalOCRPlatformSpec | None = None,
     ) -> None:
         self.runtime_root = Path(runtime_root) if runtime_root is not None else user_runtime_directory()
-        self.version = version or current_local_ocr_version()
         self._platform_spec_explicit = platform_spec is not None
         self.platform_spec = platform_spec or current_spec()
+        self.version = version or local_ocr_version_for_spec(self.platform_spec)
 
     @property
     def components_root(self) -> Path:
@@ -110,8 +110,9 @@ class LocalOCRComponentManager:
         manifest_spec = spec_for_manifest(manifest.platform, manifest.arch)
         if manifest_spec is None:
             raise ComponentError("Local OCR component platform or architecture is unsupported.")
-        if not self._platform_spec_explicit and manifest_spec.platform_id != current_spec().platform_id:
-            raise ComponentError("Local OCR component platform or architecture is unsupported on this host.")
+        expected_spec = self.platform_spec if self._platform_spec_explicit else current_spec()
+        if manifest_spec.platform_id != expected_spec.platform_id:
+            raise ComponentError("Local OCR component platform or architecture does not match the target.")
         # ComponentManifest has already performed host validation. Selecting
         # from its normalized values keeps explicit fixture managers stable.
         self.platform_spec = manifest_spec
@@ -122,6 +123,13 @@ class LocalOCRComponentManager:
             raise ComponentCancelled("Local OCR installation cancelled.")
         if progress:
             progress(0)
+        try:
+            archive_size = archive.stat().st_size
+        except OSError as exc:
+            raise ComponentError("Local OCR download file cannot be inspected.") from exc
+        if archive_size != manifest.size:
+            self._safe_unlink(archive)
+            raise ComponentError("Local OCR download size verification failed. Please download again.")
         if self._sha256(archive) != manifest.sha256.lower():
             self._safe_unlink(archive)
             raise ComponentError("Local OCR download checksum verification failed. Please download again.")

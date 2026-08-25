@@ -15,16 +15,13 @@ from app.local_ocr.version import local_ocr_release_tag_for_spec
 
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 DISTRIBUTION_REPOSITORY = "Ushiochanii/tellme-sensei-releases"
-DISTRIBUTION_RELEASE_TAG = local_ocr_release_tag_for_spec()
-DEFAULT_MANIFEST_URL = (
-    f"https://github.com/{DISTRIBUTION_REPOSITORY}/releases/download/"
-    f"{DISTRIBUTION_RELEASE_TAG}/local-ocr-manifest.json"
-)
 
 
-def production_manifest_url(platform_spec: object | None = None) -> str:
-    """Return the pinned production manifest URL for a normalized platform spec."""
+class ManifestError(ValueError):
+    """Raised when component metadata is missing or unsafe."""
 
+
+def _production_url_for_spec(platform_spec: object | None = None) -> str:
     release_tag = local_ocr_release_tag_for_spec(platform_spec)
     return (
         f"https://github.com/{DISTRIBUTION_REPOSITORY}/releases/download/"
@@ -32,8 +29,24 @@ def production_manifest_url(platform_spec: object | None = None) -> str:
     )
 
 
-class ManifestError(ValueError):
-    """Raised when component metadata is missing or unsafe."""
+try:
+    # Unsupported development hosts (including ARM64 during A4.1) have no
+    # production manifest URL.  Keep import-time defaults harmless there.
+    DISTRIBUTION_RELEASE_TAG = local_ocr_release_tag_for_spec()
+except ValueError:
+    DISTRIBUTION_RELEASE_TAG = ""
+    DEFAULT_MANIFEST_URL = ""
+else:
+    DEFAULT_MANIFEST_URL = _production_url_for_spec()
+
+
+def production_manifest_url(platform_spec: object | None = None) -> str:
+    """Return the pinned production manifest URL for a normalized platform spec."""
+
+    try:
+        return _production_url_for_spec(platform_spec)
+    except ValueError as exc:
+        raise ManifestError(str(exc)) from exc
 
 
 def current_platform() -> str:

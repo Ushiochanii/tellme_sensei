@@ -1,14 +1,19 @@
 from pathlib import Path
 
+import pytest
+
 from app.local_ocr.download import USER_AGENT
 from app.local_ocr.manifest import (
+    ComponentManifest,
     DEFAULT_MANIFEST_URL,
     DISTRIBUTION_REPOSITORY,
+    ManifestError,
     production_manifest_url,
     resolve_manifest_url,
 )
 from app.local_ocr.platform import spec_for_manifest
 from app.local_ocr.version import (
+    ARM64_LOCAL_OCR_ACCEPTANCE_VERSION,
     LOCAL_OCR_VERSION,
     MACOS_LOCAL_OCR_RELEASE_TAG,
     MACOS_LOCAL_OCR_VERSION,
@@ -41,10 +46,42 @@ def test_platform_production_manifest_routes_are_pinned() -> None:
         "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
         "local-ocr-v1.2.0-macos-x64/local-ocr-manifest.json"
     )
-    assert production_manifest_url(spec_for_manifest("macos", "arm64")) == (
-        "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
-        "local-ocr-v1.1.0/local-ocr-manifest.json"
-    )
+    with pytest.raises(ManifestError, match="no production"):
+        production_manifest_url(spec_for_manifest("macos", "arm64"))
+
+
+def test_arm64_acceptance_version_is_not_a_production_route() -> None:
+    arm_spec = spec_for_manifest("macos", "arm64")
+    assert arm_spec is not None
+    assert arm_spec.supported is False
+    assert current_local_ocr_version() == ARM64_LOCAL_OCR_ACCEPTANCE_VERSION
+
+
+def test_arm64_manifest_requires_macos_arm64_pair() -> None:
+    payload = {
+        "component": "local-ocr",
+        "version": ARM64_LOCAL_OCR_ACCEPTANCE_VERSION,
+        "platform": "macos",
+        "arch": "arm64",
+        "url": "http://127.0.0.1:8765/arm64.zip",
+        "sha256": "a" * 64,
+        "size": 1,
+        "archive_format": "zip",
+    }
+    assert ComponentManifest.from_dict(
+        payload, expected_platform="macos", expected_arch="arm64"
+    ).arch == "arm64"
+    for wrong_platform, wrong_arch in (
+        ("macos", "x86_64"),
+        ("windows", "x86_64"),
+        ("windows", "arm64"),
+    ):
+        with pytest.raises(ManifestError):
+            ComponentManifest.from_dict(
+                {**payload, "platform": wrong_platform, "arch": wrong_arch},
+                expected_platform="macos",
+                expected_arch="arm64",
+            )
 
 
 def test_manifest_url_precedence_keeps_environment_and_dotenv_separate(
