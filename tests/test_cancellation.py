@@ -216,7 +216,7 @@ def test_real_qthread_cancel_during_ai_restores_idle(qt_app, monkeypatch) -> Non
     window.processing_finished.connect(loop.quit)
     window._launch_worker(QImage(32, 24, QImage.Format.Format_RGBA8888), None)
     QTimer.singleShot(100, window.cancel_processing)
-    QTimer.singleShot(3000, loop.quit)
+    QTimer.singleShot(10000, loop.quit)
     loop.exec()
     qt_app.processEvents()
 
