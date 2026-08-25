@@ -5,19 +5,19 @@
 </p>
 
 <p align="center">
-  一个 Windows 桌面学习助手：框选屏幕上的题目，通过 OCR 识别文字，<br>
+  一个 Windows 和 macOS 桌面学习助手：框选屏幕上的题目，通过 OCR 识别文字，<br>
   再交给 DeepSeek 生成解释与答案。
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-v0.5.0-blue">
-  <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey">
+  <img alt="version" src="https://img.shields.io/badge/version-v0.6.0-blue">
+  <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%2B%20macOS-lightgrey">
 </p>
 
 ## 功能
 
 - 全局截图快捷键（默认 `Ctrl+Shift+Q`）
-- 鼠标拖拽框选屏幕区域
+- 鼠标拖拽框选屏幕区域，支持 macOS 全屏应用和多桌面
 - 悬浮窗口流式显示 DeepSeek 回答
 - **Local OCR**：PaddleOCR，本机处理
 - **Google Cloud Vision**：可选的 BYOK 在线 OCR
@@ -25,10 +25,17 @@
 
 ## 下载
 
-**[下载 TellMeSensei v0.5.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.5.0)**
+所有版本都发布在[规范仓库的 Releases 页面](https://github.com/Ushiochanii/tellme_sensei/releases)。
 
-Windows 安装包为当前用户安装，不需要管理员权限。
-目前尚未进行代码签名，因此 Windows SmartScreen 可能显示 **Unknown Publisher（未知发布者）**。
+| 平台 | TellMeSensei | Local OCR 组件 |
+|---|---|---|
+| Windows x64 | [v0.5.0 — TellMeSensei-Setup-0.5.0.exe](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.5.0) | [Local OCR 1.1.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.1.0) |
+| macOS Intel x86_64 | [v0.6.0 — TellMeSensei-0.6.0-macos-x64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.6.0) | [Local OCR 1.2.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.2.0-macos-x64) |
+| macOS Apple Silicon arm64 | [v0.6.0 — TellMeSensei-0.6.0-macos-arm64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.6.0) | [Local OCR 1.3.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.3.0-macos-arm64) |
+
+当前 Windows 二进制仍为 v0.5.0；两个 macOS 二进制均为 v0.6.0。
+
+macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安全性”中选择**仍要打开**，截图功能还需要授予屏幕录制权限。
 
 ## 快速开始
 
@@ -47,9 +54,9 @@ Windows 安装包为当前用户安装，不需要管理员权限。
 | 处理位置 | 本机 | 在线 |
 | 上传截图 | 否 | 是 |
 | OCR API Key | 不需要 | 需要 |
-| 额外下载 | 约 255 MB | 不需要 |
+| 额外下载 | 约 255–391 MB，因平台而异 | 不需要 |
 
-默认使用 Local OCR。TellMeSensei **不会静默切换 OCR 服务**。
+Local OCR 按平台作为独立组件分发。TellMeSensei **不会静默切换 OCR 服务**。
 
 ## 隐私
 
@@ -60,33 +67,20 @@ Windows 安装包为当前用户安装，不需要管理员权限。
 
 ## 开发
 
-环境要求：Windows 10/11、Python 3.12。
+环境要求：Windows 或 macOS、Python 3.12。
 
-```powershell
+```sh
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
-python -m pip install -r requirements-local-ocr.txt
 python gui.py
 ```
 
-构建与测试：
-
-```powershell
-.\scripts\build_installer.ps1
-pytest
-```
-
-Local OCR 以独立组件（`v1.1.0`）发布，因此 Core 安装包可以保持较小体积。
+Core/GUI 环境与 Local OCR worker 依赖刻意分开。只有开发 worker 时，才使用对应平台的 Local OCR 构建脚本和依赖文件。Apple Silicon 使用 `packaging/macos/local_ocr_arm64_requirements.txt`、`packaging/macos/local_ocr_arm64_constraints.txt` 和 `packaging/macos/local_ocr_arm64_build_requirements.txt` 中提交的 PaddleOCR 3.x ARM64 依赖集。
 
 ## 当前状态
 
-- **当前版本：** `v0.5.0`
-- **Local OCR 组件：** `v1.1.0`
-- **Windows 10/11：** 已支持
-- **macOS：** 计划支持
+- **应用版本：** macOS v0.6.0；Windows 稳定版本 v0.5.0
+- **Local OCR：** Windows 1.1.0 · macOS Intel 1.2.0 · macOS Apple Silicon 1.3.0
 - **自动更新：** 尚未实现
-- **代码签名：** 尚未实现
 
-更多信息见 [v0.5.0 Release Notes](./docs/releases/v0.5.0.md)。
+更多信息见 [v0.6.0 Release Notes](./docs/releases/v0.6.0.md)。

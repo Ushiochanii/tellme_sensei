@@ -1,4 +1,4 @@
-"""Phase 1-3 command-line entry point; GUI is intentionally not included yet."""
+"""TellMeSensei command-line study pipeline entry point."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from app.services.ocr_service import OCRService
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Study Assistant Phase 1-3 CLI pipeline")
+    parser = argparse.ArgumentParser(description="TellMeSensei desktop study assistant CLI")
     parser.add_argument("image", type=Path, help="题目截图路径")
     return parser
 

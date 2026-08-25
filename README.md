@@ -5,30 +5,37 @@
 </p>
 
 <p align="center">
-  A Windows desktop study assistant that captures a question from your screen,<br>
+  A Windows and macOS desktop study assistant that captures a question from your screen,<br>
   recognizes it with OCR, and asks DeepSeek for an explanation.
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-v0.5.0-blue">
-  <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey">
+  <img alt="version" src="https://img.shields.io/badge/version-v0.6.0-blue">
+  <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%2B%20macOS-lightgrey">
 </p>
 
 ## Features
 
 - Global screenshot hotkey (`Ctrl+Shift+Q` by default)
-- Drag-to-select screen capture
+- Drag-to-select screen capture, including macOS fullscreen and Spaces
 - Floating answer window with streaming DeepSeek output
 - **Local OCR** with PaddleOCR, processed on-device
 - **Google Cloud Vision** as an optional BYOK online OCR mode
 - Configurable hotkey, persistent window geometry, system tray, and cancellation
 
-## Download
+## Downloads
 
-**[Download TellMeSensei v0.5.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.5.0)**
+All releases are published in the [canonical repository Releases](https://github.com/Ushiochanii/tellme_sensei/releases).
 
-The Windows installer is per-user and does not require administrator privileges.
-It is currently unsigned, so Windows SmartScreen may show an **Unknown Publisher** warning.
+| Platform | TellMeSensei | Local OCR component |
+|---|---|---|
+| Windows x64 | [v0.5.0 — TellMeSensei-Setup-0.5.0.exe](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.5.0) | [Local OCR 1.1.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.1.0) |
+| macOS Intel x86_64 | [v0.6.0 — TellMeSensei-0.6.0-macos-x64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.6.0) | [Local OCR 1.2.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.2.0-macos-x64) |
+| macOS Apple Silicon arm64 | [v0.6.0 — TellMeSensei-0.6.0-macos-arm64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.6.0) | [Local OCR 1.3.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.3.0-macos-arm64) |
+
+The current Windows binary is still v0.5.0; both macOS binaries are v0.6.0.
+
+macOS builds are ad-hoc signed and not notarized. macOS may require **Open Anyway** in **Privacy & Security**, and Screen Recording permission is required for capture.
 
 ## Quick start
 
@@ -47,9 +54,9 @@ It is currently unsigned, so Windows SmartScreen may show an **Unknown Publisher
 | Processing | On-device | Online |
 | Screenshot upload | No | Yes |
 | OCR API key | No | Yes |
-| Extra download | ~255 MB | No |
+| Extra download | Approximately 255–391 MB, depending on platform | No |
 
-Local OCR is the default. TellMeSensei does **not** silently switch between OCR providers.
+Local OCR is distributed as a separate, platform-specific component. TellMeSensei does **not** silently switch between OCR providers.
 
 ## Privacy
 
@@ -60,33 +67,20 @@ Local OCR is the default. TellMeSensei does **not** silently switch between OCR 
 
 ## Development
 
-Requirements: Windows 10/11, Python 3.12.
+Requirements: Windows or macOS, Python 3.12.
 
-```powershell
+```sh
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
-python -m pip install -r requirements-local-ocr.txt
 python gui.py
 ```
 
-Build and test:
-
-```powershell
-.\scripts\build_installer.ps1
-pytest
-```
-
-Local OCR is distributed as a separate component (`v1.1.0`) so the Core installer stays lightweight.
+The Core/GUI environment is intentionally separate from Local OCR worker dependencies. Use the platform-specific Local OCR build scripts and requirements only when working on the worker. Apple Silicon uses the committed PaddleOCR 3.x ARM64 dependency set in `packaging/macos/local_ocr_arm64_requirements.txt`, `packaging/macos/local_ocr_arm64_constraints.txt`, and `packaging/macos/local_ocr_arm64_build_requirements.txt`.
 
 ## Status
 
-- **Current release:** `v0.5.0`
-- **Local OCR component:** `v1.1.0`
-- **Windows 10/11:** supported
-- **macOS:** planned
+- **Application release:** macOS v0.6.0; Windows stable binary v0.5.0
+- **Local OCR:** Windows 1.1.0 · macOS Intel 1.2.0 · macOS Apple Silicon 1.3.0
 - **Auto updater:** not implemented yet
-- **Code signing:** not implemented yet
 
-See the [v0.5.0 release notes](./docs/releases/v0.5.0.md) for details.
+See the [v0.6.0 release notes](./docs/releases/v0.6.0.md) for details.

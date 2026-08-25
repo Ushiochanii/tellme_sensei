@@ -1,4 +1,4 @@
-"""Phase 7 tray-mode GUI entry point."""
+"""TellMeSensei tray-mode GUI entry point."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Study Assistant GUI Phase 7")
+    parser = argparse.ArgumentParser(description="TellMeSensei desktop study assistant")
     parser.add_argument(
         "--show-window",
         action="store_true",

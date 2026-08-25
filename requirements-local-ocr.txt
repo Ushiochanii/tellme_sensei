@@ -1,4 +1,11 @@
-# Dependencies used only by the external TellMeSenseiOCR component.
+# PaddleOCR 2.x dependencies for the corresponding Windows and macOS Intel
+# Local OCR worker environments. Apple Silicon uses the committed ARM64
+# PaddleOCR 3.x dependency files under packaging/macos instead.
+#
+# Apple Silicon files:
+# packaging/macos/local_ocr_arm64_requirements.txt
+# packaging/macos/local_ocr_arm64_constraints.txt
+# packaging/macos/local_ocr_arm64_build_requirements.txt
 Pillow>=10.0.0,<12.0.0
 numpy>=1.26.0,<2.0.0
 setuptools>=65.0.0

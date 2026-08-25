@@ -1,6 +1,0 @@
-{
-  "model": "deepseek-chat",
-  "base_url": "https://api.deepseek.com",
-  "request_timeout": 60,
-  "ocr_language": "japan"
-}
