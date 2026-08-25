@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import threading
 from typing import Any
@@ -25,6 +26,20 @@ SYSTEM_PROMPT = """你是一个考试学习助手。
 【知识点】...
 """
 
+VISION_MODEL = "deepseek-v4-flash-vision-exp"
+VISION_SYSTEM_PROMPT = """你是一个考试学习助手。
+用户会提供一张题目截图，截图本身是主要信息来源，不要假设已经完成 OCR。
+请识别题目、相关文字/标签/坐标轴/选项，并在存在图表、表格、几何图形、网络拓扑、流程图或其他视觉结构时结合图形进行推理。
+对于选择题，请明确指出所选选项并解释理由；不要猜测无法读清或无法判断的信息。
+请使用以下格式回答：
+
+【答案】...
+
+【解析】...
+
+【知识点】...
+"""
+
 
 class DeepSeekError(RuntimeError):
     """A user-facing, key-safe DeepSeek request error."""
@@ -35,7 +50,7 @@ class DeepSeekCancelled(DeepSeekError):
 
 
 class DeepSeekService:
-    """Send normalized OCR text to DeepSeek through the OpenAI-compatible SDK."""
+    """Send Text and Vision requests through the OpenAI-compatible SDK."""
 
     def __init__(self, config: AppConfig, client: Any | None = None) -> None:
         self.config = config
@@ -53,16 +68,69 @@ class DeepSeekService:
             raise DeepSeekError("OCR 没有识别到有效文字，无法请求 DeepSeek。")
         self._raise_if_cancelled(cancel_event)
 
+        return self._stream_completion(
+            model=self.config.model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"下面是 OCR 识别到的题目：\n\n{text}"},
+            ],
+            cancel_event=cancel_event,
+            log_context=f"text_length={len(text)}",
+        )
+
+    def analyze_image(
+        self,
+        image_bytes: bytes,
+        mime_type: str = "image/png",
+        cancel_event: threading.Event | None = None,
+    ) -> str:
+        """Send one in-memory screenshot directly to the fixed Vision model."""
+
+        if not isinstance(image_bytes, (bytes, bytearray)) or not image_bytes:
+            raise DeepSeekError("截图内容为空，无法请求 DeepSeek Vision。")
+        mime_type = mime_type.strip().lower()
+        if mime_type != "image/png":
+            raise DeepSeekError("Vision Mode 当前只支持 PNG 截图。")
+        self._raise_if_cancelled(cancel_event)
+        encoded = base64.b64encode(bytes(image_bytes)).decode("ascii")
+        data_url = f"data:{mime_type};base64,{encoded}"
+        return self._stream_completion(
+            model=VISION_MODEL,
+            messages=[
+                {"role": "system", "content": VISION_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "请直接分析这张题目截图，并按指定格式给出答案、解析和知识点。",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url},
+                        },
+                    ],
+                },
+            ],
+            cancel_event=cancel_event,
+            log_context=f"image_bytes={len(image_bytes)} model={VISION_MODEL}",
+        )
+
+    def _stream_completion(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        cancel_event: threading.Event | None,
+        log_context: str,
+    ) -> str:
         client = self._get_client()
-        logger.info("DeepSeek API request started text_length=%d", len(text))
+        logger.info("DeepSeek API request started %s", log_context)
         response = None
         try:
             response = client.chat.completions.create(
-                model=self.config.model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"下面是 OCR 识别到的题目：\n\n{text}"},
-                ],
+                model=model,
+                messages=messages,
                 temperature=0.2,
                 timeout=self.config.request_timeout,
                 stream=True,

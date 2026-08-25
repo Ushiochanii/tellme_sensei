@@ -5,18 +5,18 @@
 </p>
 
 <p align="center">
-  A Windows and macOS desktop study assistant that captures a question from your screen,<br>
-  recognizes it with OCR, and asks DeepSeek for an explanation.
+  A Windows and macOS desktop study assistant with explicit Text and Vision analysis modes.
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-v0.6.0-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v0.7.0-blue">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%2B%20macOS-lightgrey">
 </p>
 
 ## Features
 
-- Global screenshot hotkey (`Ctrl+Shift+Q` by default)
+- Text Mode screenshot hotkey (`Ctrl+Shift+Q` by default)
+- Vision Mode screenshot hotkey (`Ctrl+Shift+W` by default)
 - Drag-to-select screen capture, including macOS fullscreen and Spaces
 - Floating answer window with streaming DeepSeek output
 - **Local OCR** with PaddleOCR, processed on-device
@@ -44,7 +44,16 @@ macOS builds are ad-hoc signed and not notarized. macOS may require **Open Anywa
 3. Choose an OCR mode:
    - **Local OCR:** click **Download Local OCR** in Settings.
    - **Google Cloud Vision:** enter your own Google Vision API key and test the connection.
-4. Press `Ctrl+Shift+Q`, drag over a question, and wait for the answer window.
+4. Press `Ctrl+Shift+Q` for a text/OCR question or `Ctrl+Shift+W` for a diagram-heavy Vision question, drag over the question, and wait for the answer window.
+
+## Analysis modes
+
+| Mode | Shortcut | Pipeline | Best for |
+|---|---|---|---|
+| Text Mode | `Ctrl+Shift+Q` | Screenshot → configured OCR → DeepSeek text analysis | Text-heavy questions |
+| Vision Mode | `Ctrl+Shift+W` | Screenshot → DeepSeek Vision | Diagrams, charts, geometry, flowcharts, and graphical questions |
+
+Vision Mode always uses `deepseek-v4-flash-vision-exp` and sends the captured screenshot directly to DeepSeek. The user explicitly chooses the mode; TellMeSensei does not automatically switch or fall back between Text and Vision.
 
 ## OCR modes
 
@@ -62,6 +71,7 @@ Local OCR is distributed as a separate, platform-specific component. TellMeSense
 
 - With **Local OCR**, screenshots stay on the device during OCR.
 - With **Google Cloud Vision**, screenshots are uploaded to Google for OCR only when that mode is selected.
+- With **Vision Mode**, screenshots are sent directly to DeepSeek Vision for image analysis.
 - Recognized question text is sent to **DeepSeek** to generate the answer.
 - Logs avoid storing API keys, full question text, or screenshots.
 
@@ -81,7 +91,7 @@ The Core/GUI environment is intentionally separate from Local OCR worker depende
 
 ## Status
 
-- **Application release:** macOS v0.6.0; Windows stable binary v0.5.0
+- **Application development target:** v0.7.0; published macOS binaries remain v0.6.0 and the Windows stable binary remains v0.5.0
 - **Local OCR:** Windows 1.1.0 · macOS Intel 1.2.0 · macOS Apple Silicon 1.3.0
 - **Auto updater:** not implemented yet
 

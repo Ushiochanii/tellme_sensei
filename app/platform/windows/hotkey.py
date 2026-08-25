@@ -11,7 +11,7 @@ from typing import Callable
 from PySide6.QtCore import QAbstractNativeEventFilter, QObject
 
 from app.platform.base import GlobalHotkeyManager
-from app.platform.hotkey import DEFAULT_SHORTCUT, HotkeySpec, HotkeySpecError
+from app.platform.hotkey import DEFAULT_SHORTCUT, TEXT_HOTKEY_ID, HotkeySpec, HotkeySpecError
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,8 @@ MOD_CONTROL = 0x0002
 MOD_ALT = 0x0001
 MOD_SHIFT = 0x0004
 VK_Q = 0x51
-HOTKEY_ID = 0x5341
+# Backward-compatible name for the original Text Mode registration ID.
+HOTKEY_ID = TEXT_HOTKEY_ID
 
 _MODIFIER_BITS = {"Ctrl": MOD_CONTROL, "Alt": MOD_ALT, "Shift": MOD_SHIFT}
 _KEY_CODES = {
@@ -52,10 +53,11 @@ class WindowsGlobalHotkey(GlobalHotkeyManager, QAbstractNativeEventFilter):
         unregister_func: Callable[[object, int], int] | None = None,
         *,
         shortcut: str = DEFAULT_SHORTCUT,
+        hotkey_id: int = TEXT_HOTKEY_ID,
     ) -> None:
         GlobalHotkeyManager.__init__(self, parent)
         QAbstractNativeEventFilter.__init__(self)
-        self.hotkey_id = HOTKEY_ID
+        self.hotkey_id = hotkey_id
         try:
             self._spec = HotkeySpec.parse(shortcut)
         except HotkeySpecError:

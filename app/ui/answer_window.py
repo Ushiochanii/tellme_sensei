@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.analysis import AnalysisMode
 from app.settings.repository import SettingsRepository
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ class AnswerWindow(QWidget):
         self._restore_saved_geometry()
         self._ocr_text = ""
         self._answer_text = ""
+        self._vision_mode = False
         self._closed_emitted = False
 
         root = QVBoxLayout(self)
@@ -105,7 +107,8 @@ class AnswerWindow(QWidget):
         self.status_label.setObjectName("statusLabel")
         body_layout.addWidget(self.status_label)
 
-        body_layout.addWidget(self._section_label("识别题目"))
+        self.ocr_section_label = self._section_label("识别题目")
+        body_layout.addWidget(self.ocr_section_label)
         self.ocr_edit = QPlainTextEdit()
         self.ocr_edit.setReadOnly(True)
         self.ocr_edit.setPlaceholderText("截图后将在这里显示 OCR 文本。")
@@ -166,6 +169,7 @@ class AnswerWindow(QWidget):
         return label
 
     def show_processing(self) -> None:
+        self.set_mode(AnalysisMode.TEXT)
         self._answer_text = ""
         self.answer_edit.clear()
         self.copy_button.setEnabled(False)
@@ -175,6 +179,31 @@ class AnswerWindow(QWidget):
         self.stop_button.setEnabled(True)
         self.set_status("正在识别题目...")
         self.show_at_current_screen()
+
+    def show_vision_processing(self) -> None:
+        self.set_mode(AnalysisMode.VISION)
+        self._answer_text = ""
+        self.answer_edit.clear()
+        self.copy_button.setEnabled(False)
+        self.retry_button.setEnabled(False)
+        self.recapture_button.setVisible(False)
+        self.stop_button.setVisible(True)
+        self.stop_button.setEnabled(True)
+        self.set_status("正在分析截图...")
+        self.show_at_current_screen()
+
+    def set_mode(self, mode: AnalysisMode | str) -> None:
+        """Show only the UI relevant to the selected analysis pipeline."""
+
+        self._vision_mode = mode is AnalysisMode.VISION or str(mode) in {
+            AnalysisMode.VISION.value,
+            "AnalysisMode.VISION",
+        }
+        self.ocr_section_label.setVisible(not self._vision_mode)
+        self.ocr_edit.setVisible(not self._vision_mode)
+        if self._vision_mode:
+            self._ocr_text = ""
+            self.ocr_edit.clear()
 
     def set_ocr_processing(self) -> None:
         self.set_status("正在识别题目...")
@@ -241,6 +270,16 @@ class AnswerWindow(QWidget):
         self.stop_button.setVisible(True)
         self.stop_button.setEnabled(True)
 
+    def set_vision_ai_processing(self) -> None:
+        self._answer_text = ""
+        self.set_status("正在分析截图...")
+        self.answer_edit.clear()
+        self.copy_button.setEnabled(False)
+        self.retry_button.setEnabled(False)
+        self.recapture_button.setVisible(False)
+        self.stop_button.setVisible(True)
+        self.stop_button.setEnabled(True)
+
     def set_cancelling(self) -> None:
         self.set_status("正在取消...")
         self.stop_button.setEnabled(False)
@@ -254,7 +293,7 @@ class AnswerWindow(QWidget):
         self.stop_button.setVisible(False)
         self.stop_button.setEnabled(False)
         self.copy_button.setEnabled(False)
-        self.retry_button.setEnabled(bool(self._ocr_text))
+        self.retry_button.setEnabled(self._vision_mode or bool(self._ocr_text))
         self.recapture_button.setVisible(True)
         self.recapture_button.setEnabled(True)
 
@@ -266,7 +305,7 @@ class AnswerWindow(QWidget):
         self.stop_button.setEnabled(False)
         self.recapture_button.setVisible(False)
         self.copy_button.setEnabled(bool(answer))
-        self.retry_button.setEnabled(bool(self._ocr_text))
+        self.retry_button.setEnabled(self._vision_mode or bool(self._ocr_text))
 
     def show_error(self, message: str) -> None:
         self._answer_text = ""
@@ -276,10 +315,11 @@ class AnswerWindow(QWidget):
         self.stop_button.setEnabled(False)
         self.copy_button.setEnabled(False)
         self.recapture_button.setVisible(False)
-        self.retry_button.setEnabled(bool(self._ocr_text))
+        self.retry_button.setEnabled(self._vision_mode or bool(self._ocr_text))
 
-    def set_retry_enabled(self, enabled: bool) -> None:
-        self.retry_button.setEnabled(enabled and bool(self._ocr_text))
+    def set_retry_enabled(self, enabled: bool | None = None) -> None:
+        source_available = self._vision_mode or bool(self._ocr_text)
+        self.retry_button.setEnabled(source_available if enabled is None else enabled and source_available)
 
     def copy_answer(self) -> None:
         if not self._answer_text:

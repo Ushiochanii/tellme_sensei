@@ -64,6 +64,9 @@ class SettingsRepository:
         shortcut = raw.get("global_shortcut")
         if isinstance(shortcut, str) and shortcut.strip():
             settings["global_shortcut"] = shortcut.strip()
+        vision_shortcut = raw.get("vision_global_shortcut")
+        if isinstance(vision_shortcut, str) and vision_shortcut.strip():
+            settings["vision_global_shortcut"] = vision_shortcut.strip()
         geometry = self._normalize_geometry(raw.get("answer_window_geometry"))
         if geometry is not None:
             settings["answer_window_geometry"] = geometry
@@ -96,6 +99,11 @@ class SettingsRepository:
             if not shortcut:
                 raise ValueError("global_shortcut 不能为空")
             payload["global_shortcut"] = shortcut
+        if "vision_global_shortcut" in settings:
+            shortcut = str(settings["vision_global_shortcut"]).strip()
+            if not shortcut:
+                raise ValueError("vision_global_shortcut 不能为空")
+            payload["vision_global_shortcut"] = shortcut
         if "ocr_provider" in settings:
             provider = str(settings["ocr_provider"]).strip().lower()
             if provider not in {"local", "google_vision"}:

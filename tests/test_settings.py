@@ -133,6 +133,24 @@ def test_saved_shortcut_is_restored_on_startup(tmp_path, monkeypatch) -> None:
     assert make_manager(tmp_path).load(False).global_shortcut == "Ctrl+Alt+A"
 
 
+def test_vision_shortcut_uses_environment_saved_dotenv_default_precedence(tmp_path, monkeypatch) -> None:
+    write_dotenv(tmp_path, VISION_GLOBAL_SHORTCUT="Ctrl+Alt+F1")
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.update({"vision_global_shortcut": "Ctrl+Alt+F2"})
+    monkeypatch.delenv("VISION_GLOBAL_SHORTCUT", raising=False)
+    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Alt+F2"
+
+    monkeypatch.setenv("VISION_GLOBAL_SHORTCUT", "Ctrl+Alt+F3")
+    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Alt+F3"
+
+    repository.path.unlink()
+    monkeypatch.delenv("VISION_GLOBAL_SHORTCUT", raising=False)
+    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Alt+F1"
+
+    (tmp_path / ".env").unlink()
+    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Shift+W"
+
+
 def test_invalid_saved_shortcut_falls_back_to_default(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("GLOBAL_SHORTCUT", raising=False)
     SettingsRepository(tmp_path / "settings.json").update(
@@ -255,6 +273,56 @@ def test_failed_shortcut_rebind_does_not_persist_new_value(qt_app, tmp_path) -> 
     qt_app.processEvents()
 
 
+def test_identical_text_and_vision_shortcuts_are_rejected(qt_app, tmp_path) -> None:
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+Q"))
+    window.save()
+    assert "different" in window.status_label.text()
+    assert window.config_manager.settings_repository.load() == {}
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebinds_roll_back_when_vision_registration_fails(qt_app, tmp_path) -> None:
+    text_hotkey = FakeHotkeyManager()
+    vision_hotkey = FakeHotkeyManager("Ctrl+Shift+W", rebind_result=False)
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+A"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+B"))
+    window.save()
+
+    assert text_hotkey.shortcut == "Ctrl+Shift+Q"
+    assert vision_hotkey.shortcut == "Ctrl+Shift+W"
+    assert window.config_manager.settings_repository.load() == {}
+    assert "注册失败" in window.status_label.text()
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebinds_attempt_vision_after_text_failure(qt_app, tmp_path) -> None:
+    text_hotkey = FakeHotkeyManager(rebind_result=False)
+    vision_hotkey = FakeHotkeyManager("Ctrl+Shift+W")
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+A"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+B"))
+    window.save()
+
+    assert text_hotkey.rebind_calls == ["Ctrl+Alt+A"]
+    assert vision_hotkey.rebind_calls == ["Ctrl+Alt+B", "Ctrl+Shift+W"]
+    assert vision_hotkey.shortcut == "Ctrl+Shift+W"
+    assert window.config_manager.settings_repository.load() == {}
+    window.deleteLater()
+    qt_app.processEvents()
+
+
 def test_settings_cancel_discards_edits_and_reopen_reloads_saved_values(qt_app, tmp_path) -> None:
     manager = make_manager(tmp_path, FakeSecretStore("key"))
     window = MainWindow(tray_mode=True, config_manager=manager)
@@ -302,6 +370,7 @@ def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
         "model": "new-model",
         "request_timeout": 33.0,
         "global_shortcut": "Ctrl+Shift+Q",
+        "vision_global_shortcut": "Ctrl+Shift+W",
         "ocr_provider": "local",
         "online_ocr_timeout": 15.0,
     }

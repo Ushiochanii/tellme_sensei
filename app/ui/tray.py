@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 class SystemTrayController(QObject):
     """Own the tray icon and expose GUI-safe actions as Qt signals."""
 
+    text_capture_requested = Signal()
+    vision_capture_requested = Signal()
+    # Retain the old signal name for external callers and existing integrations.
     capture_requested = Signal()
     settings_requested = Signal()
     exit_requested = Signal()
@@ -25,11 +28,13 @@ class SystemTrayController(QObject):
         title = self.menu.addAction("学习助手")
         title.setEnabled(False)
         self.menu.addSeparator()
-        capture = self.menu.addAction("截图识别")
+        text_capture = self.menu.addAction("截图识别（文字题）")
+        vision_capture = self.menu.addAction("截图分析（图形题）")
         settings = self.menu.addAction("设置")
         self.menu.addSeparator()
         exit_action = self.menu.addAction("退出")
-        capture.triggered.connect(self.trigger_capture)
+        text_capture.triggered.connect(self.trigger_text_capture)
+        vision_capture.triggered.connect(self.trigger_vision_capture)
         settings.triggered.connect(self.trigger_settings)
         exit_action.triggered.connect(self.trigger_exit)
         self.tray.setContextMenu(self.menu)
@@ -53,8 +58,18 @@ class SystemTrayController(QObject):
         self.tray.hide()
 
     def trigger_capture(self) -> None:
-        logger.info("tray capture triggered")
+        """Backward-compatible alias for the Text Mode tray action."""
+
+        self.trigger_text_capture()
+
+    def trigger_text_capture(self) -> None:
+        logger.info("tray text capture triggered")
+        self.text_capture_requested.emit()
         self.capture_requested.emit()
+
+    def trigger_vision_capture(self) -> None:
+        logger.info("tray vision capture triggered")
+        self.vision_capture_requested.emit()
 
     def trigger_settings(self) -> None:
         self.settings_requested.emit()

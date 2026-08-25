@@ -39,7 +39,12 @@ def main(argv: list[str] | None = None) -> int:
     from app.config import ConfigError, ConfigManager
     from app.logging_config import configure_logging
     from app.platform.factory import create_global_hotkey_manager
-    from app.platform.hotkey import DEFAULT_SHORTCUT
+    from app.platform.hotkey import (
+        DEFAULT_SHORTCUT,
+        DEFAULT_VISION_SHORTCUT,
+        TEXT_HOTKEY_ID,
+        VISION_HOTKEY_ID,
+    )
     from app.runtime_paths import APPLICATION_DIRECTORY
     from app.single_instance import SingleInstanceGuard
     from app.ui.application_controller import ApplicationController
@@ -62,18 +67,30 @@ def main(argv: list[str] | None = None) -> int:
     try:
         startup_config = config_manager.load(require_api_key=False)
         startup_shortcut = startup_config.global_shortcut
+        startup_vision_shortcut = startup_config.vision_global_shortcut
     except ConfigError as exc:
         logger.warning("invalid startup settings; using default shortcut: %s", exc)
         startup_shortcut = DEFAULT_SHORTCUT
+        startup_vision_shortcut = DEFAULT_VISION_SHORTCUT
     tray = SystemTrayController(parent=app)
-    hotkey = create_global_hotkey_manager(parent=app, shortcut=startup_shortcut)
+    text_hotkey = create_global_hotkey_manager(
+        parent=app,
+        shortcut=startup_shortcut,
+        hotkey_id=TEXT_HOTKEY_ID,
+    )
+    vision_hotkey = create_global_hotkey_manager(
+        parent=app,
+        shortcut=startup_vision_shortcut,
+        hotkey_id=VISION_HOTKEY_ID,
+    )
     window = MainWindow(
         debug_capture_path=args.debug_capture,
         tray_mode=not args.show_window,
         config_manager=config_manager,
-        hotkey_manager=hotkey,
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
     )
-    controller = ApplicationController(app, window, tray, hotkey)
+    controller = ApplicationController(app, window, tray, text_hotkey, vision_hotkey)
     # Keep the Python wrapper alive as well as the QObject parent relationship.
     controller.single_instance_guard = single_instance
     app.aboutToQuit.connect(controller.cleanup)

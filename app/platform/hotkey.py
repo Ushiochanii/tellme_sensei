@@ -6,6 +6,9 @@ from dataclasses import dataclass
 
 SUPPORTED_MODIFIERS = ("Ctrl", "Alt", "Shift")
 DEFAULT_SHORTCUT = "Ctrl+Shift+Q"
+DEFAULT_VISION_SHORTCUT = "Ctrl+Shift+W"
+TEXT_HOTKEY_ID = 0x5341
+VISION_HOTKEY_ID = 0x5342
 _SUPPORTED_KEYS = {
     *"ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     *"0123456789",

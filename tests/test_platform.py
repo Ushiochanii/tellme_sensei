@@ -4,7 +4,7 @@ import inspect
 
 from app.platform.base import GlobalHotkeyManager
 from app.platform.factory import create_global_hotkey_manager
-from app.platform.hotkey import HotkeySpec, HotkeySpecError
+from app.platform.hotkey import TEXT_HOTKEY_ID, VISION_HOTKEY_ID, HotkeySpec, HotkeySpecError
 from app.platform.macos.hotkey import MacOSGlobalHotkey
 from app.platform.unsupported import UnsupportedGlobalHotkey
 from app.platform.windows import hotkey as windows_hotkey
@@ -223,3 +223,75 @@ def test_windows_rebind_failure_restores_old_shortcut(qt_app) -> None:
     assert manager.registered is True
     assert calls[-1] == ("register", ord("Q"))
     manager.unregister()
+
+
+def test_windows_two_hotkeys_use_distinct_ids_and_filter_events(qt_app) -> None:
+    calls: list[tuple] = []
+
+    def register(hwnd, hotkey_id, modifiers, key) -> int:
+        calls.append(("register", hotkey_id, modifiers, key))
+        return 1
+
+    def unregister(hwnd, hotkey_id) -> int:
+        calls.append(("unregister", hotkey_id))
+        return 1
+
+    text = WindowsGlobalHotkey(
+        qt_app,
+        register,
+        unregister,
+        hotkey_id=TEXT_HOTKEY_ID,
+    )
+    vision = WindowsGlobalHotkey(
+        qt_app,
+        register,
+        unregister,
+        shortcut="Ctrl+Shift+W",
+        hotkey_id=VISION_HOTKEY_ID,
+    )
+    text_events: list[bool] = []
+    vision_events: list[bool] = []
+    text.triggered.connect(lambda: text_events.append(True))
+    vision.triggered.connect(lambda: vision_events.append(True))
+
+    assert text.register() is True
+    assert vision.register() is True
+    assert [call[1] for call in calls[:2]] == [TEXT_HOTKEY_ID, VISION_HOTKEY_ID]
+    assert text.handle_hotkey(TEXT_HOTKEY_ID) is True
+    assert text.handle_hotkey(VISION_HOTKEY_ID) is False
+    assert vision.handle_hotkey(VISION_HOTKEY_ID) is True
+    assert vision.handle_hotkey(TEXT_HOTKEY_ID) is False
+    assert text_events == [True]
+    assert vision_events == [True]
+    text.unregister()
+    vision.unregister()
+    assert calls[-2:] == [("unregister", TEXT_HOTKEY_ID), ("unregister", VISION_HOTKEY_ID)]
+
+
+def test_macos_two_hotkeys_pass_distinct_ids_to_carbon_backend(qt_app) -> None:
+    text_backend = _FakeMacHotkeyBackend()
+    vision_backend = _FakeMacHotkeyBackend()
+    text = MacOSGlobalHotkey(qt_app, backend=text_backend, hotkey_id=TEXT_HOTKEY_ID)
+    vision = MacOSGlobalHotkey(
+        qt_app,
+        shortcut="Ctrl+Shift+W",
+        backend=vision_backend,
+        hotkey_id=VISION_HOTKEY_ID,
+    )
+
+    assert text.register() is True
+    assert vision.register() is True
+    assert text_backend.calls[0][2] == TEXT_HOTKEY_ID
+    assert vision_backend.calls[0][2] == VISION_HOTKEY_ID
+    text_events: list[bool] = []
+    vision_events: list[bool] = []
+    text.triggered.connect(lambda: text_events.append(True))
+    vision.triggered.connect(lambda: vision_events.append(True))
+    text_backend.callback(VISION_HOTKEY_ID)
+    vision_backend.callback(TEXT_HOTKEY_ID)
+    text_backend.callback(TEXT_HOTKEY_ID)
+    vision_backend.callback(VISION_HOTKEY_ID)
+    assert text_events == [True]
+    assert vision_events == [True]
+    text.unregister()
+    vision.unregister()
