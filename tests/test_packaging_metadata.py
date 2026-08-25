@@ -52,7 +52,7 @@ def test_local_ocr_distribution_metadata_is_versioned_and_public() -> None:
     publish_script = (ROOT / "scripts" / "publish_local_ocr.ps1").read_text(encoding="utf-8")
     manifest = (ROOT / "app" / "local_ocr" / "manifest.py").read_text(encoding="utf-8")
 
-    assert "Ushiochanii/tellme-sensei-releases" in manifest
+    assert "Ushiochanii/tellme_sensei" in manifest
     assert "local_ocr_release_tag_for_spec" in manifest
     assert "downloads.example.invalid" not in package_script
     assert "schema_version = 1" in package_script

@@ -25,7 +25,7 @@
 
 ## Download
 
-**[Download TellMeSensei v0.5.0](https://github.com/Ushiochanii/tellme-sensei-releases/releases/tag/v0.5.0)**
+**[Download TellMeSensei v0.5.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.5.0)**
 
 The Windows installer is per-user and does not require administrator privileges.
 It is currently unsigned, so Windows SmartScreen may show an **Unknown Publisher** warning.

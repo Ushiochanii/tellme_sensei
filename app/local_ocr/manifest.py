@@ -14,7 +14,7 @@ from app.local_ocr.platform import current_spec
 from app.local_ocr.version import local_ocr_release_tag_for_spec
 
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
-DISTRIBUTION_REPOSITORY = "Ushiochanii/tellme-sensei-releases"
+DISTRIBUTION_REPOSITORY = "Ushiochanii/tellme_sensei"
 
 
 class ManifestError(ValueError):

@@ -25,7 +25,7 @@
 
 ## 下载
 
-**[下载 TellMeSensei v0.5.0](https://github.com/Ushiochanii/tellme-sensei-releases/releases/tag/v0.5.0)**
+**[下载 TellMeSensei v0.5.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.5.0)**
 
 Windows 安装包为当前用户安装，不需要管理员权限。
 目前尚未进行代码签名，因此 Windows SmartScreen 可能显示 **Unknown Publisher（未知发布者）**。

@@ -30,26 +30,26 @@ def test_local_ocr_version_and_production_manifest_url() -> None:
     assert LOCAL_OCR_VERSION == "1.1.0"
     assert MACOS_LOCAL_OCR_VERSION == "1.2.0"
     assert MACOS_LOCAL_OCR_RELEASE_TAG == "local-ocr-v1.2.0-macos-x64"
-    assert DISTRIBUTION_REPOSITORY == "Ushiochanii/tellme-sensei-releases"
+    assert DISTRIBUTION_REPOSITORY == "Ushiochanii/tellme_sensei"
     intel_spec = spec_for_manifest("macos", "x86_64")
     assert local_ocr_release_tag_for_spec(intel_spec) == "local-ocr-v1.2.0-macos-x64"
     assert production_manifest_url(intel_spec) == (
-        "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
+        "https://github.com/Ushiochanii/tellme_sensei/releases/download/"
         "local-ocr-v1.2.0-macos-x64/local-ocr-manifest.json"
     )
 
 
 def test_platform_production_manifest_routes_are_pinned() -> None:
     assert production_manifest_url(spec_for_manifest("windows", "x86_64")) == (
-        "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
+        "https://github.com/Ushiochanii/tellme_sensei/releases/download/"
         "local-ocr-v1.1.0/local-ocr-manifest.json"
     )
     assert production_manifest_url(spec_for_manifest("macos", "x86_64")) == (
-        "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
+        "https://github.com/Ushiochanii/tellme_sensei/releases/download/"
         "local-ocr-v1.2.0-macos-x64/local-ocr-manifest.json"
     )
     assert production_manifest_url(spec_for_manifest("macos", "arm64")) == (
-        "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
+        "https://github.com/Ushiochanii/tellme_sensei/releases/download/"
         "local-ocr-v1.3.0-macos-arm64/local-ocr-manifest.json"
     )
 

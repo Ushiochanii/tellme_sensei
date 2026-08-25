@@ -1,5 +1,5 @@
 param(
-    [string]$DistributionRepository = "Ushiochanii/tellme-sensei-releases"
+    [string]$DistributionRepository = "Ushiochanii/tellme_sensei"
 )
 
 $ErrorActionPreference = "Stop"
