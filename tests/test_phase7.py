@@ -75,12 +75,26 @@ def test_tray_initialization_and_capture_action_routing(qt_app) -> None:
     fake_tray = FakeTrayIcon()
     tray = SystemTrayController(tray_icon=fake_tray)
     labels = [action.text() for action in tray.menu.actions() if not action.isSeparator()]
-    assert labels == ["学习助手", "截图识别", "设置", "退出"]
+    assert labels == ["学习助手", "截图识别（文字题）", "截图分析（图形题）", "设置", "退出"]
     received: list[bool] = []
     tray.capture_requested.connect(lambda: received.append(True))
     tray.trigger_capture()
     fake_tray.activated.emit(QSystemTrayIcon.ActivationReason.DoubleClick)
     assert received == [True, True]
+
+
+def test_tray_exposes_distinct_text_and_vision_actions(qt_app) -> None:
+    tray = SystemTrayController(tray_icon=FakeTrayIcon())
+    text: list[bool] = []
+    vision: list[bool] = []
+    tray.text_capture_requested.connect(lambda: text.append(True))
+    tray.vision_capture_requested.connect(lambda: vision.append(True))
+
+    tray.trigger_text_capture()
+    tray.trigger_vision_capture()
+
+    assert text == [True]
+    assert vision == [True]
 
 
 def test_global_hotkey_register_event_route_and_unregister(qt_app) -> None:
@@ -129,11 +143,47 @@ def test_application_controller_routes_and_cleans_up(qt_app) -> None:
     assert fake_window.capture_count == 2
     assert fake_window.settings_count == 1
     assert fake_hotkey.register_count == 1
+    assert fake_window.visible is False
     controller.cleanup()
     controller.cleanup()
     assert fake_window.shutdown_count == 1
     assert fake_hotkey.unregister_count == 1
     assert fake_tray.tray.visible is False
+
+
+def test_application_controller_routes_two_hotkeys_and_shutdown(qt_app) -> None:
+    class DualWindow(FakeWindow):
+        def __init__(self) -> None:
+            super().__init__()
+            self.text_count = 0
+            self.vision_count = 0
+
+        def start_text_capture(self) -> None:
+            self.text_count += 1
+
+        def start_vision_capture(self) -> None:
+            self.vision_count += 1
+
+    window = DualWindow()
+    tray = SystemTrayController(tray_icon=FakeTrayIcon())
+    text_hotkey = FakeHotkey()
+    vision_hotkey = FakeHotkey()
+    controller = ApplicationController(qt_app, window, tray, text_hotkey, vision_hotkey)
+    controller.start()
+    assert window.visible is True
+
+    tray.trigger_text_capture()
+    tray.trigger_vision_capture()
+    text_hotkey.triggered.emit()
+    vision_hotkey.triggered.emit()
+
+    assert window.text_count == 2
+    assert window.vision_count == 2
+    assert text_hotkey.register_count == 1
+    assert vision_hotkey.register_count == 1
+    controller.cleanup()
+    assert text_hotkey.unregister_count == 1
+    assert vision_hotkey.unregister_count == 1
 
 
 def test_busy_state_prevents_second_capture(qt_app) -> None:

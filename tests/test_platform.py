@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import ctypes
 import inspect
 
 from app.platform.base import GlobalHotkeyManager
 from app.platform.factory import create_global_hotkey_manager
-from app.platform.hotkey import HotkeySpec, HotkeySpecError
-from app.platform.macos.hotkey import MacOSGlobalHotkey
+from app.platform.hotkey import TEXT_HOTKEY_ID, VISION_HOTKEY_ID, HotkeySpec, HotkeySpecError
+from app.platform.macos.hotkey import (
+    EVENT_NOT_HANDLED,
+    HOTKEY_SIGNATURE,
+    NO_ERR,
+    MacOSGlobalHotkey,
+    _CarbonHotkeyBackend,
+    _EventHotKeyID,
+)
 from app.platform.unsupported import UnsupportedGlobalHotkey
 from app.platform.windows import hotkey as windows_hotkey
 from app.platform.windows.hotkey import WindowsGlobalHotkey
@@ -74,8 +82,8 @@ def test_macos_hotkey_register_success_and_trigger(qt_app) -> None:
 
     assert manager.register() is True
     assert manager.registered is True
-    assert manager.shortcut == "Ctrl+Shift+Q"
-    assert backend.calls[0][0] == 12
+    assert manager.shortcut == "Ctrl+Shift+A"
+    assert backend.calls[0][0] == 0
     assert backend.calls[0][1] == (1 << 12) | (1 << 9)
     backend.callback(backend.calls[0][2])
     assert triggered == [True]
@@ -103,7 +111,7 @@ def test_macos_hotkey_rebind_failure_restores_previous_shortcut(qt_app) -> None:
 
     assert manager.register() is True
     assert manager.rebind("Ctrl+Alt+A") is False
-    assert manager.shortcut == "Ctrl+Shift+Q"
+    assert manager.shortcut == "Ctrl+Shift+A"
     assert manager.registered is True
     assert len(backend.calls) == 3
     manager.unregister()
@@ -140,7 +148,7 @@ def test_macos_hotkey_rebind_keeps_old_registration_when_unregistration_fails(qt
 
     assert manager.register() is True
     assert manager.rebind("Ctrl+Alt+A") is False
-    assert manager.shortcut == "Ctrl+Shift+Q"
+    assert manager.shortcut == "Ctrl+Shift+A"
     assert manager.registered is True
     assert len(backend.calls) == 1
     manager.unregister()
@@ -210,7 +218,7 @@ def test_windows_rebind_failure_restores_old_shortcut(qt_app) -> None:
 
     def register(hwnd, hotkey_id, modifiers, key) -> int:
         calls.append(("register", key))
-        return 0 if key == ord("A") else 1
+        return 0 if key == ord("B") else 1
 
     def unregister(hwnd, hotkey_id) -> int:
         calls.append(("unregister", hotkey_id))
@@ -218,8 +226,102 @@ def test_windows_rebind_failure_restores_old_shortcut(qt_app) -> None:
 
     manager = WindowsGlobalHotkey(qt_app, register, unregister)
     assert manager.register() is True
-    assert manager.rebind("Ctrl+Alt+A") is False
-    assert manager.shortcut == "Ctrl+Shift+Q"
+    assert manager.rebind("Ctrl+Alt+B") is False
+    assert manager.shortcut == "Ctrl+Shift+A"
     assert manager.registered is True
-    assert calls[-1] == ("register", ord("Q"))
+    assert calls[-1] == ("register", ord("A"))
     manager.unregister()
+
+
+def test_windows_two_hotkeys_use_distinct_ids_and_filter_events(qt_app) -> None:
+    calls: list[tuple] = []
+
+    def register(hwnd, hotkey_id, modifiers, key) -> int:
+        calls.append(("register", hotkey_id, modifiers, key))
+        return 1
+
+    def unregister(hwnd, hotkey_id) -> int:
+        calls.append(("unregister", hotkey_id))
+        return 1
+
+    text = WindowsGlobalHotkey(
+        qt_app,
+        register,
+        unregister,
+        hotkey_id=TEXT_HOTKEY_ID,
+    )
+    vision = WindowsGlobalHotkey(
+        qt_app,
+        register,
+        unregister,
+        shortcut="Ctrl+Shift+W",
+        hotkey_id=VISION_HOTKEY_ID,
+    )
+    text_events: list[bool] = []
+    vision_events: list[bool] = []
+    text.triggered.connect(lambda: text_events.append(True))
+    vision.triggered.connect(lambda: vision_events.append(True))
+
+    assert text.register() is True
+    assert vision.register() is True
+    assert [call[1] for call in calls[:2]] == [TEXT_HOTKEY_ID, VISION_HOTKEY_ID]
+    assert text.handle_hotkey(TEXT_HOTKEY_ID) is True
+    assert text.handle_hotkey(VISION_HOTKEY_ID) is False
+    assert vision.handle_hotkey(VISION_HOTKEY_ID) is True
+    assert vision.handle_hotkey(TEXT_HOTKEY_ID) is False
+    assert text_events == [True]
+    assert vision_events == [True]
+    text.unregister()
+    vision.unregister()
+    assert calls[-2:] == [("unregister", TEXT_HOTKEY_ID), ("unregister", VISION_HOTKEY_ID)]
+
+
+def test_macos_two_hotkeys_pass_distinct_ids_to_carbon_backend(qt_app) -> None:
+    text_backend = _FakeMacHotkeyBackend()
+    vision_backend = _FakeMacHotkeyBackend()
+    text = MacOSGlobalHotkey(qt_app, backend=text_backend, hotkey_id=TEXT_HOTKEY_ID)
+    vision = MacOSGlobalHotkey(
+        qt_app,
+        shortcut="Ctrl+Shift+W",
+        backend=vision_backend,
+        hotkey_id=VISION_HOTKEY_ID,
+    )
+
+    assert text.register() is True
+    assert vision.register() is True
+    assert text_backend.calls[0][2] == TEXT_HOTKEY_ID
+    assert vision_backend.calls[0][2] == VISION_HOTKEY_ID
+    text_events: list[bool] = []
+    vision_events: list[bool] = []
+    text.triggered.connect(lambda: text_events.append(True))
+    vision.triggered.connect(lambda: vision_events.append(True))
+    text_backend.callback(VISION_HOTKEY_ID)
+    vision_backend.callback(TEXT_HOTKEY_ID)
+    text_backend.callback(TEXT_HOTKEY_ID)
+    vision_backend.callback(VISION_HOTKEY_ID)
+    assert text_events == [True]
+    assert vision_events == [True]
+    text.unregister()
+    vision.unregister()
+
+
+def test_macos_carbon_handler_passes_other_hotkey_events_to_next_handler() -> None:
+    class FakeCarbon:
+        def __init__(self, hotkey_id: int) -> None:
+            self.hotkey_id = hotkey_id
+
+        def GetEventParameter(self, *args):
+            output = ctypes.cast(args[-1], ctypes.POINTER(_EventHotKeyID)).contents
+            output.signature = HOTKEY_SIGNATURE
+            output.id = self.hotkey_id
+            return NO_ERR
+
+    backend = object.__new__(_CarbonHotkeyBackend)
+    backend._carbon = FakeCarbon(0x5341)
+    backend._callback = lambda _hotkey_id: None
+    backend._hotkey_id = 0x5342
+
+    assert backend._handle_event(None, None, None) == EVENT_NOT_HANDLED
+
+    backend._carbon.hotkey_id = 0x5342
+    assert backend._handle_event(None, None, None) == NO_ERR

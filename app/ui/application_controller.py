@@ -20,6 +20,7 @@ class ApplicationController(QObject):
         window,
         tray,
         hotkey: GlobalHotkeyManager,
+        vision_hotkey: GlobalHotkeyManager | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent or app)
@@ -27,23 +28,36 @@ class ApplicationController(QObject):
         self.window = window
         self.tray = tray
         self.hotkey = hotkey
+        self.text_hotkey = hotkey
+        self.vision_hotkey = vision_hotkey
         self._shutting_down = False
         self._quit_called = False
 
-        self.tray.capture_requested.connect(self.window.start_capture)
+        text_capture = getattr(self.window, "start_text_capture", self.window.start_capture)
+        vision_capture = getattr(self.window, "start_vision_capture", None)
+        if hasattr(self.tray, "text_capture_requested"):
+            self.tray.text_capture_requested.connect(text_capture)
+        else:
+            self.tray.capture_requested.connect(text_capture)
+        if vision_capture is not None and hasattr(self.tray, "vision_capture_requested"):
+            self.tray.vision_capture_requested.connect(vision_capture)
         settings_handler = getattr(self.window, "show_settings", None)
         if not callable(settings_handler):
             settings_handler = self.window.show_launcher
         self.tray.settings_requested.connect(settings_handler)
-        self.hotkey.triggered.connect(self.window.start_capture)
+        self.text_hotkey.triggered.connect(text_capture)
+        if self.vision_hotkey is not None and vision_capture is not None:
+            self.vision_hotkey.triggered.connect(vision_capture)
         self.tray.exit_requested.connect(self.request_exit)
         if hasattr(self.window, "shutdown_ready"):
             self.window.shutdown_ready.connect(self._on_shutdown_ready)
 
-    def start(self, show_window: bool = False) -> None:
+    def start(self, show_window: bool = True) -> None:
         self.tray.show()
-        if not self.hotkey.register():
-            logger.warning("global hotkey registration failed; open Settings to change it")
+        if not self.text_hotkey.register():
+            logger.warning("Text Mode global hotkey registration failed; open Settings to change it")
+        if self.vision_hotkey is not None and not self.vision_hotkey.register():
+            logger.warning("Vision Mode global hotkey registration failed; open Settings to change it")
         if show_window:
             self.window.show()
         else:
@@ -58,7 +72,9 @@ class ApplicationController(QObject):
         if self._shutting_down:
             return
         self._shutting_down = True
-        self.hotkey.unregister()
+        self.text_hotkey.unregister()
+        if self.vision_hotkey is not None:
+            self.vision_hotkey.unregister()
         request_shutdown = getattr(self.window, "request_shutdown", None)
         if callable(request_shutdown):
             request_shutdown()
@@ -81,6 +97,8 @@ class ApplicationController(QObject):
         self._shutting_down = True
         if not hasattr(self.window, "shutdown_ready"):
             self.window.shutdown()
-        self.hotkey.unregister()
+        self.text_hotkey.unregister()
+        if self.vision_hotkey is not None:
+            self.vision_hotkey.unregister()
         self.tray.hide()
         self._quit_called = True

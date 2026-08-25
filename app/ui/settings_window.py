@@ -31,7 +31,7 @@ from app.local_ocr.download import LocalOCRDownloadWorker
 from app.local_ocr.manifest import manifest_url_available, resolve_manifest_url
 from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
-from app.platform.hotkey import DEFAULT_SHORTCUT, HotkeySpec, HotkeySpecError
+from app.platform.hotkey import HotkeySpec, HotkeySpecError
 from app.ocr.providers.google_vision import GoogleVisionOCRProvider
 from app.ocr.types import OCRCancelled, OCRError
 from app.platform.ocr import is_local_ocr_supported
@@ -140,6 +140,7 @@ class SettingsWindow(QWidget):
         self,
         config_manager: ConfigManager | None = None,
         hotkey_manager: GlobalHotkeyManager | None = None,
+        vision_hotkey_manager: GlobalHotkeyManager | None = None,
         component_manager: LocalOCRComponentManager | None = None,
         local_ocr_session: LocalOCRSession | None = None,
         parent: QWidget | None = None,
@@ -148,6 +149,7 @@ class SettingsWindow(QWidget):
         super().__init__(parent)
         self.config_manager = config_manager or ConfigManager()
         self.hotkey_manager = hotkey_manager
+        self.vision_hotkey_manager = vision_hotkey_manager
         self.component_manager = component_manager or LocalOCRComponentManager()
         self.local_ocr_session = local_ocr_session
         self._local_ocr_supported = (
@@ -165,6 +167,8 @@ class SettingsWindow(QWidget):
         self._google_thread: QThread | None = None
         self._google_worker: GoogleVisionTestWorker | None = None
         self._google_cancel_event: threading.Event | None = None
+        self._loaded_api_key = ""
+        self._loaded_google_vision_api_key = ""
 
         self.setWindowTitle("设置")
         self.setMinimumWidth(430)
@@ -179,6 +183,8 @@ class SettingsWindow(QWidget):
         self.timeout_edit = QLineEdit()
         self.shortcut_edit = QKeySequenceEdit()
         self.shortcut_edit.setMaximumSequenceLength(1)
+        self.vision_shortcut_edit = QKeySequenceEdit()
+        self.vision_shortcut_edit.setMaximumSequenceLength(1)
         mode_widget = QWidget()
         mode_layout = QHBoxLayout(mode_widget)
         mode_layout.setContentsMargins(0, 0, 0, 0)
@@ -208,9 +214,10 @@ class SettingsWindow(QWidget):
         self.local_ocr_unsupported_label.setWordWrap(True)
         self.local_ocr_unsupported_label.setVisible(False)
         form.addRow("DeepSeek API Key", self.api_key_edit)
-        form.addRow("Model", self.model_edit)
+        form.addRow("Text model", self.model_edit)
         form.addRow("Request timeout", self.timeout_edit)
-        form.addRow("Global shortcut", self.shortcut_edit)
+        form.addRow("Text shortcut", self.shortcut_edit)
+        form.addRow("Vision shortcut", self.vision_shortcut_edit)
         form.addRow("OCR Mode", mode_widget)
         root.addLayout(form)
         root.addWidget(self.ocr_provider_override_label)
@@ -349,6 +356,8 @@ class SettingsWindow(QWidget):
             config = self.config_manager.load(require_api_key=False)
         except ConfigError:
             config = AppConfig(api_key="")
+        self._loaded_api_key = config.api_key
+        self._loaded_google_vision_api_key = config.google_vision_api_key
         self.api_key_edit.setText(config.api_key)
         self.google_vision_api_key_edit.setText(config.google_vision_api_key)
         google_env_override = self.config_manager.has_explicit_google_vision_api_key()
@@ -358,6 +367,7 @@ class SettingsWindow(QWidget):
         self.model_edit.setText(config.model)
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
+        self.vision_shortcut_edit.setKeySequence(QKeySequence(config.vision_global_shortcut))
         is_online = config.ocr_provider == "google_vision" or not self._local_ocr_is_usable()
         provider_env_override = self.config_manager.has_explicit_ocr_provider()
         self.local_mode_radio.setChecked(not is_online)
@@ -647,14 +657,10 @@ class SettingsWindow(QWidget):
         if request_timeout <= 0:
             raise ValueError("Request timeout 必须是正数")
         sequence = self.shortcut_edit.keySequence()
-        if sequence.count() != 1:
-            raise ValueError("快捷键只能包含一个组合")
-        try:
-            global_shortcut = HotkeySpec.parse(
-                sequence.toString(QKeySequence.SequenceFormat.PortableText)
-            ).canonical
-        except HotkeySpecError as exc:
-            raise ValueError(str(exc)) from exc
+        global_shortcut = self._parse_shortcut(sequence)
+        vision_shortcut = self._parse_shortcut(self.vision_shortcut_edit.keySequence())
+        if global_shortcut == vision_shortcut:
+            raise ValueError("Text and Vision shortcuts must be different.")
         current = self.config_manager.load(require_api_key=False)
         return AppConfig(
             api_key=self.api_key_edit.text().strip(),
@@ -663,10 +669,22 @@ class SettingsWindow(QWidget):
             request_timeout=request_timeout,
             ocr_language=current.ocr_language,
             global_shortcut=global_shortcut,
+            vision_global_shortcut=vision_shortcut,
             ocr_provider=self._current_provider_from_ui(),
             google_vision_api_key=self.google_vision_api_key_edit.text().strip(),
             online_ocr_timeout=current.online_ocr_timeout,
         )
+
+    @staticmethod
+    def _parse_shortcut(sequence: QKeySequence) -> str:
+        if sequence.count() != 1:
+            raise ValueError("快捷键只能包含一个组合")
+        try:
+            return HotkeySpec.parse(
+                sequence.toString(QKeySequence.SequenceFormat.PortableText)
+            ).canonical
+        except HotkeySpecError as exc:
+            raise ValueError(str(exc)) from exc
 
     @Slot()
     def test_connection(self) -> None:
@@ -799,44 +817,111 @@ class SettingsWindow(QWidget):
 
     @Slot()
     def save(self) -> None:
-        old_shortcut = self.hotkey_manager.shortcut if self.hotkey_manager is not None else None
-        rebound = False
+        changed_shortcuts: list[tuple[GlobalHotkeyManager, str, bool, str]] = []
         try:
             config = self._read_config_from_fields()
-            if (
-                self.hotkey_manager is not None
-                and old_shortcut is not None
-                and config.global_shortcut != old_shortcut
-            ):
-                if not self.hotkey_manager.rebind(config.global_shortcut):
-                    self._set_status("快捷键注册失败，可能已被其他程序占用。")
-                    return
-                rebound = True
+            requested = (
+                (self.hotkey_manager, config.global_shortcut),
+                (self.vision_hotkey_manager, config.vision_global_shortcut),
+            )
+            for manager, shortcut in requested:
+                if manager is None or manager.shortcut == shortcut:
+                    continue
+                changed_shortcuts.append(
+                    (
+                        manager,
+                        manager.shortcut,
+                        self._hotkey_is_registered(manager),
+                        shortcut,
+                    )
+                )
+            if not self._apply_shortcut_changes(changed_shortcuts):
+                self._set_status("快捷键注册失败，可能已被其他程序占用。")
+                return
             provider_to_save = None
             if not self.config_manager.has_explicit_ocr_provider():
                 provider_to_save = config.ocr_provider
+            api_key_to_save = (
+                config.api_key if config.api_key != self._loaded_api_key else None
+            )
             google_key_to_save = None
             if not self.config_manager.has_explicit_google_vision_api_key():
-                google_key_to_save = config.google_vision_api_key
+                if config.google_vision_api_key != self._loaded_google_vision_api_key:
+                    google_key_to_save = config.google_vision_api_key
             self.config_manager.save_settings(
-                config.api_key,
+                api_key_to_save,
                 config.model,
                 config.request_timeout,
                 config.global_shortcut,
+                vision_global_shortcut=config.vision_global_shortcut,
                 ocr_provider=provider_to_save,
                 google_vision_api_key=google_key_to_save,
                 online_ocr_timeout=config.online_ocr_timeout,
             )
         except (ConfigError, SecretStoreError, ValueError) as exc:
-            if rebound and self.hotkey_manager is not None and old_shortcut is not None:
-                if not self.hotkey_manager.rebind(old_shortcut):
-                    logger.error("failed to rollback shortcut after settings save failure")
+            self._restore_shortcut_changes(changed_shortcuts)
             self._set_status(str(exc))
             return
         self._set_status("设置已保存")
         self._show_environment_override_warnings()
         self.settings_saved.emit()
         self.close()
+
+    @staticmethod
+    def _hotkey_is_registered(manager: GlobalHotkeyManager) -> bool:
+        return bool(manager.registered)
+
+    @staticmethod
+    def _release_hotkey(manager: GlobalHotkeyManager) -> None:
+        manager.unregister()
+
+    @staticmethod
+    def _register_hotkey(manager: GlobalHotkeyManager) -> bool:
+        return bool(manager.register())
+
+    def _apply_shortcut_changes(
+        self,
+        changes: list[tuple[GlobalHotkeyManager, str, bool, str]],
+    ) -> bool:
+        """Claim a changed shortcut set without making a swap collide with itself."""
+
+        if len(changes) > 1:
+            for manager, _old_shortcut, was_registered, _new_shortcut in changes:
+                if was_registered:
+                    self._release_hotkey(manager)
+
+        all_registered = True
+        for manager, _old_shortcut, was_registered, new_shortcut in changes:
+            if not manager.rebind(new_shortcut):
+                all_registered = False
+                continue
+            if not was_registered:
+                self._release_hotkey(manager)
+
+        if all_registered:
+            return True
+        self._restore_shortcut_changes(changes)
+        return False
+
+    def _restore_shortcut_changes(
+        self,
+        changes: list[tuple[GlobalHotkeyManager, str, bool, str]],
+    ) -> None:
+        """Restore both shortcut values and their pre-save registration states."""
+
+        for manager, _old_shortcut, _was_registered, _new_shortcut in changes:
+            if self._hotkey_is_registered(manager):
+                self._release_hotkey(manager)
+        for manager, old_shortcut, was_registered, _new_shortcut in reversed(changes):
+            if manager.shortcut != old_shortcut:
+                if not manager.rebind(old_shortcut):
+                    logger.error("failed to rollback shortcut after rebind failure")
+                    continue
+            if was_registered:
+                if not self._hotkey_is_registered(manager) and not self._register_hotkey(manager):
+                    logger.error("failed to restore hotkey registration: %s", old_shortcut)
+            else:
+                self._release_hotkey(manager)
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)

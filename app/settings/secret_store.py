@@ -74,6 +74,11 @@ class SecretStore:
         try:
             self._backend().set_password(self.service_name, account_name, value)
         except Exception as exc:
+            logger.warning(
+                "secret store operation failed operation=set account=%s exception_type=%s",
+                account_name,
+                type(exc).__name__,
+            )
             raise SecretStoreError("Unable to save API key in the system credential store") from exc
         logger.info("secret updated account=%s", account_name)
 
@@ -90,5 +95,10 @@ class SecretStore:
             self._backend().delete_password(self.service_name, account_name)
         except Exception as exc:
             name = type(exc).__name__.lower()
+            logger.warning(
+                "secret store operation failed operation=delete account=%s exception_type=%s",
+                account_name,
+                type(exc).__name__,
+            )
             if "password" not in name and "credential" not in name:
                 raise SecretStoreError("Unable to delete the system credential") from exc

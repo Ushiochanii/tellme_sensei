@@ -8,7 +8,12 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from app.platform.hotkey import DEFAULT_SHORTCUT, HotkeySpec, HotkeySpecError
+from app.platform.hotkey import (
+    DEFAULT_SHORTCUT,
+    DEFAULT_VISION_SHORTCUT,
+    HotkeySpec,
+    HotkeySpecError,
+)
 from app.settings.repository import SettingsRepository
 from app.settings.secret_store import SecretStore
 
@@ -27,6 +32,7 @@ class AppConfig:
     request_timeout: float = 60.0
     ocr_language: str = "japan"
     global_shortcut: str = DEFAULT_SHORTCUT
+    vision_global_shortcut: str = DEFAULT_VISION_SHORTCUT
     ocr_provider: str = "local"
     google_vision_api_key: str = field(default="", repr=False)
     online_ocr_timeout: float = 15.0
@@ -149,6 +155,15 @@ class ConfigManager:
                     self._file_value(dotenv_config, "GLOBAL_SHORTCUT") or DEFAULT_SHORTCUT,
                 )
             ),
+            vision_global_shortcut=self._normalized_shortcut(
+                self._os_value("VISION_GLOBAL_SHORTCUT")
+                or saved_settings.get(
+                    "vision_global_shortcut",
+                    self._file_value(dotenv_config, "VISION_GLOBAL_SHORTCUT")
+                    or DEFAULT_VISION_SHORTCUT,
+                ),
+                default=DEFAULT_VISION_SHORTCUT,
+            ),
             ocr_provider=ocr_provider,
             google_vision_api_key=google_vision_api_key,
             online_ocr_timeout=online_ocr_timeout,
@@ -164,11 +179,11 @@ class ConfigManager:
         return value.strip() if isinstance(value, str) else ""
 
     @staticmethod
-    def _normalized_shortcut(value: str) -> str:
+    def _normalized_shortcut(value: str, default: str = DEFAULT_SHORTCUT) -> str:
         try:
             return HotkeySpec.parse(value).canonical
         except (HotkeySpecError, TypeError):
-            return DEFAULT_SHORTCUT
+            return default
 
     def _read_dotenv_values(self) -> dict[str, str]:
         try:
@@ -193,24 +208,31 @@ class ConfigManager:
 
     def save_settings(
         self,
-        api_key: str,
+        api_key: str | None,
         model: str,
         request_timeout: float,
         global_shortcut: str | None = None,
         *,
+        vision_global_shortcut: str | None = None,
         ocr_provider: str | None = None,
         google_vision_api_key: str | None = None,
         online_ocr_timeout: float | None = None,
     ) -> None:
-        """Save API key and normal settings through their dedicated stores."""
+        """Save settings; a None secret value leaves that stored secret unchanged."""
 
-        if api_key.strip():
-            self.secret_store.set_api_key(api_key)
-        else:
-            self.secret_store.delete_api_key()
+        if api_key is not None:
+            if api_key.strip():
+                self.secret_store.set_api_key(api_key)
+            else:
+                self.secret_store.delete_api_key()
         settings = {"model": model, "request_timeout": request_timeout}
         if global_shortcut is not None:
             settings["global_shortcut"] = self._normalized_shortcut(global_shortcut)
+        if vision_global_shortcut is not None:
+            settings["vision_global_shortcut"] = self._normalized_shortcut(
+                vision_global_shortcut,
+                default=DEFAULT_VISION_SHORTCUT,
+            )
         if ocr_provider is not None:
             normalized_provider = ocr_provider.strip().lower()
             if normalized_provider not in {"local", "google_vision"}:

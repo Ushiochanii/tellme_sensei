@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import threading
 from typing import Any
@@ -25,6 +26,20 @@ SYSTEM_PROMPT = """你是一个考试学习助手。
 【知识点】...
 """
 
+VISION_MODEL = "deepseek-v4-flash-vision-exp"
+VISION_SYSTEM_PROMPT = """你是一个考试学习助手。
+用户会提供一张题目截图，截图本身是主要信息来源，不要假设已经完成 OCR。
+请识别题目、相关文字/标签/坐标轴/选项，并在存在图表、表格、几何图形、网络拓扑、流程图或其他视觉结构时结合图形进行推理。
+对于选择题，请明确指出所选选项并解释理由；不要猜测无法读清或无法判断的信息。
+请使用以下格式回答：
+
+【答案】...
+
+【解析】...
+
+【知识点】...
+"""
+
 
 class DeepSeekError(RuntimeError):
     """A user-facing, key-safe DeepSeek request error."""
@@ -35,7 +50,7 @@ class DeepSeekCancelled(DeepSeekError):
 
 
 class DeepSeekService:
-    """Send normalized OCR text to DeepSeek through the OpenAI-compatible SDK."""
+    """Send Text and Vision requests through the OpenAI-compatible SDK."""
 
     def __init__(self, config: AppConfig, client: Any | None = None) -> None:
         self.config = config
@@ -53,26 +68,92 @@ class DeepSeekService:
             raise DeepSeekError("OCR 没有识别到有效文字，无法请求 DeepSeek。")
         self._raise_if_cancelled(cancel_event)
 
+        return self._stream_completion(
+            model=self.config.model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"下面是 OCR 识别到的题目：\n\n{text}"},
+            ],
+            cancel_event=cancel_event,
+            log_context=f"text_length={len(text)}",
+        )
+
+    def analyze_image(
+        self,
+        image_bytes: bytes,
+        mime_type: str = "image/png",
+        cancel_event: threading.Event | None = None,
+    ) -> str:
+        """Send one in-memory screenshot directly to the fixed Vision model."""
+
+        if not isinstance(image_bytes, (bytes, bytearray)) or not image_bytes:
+            raise DeepSeekError("截图内容为空，无法请求 DeepSeek Vision。")
+        mime_type = mime_type.strip().lower()
+        if mime_type != "image/png":
+            raise DeepSeekError("Vision Mode 当前只支持 PNG 截图。")
+        self._raise_if_cancelled(cancel_event)
+        encoded = base64.b64encode(bytes(image_bytes)).decode("ascii")
+        data_url = f"data:{mime_type};base64,{encoded}"
+        return self._stream_completion(
+            model=VISION_MODEL,
+            messages=[
+                {"role": "system", "content": VISION_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "请直接分析这张题目截图，并按指定格式给出答案、解析和知识点。",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url},
+                        },
+                    ],
+                },
+            ],
+            cancel_event=cancel_event,
+            log_context=f"mode=vision image_bytes={len(image_bytes)} model={VISION_MODEL}",
+            extra_body={"thinking": {"type": "enabled"}},
+        )
+
+    def _stream_completion(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        cancel_event: threading.Event | None,
+        log_context: str,
+        extra_body: dict[str, Any] | None = None,
+    ) -> str:
         client = self._get_client()
-        logger.info("DeepSeek API request started text_length=%d", len(text))
+        logger.info("DeepSeek API request started %s", log_context)
         response = None
+        visible_content_chars = 0
+        reasoning_content_chars = 0
+        finish_reasons: set[str] = set()
         try:
-            response = client.chat.completions.create(
-                model=self.config.model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"下面是 OCR 识别到的题目：\n\n{text}"},
-                ],
-                temperature=0.2,
-                timeout=self.config.request_timeout,
-                stream=True,
-            )
+            request_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.2,
+                "timeout": self.config.request_timeout,
+                "stream": True,
+            }
+            if extra_body is not None:
+                request_kwargs["extra_body"] = extra_body
+            response = client.chat.completions.create(**request_kwargs)
             answer_parts: list[str] = []
             for chunk in response:
                 self._raise_if_cancelled(cancel_event)
-                content = self._chunk_content(chunk)
+                content, reasoning, finish_reason = self._chunk_metadata(chunk)
                 if content:
                     answer_parts.append(content)
+                    visible_content_chars += len(content.strip())
+                if reasoning:
+                    reasoning_content_chars += len(reasoning)
+                if finish_reason:
+                    finish_reasons.add(finish_reason)
             self._raise_if_cancelled(cancel_event)
             answer = "".join(answer_parts)
         except DeepSeekCancelled:
@@ -86,8 +167,26 @@ class DeepSeekService:
             self._close_stream(response)
 
         if not isinstance(answer, str) or not answer.strip():
+            logger.error(
+                "DeepSeek API response had no visible content model=%s "
+                "visible_content_chars=%d reasoning_content_present=%s "
+                "reasoning_content_chars=%d finish_reasons=%s",
+                model,
+                visible_content_chars,
+                reasoning_content_chars > 0,
+                reasoning_content_chars,
+                sorted(finish_reasons),
+            )
             raise DeepSeekError("DeepSeek 返回了空答案。")
-        logger.info("DeepSeek API request completed")
+        logger.info(
+            "DeepSeek API request completed model=%s visible_content_chars=%d "
+            "reasoning_content_present=%s reasoning_content_chars=%d finish_reasons=%s",
+            model,
+            len(answer.strip()),
+            reasoning_content_chars > 0,
+            reasoning_content_chars,
+            sorted(finish_reasons),
+        )
         return answer.strip()
 
     def test_connection(self, cancel_event: threading.Event | None = None) -> bool:
@@ -126,14 +225,40 @@ class DeepSeekService:
     def _chunk_content(chunk: Any) -> str:
         """Extract text from OpenAI SDK chunks and simple test doubles."""
 
+        return DeepSeekService._chunk_metadata(chunk)[0]
+
+    @staticmethod
+    def _chunk_metadata(chunk: Any) -> tuple[str, str, str | None]:
+        """Extract visible/reasoning content and finish metadata from a chunk."""
+
         try:
             choices = chunk["choices"] if isinstance(chunk, dict) else chunk.choices
             choice = choices[0]
             delta = choice.get("delta") if isinstance(choice, dict) else choice.delta
             content = delta.get("content") if isinstance(delta, dict) else delta.content
+            reasoning = (
+                delta.get("reasoning_content")
+                if isinstance(delta, dict)
+                else getattr(delta, "reasoning_content", None)
+            )
+            if reasoning is None:
+                reasoning = (
+                    choice.get("reasoning_content")
+                    if isinstance(choice, dict)
+                    else getattr(choice, "reasoning_content", None)
+                )
+            finish_reason = (
+                choice.get("finish_reason")
+                if isinstance(choice, dict)
+                else getattr(choice, "finish_reason", None)
+            )
         except (AttributeError, IndexError, KeyError, TypeError):
-            return ""
-        return content if isinstance(content, str) else ""
+            return "", "", None
+        return (
+            content if isinstance(content, str) else "",
+            reasoning if isinstance(reasoning, str) else "",
+            finish_reason if isinstance(finish_reason, str) else None,
+        )
 
     @staticmethod
     def _close_stream(response: Any) -> None:

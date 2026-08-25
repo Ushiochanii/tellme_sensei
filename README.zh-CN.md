@@ -5,18 +5,18 @@
 </p>
 
 <p align="center">
-  一个 Windows 和 macOS 桌面学习助手：框选屏幕上的题目，通过 OCR 识别文字，<br>
-  再交给 DeepSeek 生成解释与答案。
+  一个支持文字模式和视觉模式的 Windows、macOS 桌面学习助手。
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-v0.6.0-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v0.7.0-blue">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%2B%20macOS-lightgrey">
 </p>
 
 ## 功能
 
-- 全局截图快捷键（默认 `Ctrl+Shift+Q`）
+- 文字模式截图快捷键（默认 `Ctrl+Shift+A`）
+- 视觉模式截图快捷键（默认 `Ctrl+Shift+S`）
 - 鼠标拖拽框选屏幕区域，支持 macOS 全屏应用和多桌面
 - 悬浮窗口流式显示 DeepSeek 回答
 - **Local OCR**：PaddleOCR，本机处理
@@ -44,7 +44,16 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
 3. 选择 OCR 模式：
    - **Local OCR：** 在 Settings 中点击 **Download Local OCR**。
    - **Google Cloud Vision：** 填写自己的 Google Vision API Key 并测试连接。
-4. 按 `Ctrl+Shift+Q`，框选题目，等待答案窗口出现。
+4. 文字题按 `Ctrl+Shift+A`，图形题按 `Ctrl+Shift+S`，框选题目后等待答案窗口出现。
+
+## 分析模式
+
+| 模式 | 快捷键 | 流程 | 适用场景 |
+|---|---|---|---|
+| 文字模式 | `Ctrl+Shift+A` | 截图 → 配置的 OCR → DeepSeek 文本分析 | 文字为主的题目 |
+| 视觉模式 | `Ctrl+Shift+S` | 截图 → DeepSeek Vision | 图表、几何图形、流程图、网络拓扑等图形题 |
+
+视觉模式固定使用 `deepseek-v4-flash-vision-exp`，会把截图直接发送给 DeepSeek。模式由用户通过快捷键或托盘菜单明确选择，不会自动切换，也不会在两种模式之间回退。
 
 ## OCR 模式
 
@@ -62,6 +71,7 @@ Local OCR 按平台作为独立组件分发。TellMeSensei **不会静默切换 
 
 - 使用 **Local OCR** 时，截图只在本机进行 OCR。
 - 使用 **Google Cloud Vision** 时，只有显式选择该模式后截图才会上传到 Google。
+- 使用 **视觉模式** 时，截图会直接发送给 DeepSeek Vision 进行图像分析。
 - OCR 得到的题目文字会发送给 **DeepSeek** 用于生成回答。
 - 日志不会记录 API Key、完整题目文本或截图。
 
@@ -81,7 +91,7 @@ Core/GUI 环境与 Local OCR worker 依赖刻意分开。只有开发 worker 时
 
 ## 当前状态
 
-- **应用版本：** macOS v0.6.0；Windows 稳定版本 v0.5.0
+- **应用开发目标：** v0.7.0；已发布的 macOS 二进制仍为 v0.6.0，Windows 稳定版本仍为 v0.5.0
 - **Local OCR：** Windows 1.1.0 · macOS Intel 1.2.0 · macOS Apple Silicon 1.3.0
 - **自动更新：** 尚未实现
 

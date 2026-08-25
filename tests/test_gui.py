@@ -138,6 +138,10 @@ def test_capture_overlay_rejects_small_selection(qt_app) -> None:
 
 def test_capture_overlay_emits_selected_image(qt_app) -> None:
     overlay = CaptureOverlay()
+    # Keep this unit test independent from Screen Recording/display capture
+    # availability on the host running pytest.
+    overlay._screen_image = QImage(200, 120, QImage.Format.Format_RGBA8888)
+    overlay._screen_image.fill(0xFFFFFFFF)
     captured: list[QImage] = []
 
     def on_captured(image: QImage) -> None:

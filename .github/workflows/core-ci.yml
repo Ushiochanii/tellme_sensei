@@ -34,7 +34,20 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
 
       - name: Run tests
+        if: runner.os != 'macOS'
         run: pytest
+
+      - name: Run macOS tests in isolated batches
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # PySide6 on the hosted macOS runner can crash during interpreter
+          # teardown only when the entire suite shares one process. Keep the
+          # test set unchanged, but give the native Qt runtime two lifetimes.
+          test_files=(tests/test_*.py)
+          midpoint=$(( (${#test_files[@]} + 1) / 2 ))
+          pytest "${test_files[@]:0:midpoint}"
+          pytest "${test_files[@]:midpoint}"
 
       - name: Compile Python sources
         run: python -m compileall app gui.py main.py local_ocr_worker.py

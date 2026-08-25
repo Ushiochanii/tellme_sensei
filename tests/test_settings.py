@@ -17,10 +17,13 @@ from app.ui.settings_window import SettingsWindow
 
 
 class FakeSecretStore:
-    def __init__(self, value: str = "") -> None:
+    def __init__(self, value: str = "", google: str = "") -> None:
         self.value = value
         self.set_values: list[str] = []
         self.delete_count = 0
+        self.google_value = google
+        self.google_set_values: list[str] = []
+        self.google_delete_count = 0
 
     def get_api_key(self) -> str:
         return self.value
@@ -32,6 +35,17 @@ class FakeSecretStore:
     def delete_api_key(self) -> None:
         self.value = ""
         self.delete_count += 1
+
+    def get_google_vision_api_key(self) -> str:
+        return self.google_value
+
+    def set_google_vision_api_key(self, value: str) -> None:
+        self.google_value = value
+        self.google_set_values.append(value)
+
+    def delete_google_vision_api_key(self) -> None:
+        self.google_value = ""
+        self.google_delete_count += 1
 
 
 class FakeKeyring:
@@ -53,12 +67,62 @@ class FakeHotkeyManager:
         self.shortcut = shortcut
         self.rebind_result = rebind_result
         self.rebind_calls: list[str] = []
+        self.registered = True
+        self.register_calls = 0
+        self.unregister_calls = 0
 
     def rebind(self, shortcut: str) -> bool:
         self.rebind_calls.append(shortcut)
         if self.rebind_result:
             self.shortcut = shortcut
+            self.registered = True
         return self.rebind_result
+
+    def register(self) -> bool:
+        self.register_calls += 1
+        self.registered = True
+        return True
+
+    def unregister(self) -> None:
+        self.unregister_calls += 1
+        self.registered = False
+
+
+class OwnedHotkeyManager:
+    """Small native-registration double that models shortcut ownership."""
+
+    def __init__(self, shortcut: str, owners: set[str], fail_shortcuts: set[str] | None = None) -> None:
+        self.shortcut = shortcut
+        self.owners = owners
+        self.fail_shortcuts = fail_shortcuts or set()
+        self.rebind_calls: list[str] = []
+        self.registered = False
+        assert self.register() is True
+
+    def register(self) -> bool:
+        if self.shortcut in self.fail_shortcuts or self.shortcut in self.owners:
+            return False
+        self.owners.add(self.shortcut)
+        self.registered = True
+        return True
+
+    def unregister(self) -> None:
+        self.owners.discard(self.shortcut)
+        self.registered = False
+
+    def rebind(self, shortcut: str) -> bool:
+        self.rebind_calls.append(shortcut)
+        old_shortcut = self.shortcut
+        was_registered = self.registered
+        if was_registered:
+            self.unregister()
+        self.shortcut = shortcut
+        if self.register():
+            return True
+        self.shortcut = old_shortcut
+        if was_registered:
+            self.register()
+        return False
 
 
 def make_manager(tmp_path, secret_store=None) -> ConfigManager:
@@ -133,12 +197,45 @@ def test_saved_shortcut_is_restored_on_startup(tmp_path, monkeypatch) -> None:
     assert make_manager(tmp_path).load(False).global_shortcut == "Ctrl+Alt+A"
 
 
+def test_fresh_shortcut_defaults_and_saved_legacy_values_are_preserved(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GLOBAL_SHORTCUT", raising=False)
+    monkeypatch.delenv("VISION_GLOBAL_SHORTCUT", raising=False)
+    manager = make_manager(tmp_path)
+    assert manager.load(False).global_shortcut == "Ctrl+Shift+A"
+    assert manager.load(False).vision_global_shortcut == "Ctrl+Shift+S"
+
+    manager.settings_repository.update(
+        {"global_shortcut": "Ctrl+Shift+Q", "vision_global_shortcut": "Ctrl+Shift+W"}
+    )
+    config = manager.load(False)
+    assert config.global_shortcut == "Ctrl+Shift+Q"
+    assert config.vision_global_shortcut == "Ctrl+Shift+W"
+
+
+def test_vision_shortcut_uses_environment_saved_dotenv_default_precedence(tmp_path, monkeypatch) -> None:
+    write_dotenv(tmp_path, VISION_GLOBAL_SHORTCUT="Ctrl+Alt+F1")
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.update({"vision_global_shortcut": "Ctrl+Alt+F2"})
+    monkeypatch.delenv("VISION_GLOBAL_SHORTCUT", raising=False)
+    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Alt+F2"
+
+    monkeypatch.setenv("VISION_GLOBAL_SHORTCUT", "Ctrl+Alt+F3")
+    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Alt+F3"
+
+    repository.path.unlink()
+    monkeypatch.delenv("VISION_GLOBAL_SHORTCUT", raising=False)
+    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Alt+F1"
+
+    (tmp_path / ".env").unlink()
+    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Shift+S"
+
+
 def test_invalid_saved_shortcut_falls_back_to_default(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("GLOBAL_SHORTCUT", raising=False)
     SettingsRepository(tmp_path / "settings.json").update(
         {"global_shortcut": "Ctrl+Win+Q"}
     )
-    assert make_manager(tmp_path).load(False).global_shortcut == "Ctrl+Shift+Q"
+    assert make_manager(tmp_path).load(False).global_shortcut == "Ctrl+Shift+A"
 
 
 def test_saved_model_and_timeout_override_dotenv(tmp_path, monkeypatch) -> None:
@@ -185,6 +282,22 @@ def test_secret_store_uses_injected_keyring_only() -> None:
     assert store.get_api_key() == "fake-key"
     store.delete_api_key()
     assert store.get_api_key() == ""
+
+
+def test_config_test_path_never_uses_real_keyring(tmp_path, monkeypatch) -> None:
+    import keyring
+
+    def fail_if_real_keyring_is_used(*_args, **_kwargs):
+        raise AssertionError("tests must not access the OS keyring")
+
+    monkeypatch.setattr(keyring, "get_password", fail_if_real_keyring_is_used)
+    manager = ConfigManager(
+        project_root=tmp_path,
+        settings_repository=SettingsRepository(tmp_path / "settings.json"),
+        secret_store=FakeSecretStore(),
+    )
+
+    assert manager.load(require_api_key=False).api_key == ""
 
 
 def test_repository_partial_update_preserves_existing_settings(tmp_path) -> None:
@@ -241,6 +354,86 @@ def test_settings_save_applies_shortcut_immediately(qt_app, tmp_path) -> None:
     qt_app.processEvents()
 
 
+def test_unchanged_deepseek_key_is_not_written_when_saving(qt_app, tmp_path) -> None:
+    secrets = FakeSecretStore("stored-key")
+    window = SettingsWindow(make_manager(tmp_path, secrets))
+    window.save()
+    assert secrets.set_values == []
+    assert secrets.delete_count == 0
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_changed_deepseek_key_is_written_once(qt_app, tmp_path) -> None:
+    secrets = FakeSecretStore("stored-key")
+    window = SettingsWindow(make_manager(tmp_path, secrets))
+    window.api_key_edit.setText("new-key")
+    window.save()
+    assert secrets.set_values == ["new-key"]
+    assert secrets.delete_count == 0
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_cleared_deepseek_key_is_deleted_once(qt_app, tmp_path) -> None:
+    secrets = FakeSecretStore("stored-key")
+    window = SettingsWindow(make_manager(tmp_path, secrets))
+    window.api_key_edit.clear()
+    window.save()
+    assert secrets.set_values == []
+    assert secrets.delete_count == 1
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_shortcut_only_change_saves_without_touching_deepseek_key(qt_app, tmp_path) -> None:
+    secrets = FakeSecretStore("stored-key")
+    window = SettingsWindow(make_manager(tmp_path, secrets))
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+A"))
+    window.save()
+    assert secrets.set_values == []
+    assert secrets.delete_count == 0
+    assert window.config_manager.settings_repository.load()["global_shortcut"] == "Ctrl+Alt+A"
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_unchanged_environment_deepseek_key_is_not_written(qt_app, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "environment-key")
+    secrets = FakeSecretStore("stored-key")
+    window = SettingsWindow(make_manager(tmp_path, secrets))
+    window.save()
+    assert secrets.set_values == []
+    assert secrets.delete_count == 0
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_unchanged_google_key_is_not_written_and_changed_key_is_written(qt_app, tmp_path) -> None:
+    secrets = FakeSecretStore("stored-key", google="stored-google")
+    window = SettingsWindow(make_manager(tmp_path, secrets))
+    window.save()
+    assert secrets.google_set_values == []
+    assert secrets.google_delete_count == 0
+    window.google_vision_api_key_edit.setText("new-google")
+    window.save()
+    assert secrets.google_set_values == ["new-google"]
+    assert secrets.google_delete_count == 0
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_cleared_google_key_is_deleted_once(qt_app, tmp_path) -> None:
+    secrets = FakeSecretStore("stored-key", google="stored-google")
+    window = SettingsWindow(make_manager(tmp_path, secrets))
+    window.google_vision_api_key_edit.clear()
+    window.save()
+    assert secrets.google_set_values == []
+    assert secrets.google_delete_count == 1
+    window.deleteLater()
+    qt_app.processEvents()
+
+
 def test_failed_shortcut_rebind_does_not_persist_new_value(qt_app, tmp_path) -> None:
     repository = SettingsRepository(tmp_path / "settings.json")
     repository.update({"global_shortcut": "Ctrl+Shift+Q"})
@@ -250,6 +443,147 @@ def test_failed_shortcut_rebind_does_not_persist_new_value(qt_app, tmp_path) -> 
     window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+A"))
     window.save()
     assert repository.load()["global_shortcut"] == "Ctrl+Shift+Q"
+    assert "注册失败" in window.status_label.text()
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_identical_text_and_vision_shortcuts_are_rejected(qt_app, tmp_path) -> None:
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+A"))
+    window.save()
+    assert "different" in window.status_label.text()
+    assert window.config_manager.settings_repository.load() == {}
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebinds_roll_back_when_vision_registration_fails(qt_app, tmp_path) -> None:
+    text_hotkey = FakeHotkeyManager()
+    vision_hotkey = FakeHotkeyManager("Ctrl+Shift+W", rebind_result=False)
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+A"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+B"))
+    window.save()
+
+    assert text_hotkey.shortcut == "Ctrl+Shift+Q"
+    assert vision_hotkey.shortcut == "Ctrl+Shift+W"
+    assert text_hotkey.registered is True
+    assert vision_hotkey.registered is True
+    assert window.config_manager.settings_repository.load() == {}
+    assert "注册失败" in window.status_label.text()
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebinds_attempt_vision_after_text_failure(qt_app, tmp_path) -> None:
+    text_hotkey = FakeHotkeyManager(rebind_result=False)
+    vision_hotkey = FakeHotkeyManager("Ctrl+Shift+W")
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+A"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+B"))
+    window.save()
+
+    assert text_hotkey.rebind_calls == ["Ctrl+Alt+A"]
+    assert vision_hotkey.rebind_calls == ["Ctrl+Alt+B", "Ctrl+Shift+W"]
+    assert vision_hotkey.shortcut == "Ctrl+Shift+W"
+    assert window.config_manager.settings_repository.load() == {}
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebind_direct_swap_succeeds(qt_app, tmp_path) -> None:
+    owners: set[str] = set()
+    text_hotkey = OwnedHotkeyManager("Ctrl+Shift+Q", owners)
+    vision_hotkey = OwnedHotkeyManager("Ctrl+Shift+W", owners)
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+Q"))
+    window.save()
+
+    assert text_hotkey.shortcut == "Ctrl+Shift+W"
+    assert vision_hotkey.shortcut == "Ctrl+Shift+Q"
+    assert text_hotkey.registered is True
+    assert vision_hotkey.registered is True
+    assert owners == {"Ctrl+Shift+Q", "Ctrl+Shift+W"}
+    assert window.config_manager.settings_repository.load()["global_shortcut"] == "Ctrl+Shift+W"
+    assert window.config_manager.settings_repository.load()["vision_global_shortcut"] == "Ctrl+Shift+Q"
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebind_transfer_succeeds(qt_app, tmp_path) -> None:
+    owners: set[str] = set()
+    text_hotkey = OwnedHotkeyManager("Ctrl+Shift+Q", owners)
+    vision_hotkey = OwnedHotkeyManager("Ctrl+Shift+W", owners)
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+E"))
+    window.save()
+
+    assert text_hotkey.shortcut == "Ctrl+Shift+W"
+    assert vision_hotkey.shortcut == "Ctrl+Alt+E"
+    assert owners == {"Ctrl+Shift+W", "Ctrl+Alt+E"}
+    assert window.config_manager.settings_repository.load()["vision_global_shortcut"] == "Ctrl+Alt+E"
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebind_preserves_unregistered_state(qt_app, tmp_path) -> None:
+    text_hotkey = FakeHotkeyManager()
+    vision_hotkey = FakeHotkeyManager("Ctrl+Shift+W")
+    text_hotkey.unregister()
+    vision_hotkey.unregister()
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+E"))
+    window.save()
+
+    assert text_hotkey.registered is False
+    assert vision_hotkey.registered is False
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebind_restores_after_second_registration_fails(qt_app, tmp_path) -> None:
+    owners: set[str] = set()
+    text_hotkey = OwnedHotkeyManager("Ctrl+Shift+Q", owners)
+    vision_hotkey = OwnedHotkeyManager("Ctrl+Shift+W", owners, {"Ctrl+Alt+E"})
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+E"))
+    window.save()
+
+    assert text_hotkey.shortcut == "Ctrl+Shift+Q"
+    assert vision_hotkey.shortcut == "Ctrl+Shift+W"
+    assert text_hotkey.registered is True
+    assert vision_hotkey.registered is True
+    assert owners == {"Ctrl+Shift+Q", "Ctrl+Shift+W"}
+    assert window.config_manager.settings_repository.load() == {}
     assert "注册失败" in window.status_label.text()
     window.deleteLater()
     qt_app.processEvents()
@@ -301,7 +635,8 @@ def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
     assert manager.settings_repository.load() == {
         "model": "new-model",
         "request_timeout": 33.0,
-        "global_shortcut": "Ctrl+Shift+Q",
+        "global_shortcut": "Ctrl+Shift+A",
+        "vision_global_shortcut": "Ctrl+Shift+S",
         "ocr_provider": "local",
         "online_ocr_timeout": 15.0,
     }

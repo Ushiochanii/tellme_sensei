@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import os
+import logging
+
+import pytest
 
 from app.config import ConfigManager
 from app.settings.repository import SettingsRepository
-from app.settings.secret_store import SecretStore
+from app.settings.secret_store import SecretStore, SecretStoreError
 
 
 class _Secrets:
@@ -102,6 +105,28 @@ def test_legacy_and_google_secret_accounts_are_separate() -> None:
     assert store.get_google_vision_api_key() == "google-key"
     assert ("tellme-sensei", "default") in keyring.values
     assert ("tellme-sensei", "google-vision-api-key") in keyring.values
+
+
+def test_secret_store_failures_log_safe_operation_metadata(caplog) -> None:
+    class _FailingKeyring:
+        def set_password(self, *_args) -> None:
+            raise RuntimeError("diagnostic-secret-value")
+
+        def delete_password(self, *_args) -> None:
+            raise RuntimeError("diagnostic-secret-value")
+
+    store = SecretStore(keyring_module=_FailingKeyring())
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(SecretStoreError):
+            store.set_api_key("super-secret-value")
+        with pytest.raises(SecretStoreError):
+            store.delete_api_key()
+
+    assert "operation=set" in caplog.text
+    assert "operation=delete" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "super-secret-value" not in caplog.text
+    assert "diagnostic-secret-value" not in caplog.text
 
 
 def test_google_key_is_not_in_app_config_repr() -> None:
