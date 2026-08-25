@@ -13,8 +13,8 @@ import pytest
 from app.local_ocr.component_manager import ComponentError, LocalOCRComponentManager
 from app.local_ocr.manifest import ComponentManifest, ManifestError
 from app.local_ocr.version import (
-    ARM64_LOCAL_OCR_ACCEPTANCE_VERSION,
     LOCAL_OCR_VERSION,
+    MACOS_ARM64_LOCAL_OCR_VERSION,
     MACOS_LOCAL_OCR_VERSION,
 )
 from app.local_ocr.platform import spec_for_manifest
@@ -25,7 +25,7 @@ def _manifest_for(archive: Path, *, platform: str = "windows", arch: str = "x86_
     version = {
         ("windows", "x86_64"): LOCAL_OCR_VERSION,
         ("macos", "x86_64"): MACOS_LOCAL_OCR_VERSION,
-        ("macos", "arm64"): ARM64_LOCAL_OCR_ACCEPTANCE_VERSION,
+        ("macos", "arm64"): MACOS_ARM64_LOCAL_OCR_VERSION,
     }[(platform, arch)]
     return ComponentManifest.from_dict(
         {
@@ -215,7 +215,7 @@ def test_arm64_explicit_lifecycle_accepts_native_layout_while_capability_enabled
         tmp_path / "runtime",
         platform_spec=arm_spec,
     )
-    assert manager.version == ARM64_LOCAL_OCR_ACCEPTANCE_VERSION
+    assert manager.version == MACOS_ARM64_LOCAL_OCR_VERSION
     monkeypatch.setattr(
         "app.local_ocr.component_manager.subprocess.run",
         lambda *args, **kwargs: SimpleNamespace(returncode=0),
@@ -238,7 +238,7 @@ def test_arm64_explicit_lifecycle_rejects_intel_manifest(
     manifest = ComponentManifest.from_dict(
         {
             "component": "local-ocr",
-            "version": ARM64_LOCAL_OCR_ACCEPTANCE_VERSION,
+            "version": MACOS_ARM64_LOCAL_OCR_VERSION,
             "platform": "macos",
             "arch": "x86_64",
             "url": "https://example.test/local-ocr.zip",

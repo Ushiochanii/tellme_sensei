@@ -30,8 +30,8 @@ def _production_url_for_spec(platform_spec: object | None = None) -> str:
 
 
 try:
-    # Hosts without a published component (including ARM64 before A5) have no
-    # production manifest URL. Keep import-time defaults harmless there.
+    # Unsupported hosts have no production manifest URL. Keep import-time
+    # defaults harmless there while pinning supported platform releases.
     DISTRIBUTION_RELEASE_TAG = local_ocr_release_tag_for_spec()
 except ValueError:
     DISTRIBUTION_RELEASE_TAG = ""

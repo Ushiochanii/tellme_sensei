@@ -97,6 +97,9 @@ def test_settings_shows_supported_but_unconfigured_distribution(
     monkeypatch.setattr(
         settings_window_module, "manifest_url_available", lambda _root=None: False
     )
+    monkeypatch.setattr(
+        settings_window_module, "resolve_manifest_url", lambda _root=None: ""
+    )
     window = _window(tmp_path, _ComponentManager(False), manifest_url=None)
 
     assert window.online_mode_radio.isChecked()
