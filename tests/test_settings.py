@@ -53,12 +53,62 @@ class FakeHotkeyManager:
         self.shortcut = shortcut
         self.rebind_result = rebind_result
         self.rebind_calls: list[str] = []
+        self.registered = True
+        self.register_calls = 0
+        self.unregister_calls = 0
 
     def rebind(self, shortcut: str) -> bool:
         self.rebind_calls.append(shortcut)
         if self.rebind_result:
             self.shortcut = shortcut
+            self.registered = True
         return self.rebind_result
+
+    def register(self) -> bool:
+        self.register_calls += 1
+        self.registered = True
+        return True
+
+    def unregister(self) -> None:
+        self.unregister_calls += 1
+        self.registered = False
+
+
+class OwnedHotkeyManager:
+    """Small native-registration double that models shortcut ownership."""
+
+    def __init__(self, shortcut: str, owners: set[str], fail_shortcuts: set[str] | None = None) -> None:
+        self.shortcut = shortcut
+        self.owners = owners
+        self.fail_shortcuts = fail_shortcuts or set()
+        self.rebind_calls: list[str] = []
+        self.registered = False
+        assert self.register() is True
+
+    def register(self) -> bool:
+        if self.shortcut in self.fail_shortcuts or self.shortcut in self.owners:
+            return False
+        self.owners.add(self.shortcut)
+        self.registered = True
+        return True
+
+    def unregister(self) -> None:
+        self.owners.discard(self.shortcut)
+        self.registered = False
+
+    def rebind(self, shortcut: str) -> bool:
+        self.rebind_calls.append(shortcut)
+        old_shortcut = self.shortcut
+        was_registered = self.registered
+        if was_registered:
+            self.unregister()
+        self.shortcut = shortcut
+        if self.register():
+            return True
+        self.shortcut = old_shortcut
+        if was_registered:
+            self.register()
+        return False
 
 
 def make_manager(tmp_path, secret_store=None) -> ConfigManager:
@@ -297,6 +347,8 @@ def test_two_shortcut_rebinds_roll_back_when_vision_registration_fails(qt_app, t
 
     assert text_hotkey.shortcut == "Ctrl+Shift+Q"
     assert vision_hotkey.shortcut == "Ctrl+Shift+W"
+    assert text_hotkey.registered is True
+    assert vision_hotkey.registered is True
     assert window.config_manager.settings_repository.load() == {}
     assert "注册失败" in window.status_label.text()
     window.deleteLater()
@@ -319,6 +371,95 @@ def test_two_shortcut_rebinds_attempt_vision_after_text_failure(qt_app, tmp_path
     assert vision_hotkey.rebind_calls == ["Ctrl+Alt+B", "Ctrl+Shift+W"]
     assert vision_hotkey.shortcut == "Ctrl+Shift+W"
     assert window.config_manager.settings_repository.load() == {}
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebind_direct_swap_succeeds(qt_app, tmp_path) -> None:
+    owners: set[str] = set()
+    text_hotkey = OwnedHotkeyManager("Ctrl+Shift+Q", owners)
+    vision_hotkey = OwnedHotkeyManager("Ctrl+Shift+W", owners)
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+Q"))
+    window.save()
+
+    assert text_hotkey.shortcut == "Ctrl+Shift+W"
+    assert vision_hotkey.shortcut == "Ctrl+Shift+Q"
+    assert text_hotkey.registered is True
+    assert vision_hotkey.registered is True
+    assert owners == {"Ctrl+Shift+Q", "Ctrl+Shift+W"}
+    assert window.config_manager.settings_repository.load()["global_shortcut"] == "Ctrl+Shift+W"
+    assert window.config_manager.settings_repository.load()["vision_global_shortcut"] == "Ctrl+Shift+Q"
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebind_transfer_succeeds(qt_app, tmp_path) -> None:
+    owners: set[str] = set()
+    text_hotkey = OwnedHotkeyManager("Ctrl+Shift+Q", owners)
+    vision_hotkey = OwnedHotkeyManager("Ctrl+Shift+W", owners)
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+E"))
+    window.save()
+
+    assert text_hotkey.shortcut == "Ctrl+Shift+W"
+    assert vision_hotkey.shortcut == "Ctrl+Alt+E"
+    assert owners == {"Ctrl+Shift+W", "Ctrl+Alt+E"}
+    assert window.config_manager.settings_repository.load()["vision_global_shortcut"] == "Ctrl+Alt+E"
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebind_preserves_unregistered_state(qt_app, tmp_path) -> None:
+    text_hotkey = FakeHotkeyManager()
+    vision_hotkey = FakeHotkeyManager("Ctrl+Shift+W")
+    text_hotkey.unregister()
+    vision_hotkey.unregister()
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+E"))
+    window.save()
+
+    assert text_hotkey.registered is False
+    assert vision_hotkey.registered is False
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_two_shortcut_rebind_restores_after_second_registration_fails(qt_app, tmp_path) -> None:
+    owners: set[str] = set()
+    text_hotkey = OwnedHotkeyManager("Ctrl+Shift+Q", owners)
+    vision_hotkey = OwnedHotkeyManager("Ctrl+Shift+W", owners, {"Ctrl+Alt+E"})
+    window = SettingsWindow(
+        make_manager(tmp_path, FakeSecretStore("key")),
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+    window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
+    window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+E"))
+    window.save()
+
+    assert text_hotkey.shortcut == "Ctrl+Shift+Q"
+    assert vision_hotkey.shortcut == "Ctrl+Shift+W"
+    assert text_hotkey.registered is True
+    assert vision_hotkey.registered is True
+    assert owners == {"Ctrl+Shift+Q", "Ctrl+Shift+W"}
+    assert window.config_manager.settings_repository.load() == {}
+    assert "注册失败" in window.status_label.text()
     window.deleteLater()
     qt_app.processEvents()
 

@@ -813,26 +813,25 @@ class SettingsWindow(QWidget):
 
     @Slot()
     def save(self) -> None:
-        old_shortcuts: list[tuple[GlobalHotkeyManager, str, bool]] = []
+        changed_shortcuts: list[tuple[GlobalHotkeyManager, str, bool, str]] = []
         try:
             config = self._read_config_from_fields()
             requested = (
                 (self.hotkey_manager, config.global_shortcut),
                 (self.vision_hotkey_manager, config.vision_global_shortcut),
             )
-            rebind_failed = False
             for manager, shortcut in requested:
                 if manager is None or manager.shortcut == shortcut:
                     continue
-                old_shortcuts.append((manager, manager.shortcut, False))
-                if not manager.rebind(shortcut):
-                    rebind_failed = True
-                else:
-                    old_shortcuts[-1] = (manager, old_shortcuts[-1][1], True)
-            if rebind_failed:
-                for rebound_manager, old_shortcut, rebound in reversed(old_shortcuts):
-                    if rebound and not rebound_manager.rebind(old_shortcut):
-                        logger.error("failed to rollback shortcut after rebind failure")
+                changed_shortcuts.append(
+                    (
+                        manager,
+                        manager.shortcut,
+                        self._hotkey_is_registered(manager),
+                        shortcut,
+                    )
+                )
+            if not self._apply_shortcut_changes(changed_shortcuts):
                 self._set_status("快捷键注册失败，可能已被其他程序占用。")
                 return
             provider_to_save = None
@@ -852,15 +851,69 @@ class SettingsWindow(QWidget):
                 online_ocr_timeout=config.online_ocr_timeout,
             )
         except (ConfigError, SecretStoreError, ValueError) as exc:
-            for manager, old_shortcut, rebound in reversed(old_shortcuts):
-                if rebound and not manager.rebind(old_shortcut):
-                    logger.error("failed to rollback shortcut after settings save failure")
+            self._restore_shortcut_changes(changed_shortcuts)
             self._set_status(str(exc))
             return
         self._set_status("设置已保存")
         self._show_environment_override_warnings()
         self.settings_saved.emit()
         self.close()
+
+    @staticmethod
+    def _hotkey_is_registered(manager: GlobalHotkeyManager) -> bool:
+        return bool(manager.registered)
+
+    @staticmethod
+    def _release_hotkey(manager: GlobalHotkeyManager) -> None:
+        manager.unregister()
+
+    @staticmethod
+    def _register_hotkey(manager: GlobalHotkeyManager) -> bool:
+        return bool(manager.register())
+
+    def _apply_shortcut_changes(
+        self,
+        changes: list[tuple[GlobalHotkeyManager, str, bool, str]],
+    ) -> bool:
+        """Claim a changed shortcut set without making a swap collide with itself."""
+
+        if len(changes) > 1:
+            for manager, _old_shortcut, was_registered, _new_shortcut in changes:
+                if was_registered:
+                    self._release_hotkey(manager)
+
+        all_registered = True
+        for manager, _old_shortcut, was_registered, new_shortcut in changes:
+            if not manager.rebind(new_shortcut):
+                all_registered = False
+                continue
+            if not was_registered:
+                self._release_hotkey(manager)
+
+        if all_registered:
+            return True
+        self._restore_shortcut_changes(changes)
+        return False
+
+    def _restore_shortcut_changes(
+        self,
+        changes: list[tuple[GlobalHotkeyManager, str, bool, str]],
+    ) -> None:
+        """Restore both shortcut values and their pre-save registration states."""
+
+        for manager, _old_shortcut, _was_registered, _new_shortcut in changes:
+            if self._hotkey_is_registered(manager):
+                self._release_hotkey(manager)
+        for manager, old_shortcut, was_registered, _new_shortcut in reversed(changes):
+            if manager.shortcut != old_shortcut:
+                if not manager.rebind(old_shortcut):
+                    logger.error("failed to rollback shortcut after rebind failure")
+                    continue
+            if was_registered:
+                if not self._hotkey_is_registered(manager) and not self._register_hotkey(manager):
+                    logger.error("failed to restore hotkey registration: %s", old_shortcut)
+            else:
+                self._release_hotkey(manager)
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)
