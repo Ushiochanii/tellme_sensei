@@ -284,6 +284,22 @@ def test_secret_store_uses_injected_keyring_only() -> None:
     assert store.get_api_key() == ""
 
 
+def test_config_test_path_never_uses_real_keyring(tmp_path, monkeypatch) -> None:
+    import keyring
+
+    def fail_if_real_keyring_is_used(*_args, **_kwargs):
+        raise AssertionError("tests must not access the OS keyring")
+
+    monkeypatch.setattr(keyring, "get_password", fail_if_real_keyring_is_used)
+    manager = ConfigManager(
+        project_root=tmp_path,
+        settings_repository=SettingsRepository(tmp_path / "settings.json"),
+        secret_store=FakeSecretStore(),
+    )
+
+    assert manager.load(require_api_key=False).api_key == ""
+
+
 def test_repository_partial_update_preserves_existing_settings(tmp_path) -> None:
     repository = SettingsRepository(tmp_path / "settings.json")
     repository.update(
