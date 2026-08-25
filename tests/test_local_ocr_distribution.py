@@ -20,6 +20,7 @@ from app.local_ocr.version import (
     MACOS_LOCAL_OCR_RELEASE_TAG,
     MACOS_LOCAL_OCR_VERSION,
     current_local_ocr_version,
+    local_ocr_version_for_spec,
     local_ocr_release_tag_for_spec,
 )
 from app.version import __version__
@@ -58,7 +59,7 @@ def test_arm64_version_is_a_pinned_production_route() -> None:
     arm_spec = spec_for_manifest("macos", "arm64")
     assert arm_spec is not None
     assert arm_spec.supported is True
-    assert current_local_ocr_version() == MACOS_ARM64_LOCAL_OCR_VERSION
+    assert local_ocr_version_for_spec(arm_spec) == MACOS_ARM64_LOCAL_OCR_VERSION
     assert local_ocr_release_tag_for_spec(arm_spec) == MACOS_ARM64_LOCAL_OCR_RELEASE_TAG
 
 
@@ -105,16 +106,18 @@ def test_manifest_url_precedence_keeps_environment_and_dotenv_separate(
     assert resolve_manifest_url(tmp_path) == DEFAULT_MANIFEST_URL
 
 
-def test_arm_distribution_uses_pinned_default_without_override(tmp_path: Path) -> None:
-    assert manifest_url_available(tmp_path) is True
-    assert resolve_manifest_url(tmp_path).endswith(
+def test_arm_distribution_uses_pinned_route_with_explicit_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arm_spec = spec_for_manifest("macos", "arm64")
+    assert arm_spec is not None
+    arm_url = production_manifest_url(arm_spec)
+    assert arm_url.endswith(
         "/local-ocr-v1.3.0-macos-arm64/local-ocr-manifest.json"
     )
-    (tmp_path / ".env").write_text(
-        "LOCAL_OCR_MANIFEST_URL=http://127.0.0.1:8765/manifest.json\n",
-        encoding="utf-8",
-    )
+    monkeypatch.setenv("LOCAL_OCR_MANIFEST_URL", arm_url)
     assert manifest_url_available(tmp_path) is True
+    assert resolve_manifest_url(tmp_path) == arm_url
 
 
 def test_download_user_agent_follows_application_version() -> None:

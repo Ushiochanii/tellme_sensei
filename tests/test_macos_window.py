@@ -47,9 +47,10 @@ class _FakeOverlay:
         self.activate_calls += 1
 
 
-def test_macos_overlay_bridge_configures_native_window() -> None:
+def test_macos_overlay_bridge_configures_native_window(monkeypatch) -> None:
     bridge = _FakeBridge()
     widget = _FakeWidget()
+    monkeypatch.setattr(window_module.sys, "platform", "darwin")
 
     assert configure_macos_overlay_window(widget, bridge=bridge) is True
     assert bridge.widgets == [widget]
