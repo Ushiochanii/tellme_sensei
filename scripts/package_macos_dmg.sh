@@ -19,7 +19,6 @@ fi
 app_path="$repo_root/dist/macos/TellMeSensei.app"
 release_path="$repo_root/dist/release"
 version="$("$python_path" -c 'from app.version import __version__; print(__version__)')"
-dmg_path="$release_path/TellMeSensei-$version-macos-x64.dmg"
 executable_path="$app_path/Contents/MacOS/TellMeSensei"
 plist_path="$app_path/Contents/Info.plist"
 
@@ -44,11 +43,21 @@ if [[ "$ls_ui_element" != "1" && "$ls_ui_element" != "true" ]]; then
     echo "LSUIElement must be true for the tray application." >&2
     exit 1
 fi
-if ! file "$executable_path" | grep -Fq "Mach-O 64-bit executable x86_64"; then
-    echo "The macOS app executable is not an Intel x86_64 Mach-O binary." >&2
-    file "$executable_path" >&2
+executable_format="$(file "$executable_path")"
+if grep -Fq "Mach-O universal binary" <<<"$executable_format"; then
+    echo "Universal2 macOS app binaries are not accepted by this native DMG pipeline." >&2
+    echo "$executable_format" >&2
+    exit 1
+elif grep -Fq "Mach-O 64-bit executable arm64" <<<"$executable_format"; then
+    dmg_arch="arm64"
+elif grep -Fq "Mach-O 64-bit executable x86_64" <<<"$executable_format"; then
+    dmg_arch="x64"
+else
+    echo "The macOS app executable is not a supported native arm64 or x86_64 Mach-O binary." >&2
+    echo "$executable_format" >&2
     exit 1
 fi
+dmg_path="$release_path/TellMeSensei-$version-macos-$dmg_arch.dmg"
 /usr/bin/codesign --verify --deep --strict "$app_path"
 
 if grep -R -aEq '127\.0\.0\.1:8765|localhost:8765|downloads\.example\.invalid' "$app_path"; then
@@ -88,3 +97,4 @@ ln -s /Applications "$staging_path/Applications"
 
 echo "DMG created: $dmg_path"
 echo "Version: $version"
+echo "Architecture: $dmg_arch"
