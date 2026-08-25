@@ -3,7 +3,6 @@ from pathlib import Path
 from app.local_ocr.download import USER_AGENT
 from app.local_ocr.manifest import (
     DEFAULT_MANIFEST_URL,
-    DISTRIBUTION_RELEASE_TAG,
     DISTRIBUTION_REPOSITORY,
     production_manifest_url,
     resolve_manifest_url,
@@ -14,6 +13,7 @@ from app.local_ocr.version import (
     MACOS_LOCAL_OCR_RELEASE_TAG,
     MACOS_LOCAL_OCR_VERSION,
     current_local_ocr_version,
+    local_ocr_release_tag_for_spec,
 )
 from app.version import __version__
 from app.local_ocr.component_manager import LocalOCRComponentManager
@@ -24,8 +24,9 @@ def test_local_ocr_version_and_production_manifest_url() -> None:
     assert MACOS_LOCAL_OCR_VERSION == "1.2.0"
     assert MACOS_LOCAL_OCR_RELEASE_TAG == "local-ocr-v1.2.0-macos-x64"
     assert DISTRIBUTION_REPOSITORY == "Ushiochanii/tellme-sensei-releases"
-    assert DISTRIBUTION_RELEASE_TAG == "local-ocr-v1.2.0-macos-x64"
-    assert DEFAULT_MANIFEST_URL == (
+    intel_spec = spec_for_manifest("macos", "x86_64")
+    assert local_ocr_release_tag_for_spec(intel_spec) == "local-ocr-v1.2.0-macos-x64"
+    assert production_manifest_url(intel_spec) == (
         "https://github.com/Ushiochanii/tellme-sensei-releases/releases/download/"
         "local-ocr-v1.2.0-macos-x64/local-ocr-manifest.json"
     )

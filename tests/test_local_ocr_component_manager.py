@@ -195,7 +195,9 @@ def test_macos_install_restores_macho_modes_and_requires_models(
             bundle.writestr(info, data)
     manifest = _manifest_for(archive_path, platform="macos", arch="x86_64")
     manager = LocalOCRComponentManager(
-        tmp_path / "runtime", platform_spec=spec_for_manifest("macos", "x86_64")
+        tmp_path / "runtime",
+        version=MACOS_LOCAL_OCR_VERSION,
+        platform_spec=spec_for_manifest("macos", "x86_64"),
     )
     monkeypatch.setattr(
         "app.local_ocr.component_manager.subprocess.run",

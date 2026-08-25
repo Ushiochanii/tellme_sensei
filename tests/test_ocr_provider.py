@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import json
 import inspect
+import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +15,7 @@ from app.ocr.local_session import LocalOCRSession
 from app.ocr.profiling import read_profile, write_profile
 from app.ocr.providers.local_worker import LocalOCRProvider
 from app.ocr.providers.paddle import PaddleOCRProvider
+from app.ocr.providers import paddle as paddle_provider_module
 from app.ocr.types import OCRError, OCRLine, OCRResult
 from app.ocr.worker_protocol import error_payload
 from app.ui import main_window as main_window_module
@@ -108,6 +111,90 @@ def test_paddle_profile_reuses_one_lazy_engine(tmp_path) -> None:
     assert first_timings["engine_call_ms"] >= 0.0
     assert first_timings["result_parse_ms"] >= 0.0
     assert first_timings["normalize_ms"] >= 0.0
+
+
+@pytest.mark.parametrize(
+    ("installed", "expected"),
+    [("2.7.3", 2), ("3.7.0", 3)],
+)
+def test_paddleocr_major_version_is_parsed_deterministically(
+    monkeypatch, installed: str, expected: int
+) -> None:
+    monkeypatch.setattr(
+        paddle_provider_module,
+        "distribution_version",
+        lambda _name: installed,
+    )
+    assert paddle_provider_module._paddleocr_major_version() == expected
+
+
+def test_paddle_provider_uses_explicit_major_version_constructor_options(monkeypatch, tmp_path) -> None:
+    captured: list[dict[str, object]] = []
+
+    class FakePaddleOCR:
+        def __init__(self, **options):
+            captured.append(options)
+
+    det = tmp_path / "det"
+    rec = tmp_path / "rec"
+    det.mkdir()
+    rec.mkdir()
+    (det / "inference.yml").write_text("Global:\n  model_name: test_det\n", encoding="utf-8")
+    (rec / "inference.yml").write_text("Global:\n  model_name: test_rec\n", encoding="utf-8")
+    monkeypatch.setitem(sys.modules, "paddleocr", types.SimpleNamespace(PaddleOCR=FakePaddleOCR))
+    monkeypatch.setattr(paddle_provider_module, "distribution_version", lambda _name: "3.7.0")
+    provider = PaddleOCRProvider(det_model_dir=det, rec_model_dir=rec)
+    provider.initialize()
+    assert captured == [
+        {
+            "lang": "japan",
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+            "text_detection_model_name": "test_det",
+            "text_detection_model_dir": str(det),
+            "text_recognition_model_name": "test_rec",
+            "text_recognition_model_dir": str(rec),
+        }
+    ]
+
+
+def test_paddle_provider_uses_explicit_2x_constructor_options(monkeypatch, tmp_path) -> None:
+    captured: list[dict[str, object]] = []
+
+    class FakePaddleOCR:
+        def __init__(self, **options):
+            captured.append(options)
+
+    det = tmp_path / "det"
+    rec = tmp_path / "rec"
+    det.mkdir()
+    rec.mkdir()
+    monkeypatch.setitem(sys.modules, "paddleocr", types.SimpleNamespace(PaddleOCR=FakePaddleOCR))
+    monkeypatch.setattr(paddle_provider_module, "distribution_version", lambda _name: "2.7.3")
+    provider = PaddleOCRProvider(det_model_dir=det, rec_model_dir=rec)
+    provider.initialize()
+    assert captured == [
+        {
+            "use_angle_cls": False,
+            "lang": "japan",
+            "det_model_dir": str(det),
+            "rec_model_dir": str(rec),
+        }
+    ]
+
+
+def test_extract_lines_supports_numpy_like_boxes() -> None:
+    class ArrayLike:
+        def tolist(self):
+            return [[10, 20], [30, 20], [30, 40], [10, 40]]
+
+    lines = PaddleOCRProvider._extract_lines(
+        {"rec_texts": ["日本語"], "rec_scores": [0.9], "rec_boxes": [ArrayLike()]}
+    )
+    assert lines[0].text == "日本語"
+    assert lines[0].left == 10.0
+    assert lines[0].top == 20.0
 
 
 def test_profile_schema_rejects_malformed_documents(tmp_path) -> None:

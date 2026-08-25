@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable
 
 from app.local_ocr.manifest import ComponentManifest, ManifestError
+from app.local_ocr.model_layout import model_root_is_complete
 from app.local_ocr.platform import LocalOCRPlatformSpec, current_spec, spec_for_manifest
 from app.local_ocr.version import current_local_ocr_version
 from app.runtime_paths import user_runtime_directory
@@ -217,17 +218,7 @@ class LocalOCRComponentManager:
 
     @staticmethod
     def _models_are_complete(model_root: Path) -> bool:
-        if not model_root.is_dir():
-            return False
-        for kind in ("det", "rec"):
-            directory = model_root / kind
-            if not directory.is_dir():
-                return False
-            if not any(directory.rglob("inference.pdmodel")):
-                return False
-            if not any(directory.rglob("inference.pdiparams")):
-                return False
-        return True
+        return model_root_is_complete(model_root)
 
     def _atomic_activate(self, staging: Path) -> Path:
         target = self.installed_path()

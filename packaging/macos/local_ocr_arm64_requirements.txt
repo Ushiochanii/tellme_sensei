@@ -1,0 +1,3 @@
+# Native Apple Silicon Local OCR build inputs. Keep separate from the Intel 2.x stack.
+paddlepaddle==3.3.0
+paddleocr==3.7.0

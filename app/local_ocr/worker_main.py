@@ -19,6 +19,7 @@ from app.ocr.persistent_protocol import (
 from app.ocr.providers.paddle import PaddleOCRProvider
 from app.ocr.types import OCRError
 from app.ocr.worker_protocol import error_payload, result_payload, write_payload
+from app.local_ocr.model_layout import ModelLayoutError, find_model_pair
 
 logger = logging.getLogger(__name__)
 
@@ -183,19 +184,10 @@ def _provider(args: argparse.Namespace) -> PaddleOCRProvider:
 def _resolve_model_dirs(model_root: Path | None) -> tuple[Path, Path] | None:
     if model_root is None:
         return None
-    if not model_root.is_dir():
-        raise OCRError(f"Local OCR model root does not exist: {model_root}")
-    resolved: list[Path] = []
-    for kind in ("det", "rec"):
-        candidates = sorted(
-            path.parent
-            for path in (model_root / kind).rglob("inference.pdmodel")
-            if (path.parent / "inference.pdiparams").is_file()
-        ) if (model_root / kind).is_dir() else []
-        if not candidates:
-            raise OCRError(f"Local OCR {kind} model files are missing.")
-        resolved.append(candidates[0])
-    return resolved[0], resolved[1]
+    try:
+        return find_model_pair(model_root)
+    except ModelLayoutError as exc:
+        raise OCRError(str(exc)) from exc
 
 
 def _smoke_import(model_dirs: tuple[Path, Path] | None = None) -> int:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from importlib.metadata import PackageNotFoundError, version as distribution_version
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,25 @@ from app.ocr.profiling import make_profile_run
 from app.ocr.types import OCRError, OCRLine, OCRResult
 from app.ocr.utils import normalize_ocr_text
 from app.thread_info import current_thread_info
+from app.local_ocr.model_layout import model_name_from_directory
 
 logger = logging.getLogger(__name__)
+
+
+def _paddleocr_major_version() -> int:
+    """Read the installed PaddleOCR major version without probing constructors."""
+
+    try:
+        raw_version = distribution_version("paddleocr")
+    except PackageNotFoundError as exc:
+        raise OCRError("未安装 PaddleOCR，无法确定运行时版本。") from exc
+    match = re.match(r"^\s*(\d+)(?:\.|$)", raw_version)
+    if match is None:
+        raise OCRError(f"无法解析 PaddleOCR 版本：{raw_version!r}")
+    major = int(match.group(1))
+    if major < 2:
+        raise OCRError(f"不支持的 PaddleOCR 主版本：{raw_version}")
+    return major
 
 
 class PaddleOCRProvider:
@@ -127,31 +145,42 @@ class PaddleOCRProvider:
                 "未安装 PaddleOCR 依赖，请先执行 python -m pip install -r requirements-local-ocr.txt。"
             ) from exc
 
-        try:
-            # PaddleOCR 3.x uses these options; they also avoid unnecessary document analysis.
+        major = _paddleocr_major_version()
+        if major == 2:
             options: dict[str, Any] = {
+                "use_angle_cls": False,
                 "lang": self.language,
-                "use_doc_orientation_classify": False,
-                "use_doc_unwarping": False,
-                "use_textline_orientation": False,
             }
             if self.det_model_dir is not None:
                 options["det_model_dir"] = str(self.det_model_dir)
             if self.rec_model_dir is not None:
                 options["rec_model_dir"] = str(self.rec_model_dir)
             self._engine = PaddleOCR(**options)
-        except TypeError:
-            # PaddleOCR 2.x compatibility.
-            options = {"use_angle_cls": False, "lang": self.language}
+        else:
+            # PaddleOCR 3.x uses these canonical model-path options and does
+            # not need orientation/document models for TellMeSensei.
+            options = {
+                "lang": self.language,
+                "use_doc_orientation_classify": False,
+                "use_doc_unwarping": False,
+                "use_textline_orientation": False,
+            }
             if self.det_model_dir is not None:
-                options["det_model_dir"] = str(self.det_model_dir)
+                det_model_name = model_name_from_directory(self.det_model_dir)
+                if det_model_name is None:
+                    raise OCRError(
+                        f"PaddleOCR 3.x 检测模型配置不完整：{self.det_model_dir}"
+                    )
+                options["text_detection_model_name"] = det_model_name
+                options["text_detection_model_dir"] = str(self.det_model_dir)
             if self.rec_model_dir is not None:
-                options["rec_model_dir"] = str(self.rec_model_dir)
-                # PaddleOCR 2.7.3 downloads the default classifier even when
-                # use_angle_cls=False. Reusing the validated det directory
-                # prevents an unused network fallback without bundling cls.
-                if self.det_model_dir is not None:
-                    options["cls_model_dir"] = str(self.det_model_dir)
+                rec_model_name = model_name_from_directory(self.rec_model_dir)
+                if rec_model_name is None:
+                    raise OCRError(
+                        f"PaddleOCR 3.x 识别模型配置不完整：{self.rec_model_dir}"
+                    )
+                options["text_recognition_model_name"] = rec_model_name
+                options["text_recognition_model_dir"] = str(self.rec_model_dir)
             self._engine = PaddleOCR(**options)
         return self._engine
 
@@ -315,6 +344,7 @@ class PaddleOCRProvider:
     @staticmethod
     def _line_from(text: Any, score: Any = None, box: Any = None) -> OCRLine:
         top, left = 0.0, 0.0
+        box = PaddleOCRProvider._to_python(box)
         if isinstance(box, (list, tuple)) and box:
             try:
                 points = box if isinstance(box[0], (list, tuple)) else [box]
@@ -327,6 +357,18 @@ class PaddleOCRProvider:
         except (TypeError, ValueError):
             confidence = None
         return OCRLine(text=str(text).strip(), confidence=confidence, top=top, left=left)
+
+    @staticmethod
+    def _to_python(value: Any) -> Any:
+        """Convert NumPy-like arrays without importing NumPy in Core."""
+
+        tolist = getattr(value, "tolist", None)
+        if callable(tolist):
+            try:
+                return tolist()
+            except (TypeError, ValueError):
+                pass
+        return value
 
     @staticmethod
     def _looks_like_box(value: Any) -> bool:

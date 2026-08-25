@@ -1,0 +1,5 @@
+# Direct native/runtime pins proven during ARM-A2 feasibility work.
+paddlex==3.7.2
+numpy==2.3.5
+opencv-contrib-python==4.10.0.84
+setuptools==84.0.0

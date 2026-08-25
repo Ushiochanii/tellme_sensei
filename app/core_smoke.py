@@ -38,7 +38,7 @@ def _run_checks() -> None:
     """Import and construct safe Core services, without side effects."""
 
     from app.config import ConfigManager
-    from app.local_ocr.platform import current_spec
+    from app.local_ocr.platform import current_spec, normalize_arch
     from app.ocr.factory import create_ocr_provider
     from app.ocr.providers.google_vision import GoogleVisionOCRProvider
     from app.platform import factory as platform_factory
@@ -68,12 +68,7 @@ def _run_checks() -> None:
             "global hotkey factory is unavailable",
         )
     if sys.platform == "darwin":
-        spec = current_spec()
-        if spec.platform_id != "macos-x64" or not spec.supported:
-            raise CoreSmokeError(
-                "CORE_SMOKE_PLATFORM_FAILED",
-                f"unsupported packaged macOS platform: {spec.platform_id}",
-            )
+        _validate_macos_core_spec(current_spec(), normalize_arch)
 
     if getattr(sys, "frozen", False):
         for module_name in ("paddle", "paddleocr"):
@@ -85,6 +80,23 @@ def _run_checks() -> None:
                 "CORE_SMOKE_RESOURCE_FAILED",
                 f"forbidden Core dependency was bundled: {module_name}",
             )
+
+
+def _validate_macos_core_spec(spec: object, normalize_architecture) -> None:
+    """Validate the Core macOS boundary independently of Local OCR support."""
+
+    platform_id = getattr(spec, "platform_id", None)
+    manifest_arch = getattr(spec, "manifest_arch", None)
+    if platform_id not in {"macos-x64", "macos-arm64"}:
+        raise CoreSmokeError(
+            "CORE_SMOKE_PLATFORM_FAILED",
+            f"unsupported packaged macOS platform: {platform_id}",
+        )
+    if normalize_architecture(str(manifest_arch)) not in {"x64", "arm64"}:
+        raise CoreSmokeError(
+            "CORE_SMOKE_PLATFORM_FAILED",
+            f"unsupported packaged macOS architecture: {manifest_arch}",
+        )
 
 
 def _report(category: str, message: str) -> None:
