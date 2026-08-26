@@ -202,7 +202,8 @@ def test_cancel_capture_restores_idle(qt_app) -> None:
     window._on_capture_cancelled()
     assert window.state is AppState.IDLE
     assert window._busy is False
-    assert window.capture_button.isEnabled()
+    assert window.text_mode_button.isEnabled()
+    assert window.vision_mode_button.isEnabled()
     window.shutdown()
 
 

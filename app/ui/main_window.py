@@ -1,4 +1,4 @@
-"""GUI pipeline coordinator used by both tray mode and the dev window."""
+"""GUI pipeline coordinator used by the floating controller and tray mode."""
 
 from __future__ import annotations
 
@@ -10,14 +10,12 @@ from pathlib import Path
 import threading
 
 from PySide6.QtCore import QThread, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QIcon, QImage
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
-    QRadioButton,
     QVBoxLayout,
     QWidget,
 )
@@ -29,12 +27,22 @@ from app.local_ocr.component_manager import LocalOCRComponentManager
 from app.ocr.factory import create_ocr_provider
 from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
+from app.platform.hotkey import DEFAULT_SHORTCUT, DEFAULT_VISION_SHORTCUT
 from app.platform import screen_permissions
 from app.services.deepseek_service import DeepSeekService
 from app.state import AppState
 from app.thread_info import current_thread_info
 from app.ui.answer_window import AnswerWindow
 from app.ui.settings_window import SettingsWindow
+from app.ui.theme import (
+    SECONDARY_TEXT,
+    TEXT_ACCENT,
+    VISION_ACCENT,
+    ModeButton,
+    controller_stylesheet,
+    mode_icon,
+    settings_icon,
+)
 from app.workers.processing_worker import ProcessingWorker
 from app.workers.local_ocr_prewarm_worker import LocalOCRPrewarmWorker
 from app.workers.vision_processing_worker import VisionProcessingWorker
@@ -85,48 +93,129 @@ class MainWindow(QWidget):
         self._prewarm_thread: QThread | None = None
         self._prewarm_worker: LocalOCRPrewarmWorker | None = None
         self._prewarm_cancel_event: threading.Event | None = None
-        self.setWindowTitle("AI 学习助手")
+        self.setWindowTitle("TellMeSensei")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
-        self.setFixedSize(280, 170)
+        self.setObjectName("mainController")
+        self.setFixedSize(340, 250)
+        self.setStyleSheet(controller_stylesheet())
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 18)
-        label = QLabel("TellMeSensei")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        mode_layout = QHBoxLayout()
-        self.mode_group = QButtonGroup(self)
-        self.text_mode_radio = QRadioButton("OCR / Text")
-        self.vision_mode_radio = QRadioButton("AI Vision")
-        self.mode_group.addButton(self.text_mode_radio)
-        self.mode_group.addButton(self.vision_mode_radio)
-        self.text_mode_radio.setChecked(True)
-        self.text_mode_radio.toggled.connect(self._on_mode_radio_toggled)
-        mode_layout.addWidget(self.text_mode_radio)
-        mode_layout.addWidget(self.vision_mode_radio)
-        self.capture_button = QPushButton("截图识别")
-        self.capture_button.setMinimumHeight(38)
-        self.capture_button.clicked.connect(self._start_selected_capture)
-        layout.addWidget(label)
-        layout.addLayout(mode_layout)
-        layout.addWidget(self.capture_button)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
 
-    @Slot(bool)
-    def _on_mode_radio_toggled(self, checked: bool) -> None:
-        if checked:
-            self.capture_button.setText("截图识别")
-        elif self.vision_mode_radio.isChecked():
-            self.capture_button.setText("截图分析")
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        title = QLabel("TellMeSensei")
+        title.setObjectName("titleLabel")
+        settings_button = QPushButton()
+        settings_button.setObjectName("settingsButton")
+        settings_button.setToolTip("Settings")
+        settings_button.setAccessibleName("Settings")
+        settings_button.setIcon(QIcon(settings_icon()))
+        settings_button.clicked.connect(self.show_settings)
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(settings_button)
+        self.settings_button = settings_button
+
+        mode_layout = QHBoxLayout()
+        mode_layout.setSpacing(10)
+        text_shortcut, vision_shortcut = self._configured_shortcuts()
+        self.text_mode_button = ModeButton(
+            "Text / OCR",
+            text_shortcut,
+            mode_icon("text", TEXT_ACCENT),
+            TEXT_ACCENT,
+        )
+        self.text_mode_button.setObjectName("textModeButton")
+        self.text_mode_button.setProperty("mode", AnalysisMode.TEXT.value)
+        self.text_mode_button.clicked.connect(self.start_text_capture)
+        self.vision_mode_button = ModeButton(
+            "Vision",
+            vision_shortcut,
+            mode_icon("vision", VISION_ACCENT),
+            VISION_ACCENT,
+        )
+        self.vision_mode_button.setObjectName("visionModeButton")
+        self.vision_mode_button.setProperty("mode", AnalysisMode.VISION.value)
+        self.vision_mode_button.clicked.connect(self.start_vision_capture)
+        for button in (self.text_mode_button, self.vision_mode_button):
+            button.setObjectName(button.objectName())
+            button.setProperty("class", "modeButton")
+            button.setMinimumHeight(108)
+            button.setToolTip("截图识别" if button is self.text_mode_button else "截图分析")
+            mode_layout.addWidget(button)
+
+        self.status_label = QLabel()
+        self.status_label.setObjectName("statusLabel")
+        self._set_status(AppState.IDLE)
+
+        layout.addLayout(header)
+        layout.addLayout(mode_layout)
+        layout.addWidget(self.status_label)
+
+    def _set_capture_controls_enabled(self, enabled: bool) -> None:
+        """Enable or disable both direct mode capture controls together."""
+
+        self.text_mode_button.setEnabled(enabled)
+        self.vision_mode_button.setEnabled(enabled)
+
+    def _set_state(self, state: AppState) -> None:
+        self.state = state
+        self._set_status(state)
+
+    def _set_status(self, state: AppState) -> None:
+        labels = {
+            AppState.IDLE: "●  Ready",
+            AppState.CAPTURING: "●  Capturing…",
+            AppState.OCR_PROCESSING: "●  Processing…",
+            AppState.AI_PROCESSING: "●  Processing…",
+            AppState.CANCELLING: "●  Cancelling…",
+            AppState.ERROR: "●  Ready",
+        }
+        self.status_label.setText(labels[state])
+        self.status_label.setProperty("state", "ready" if state is AppState.IDLE else "busy")
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
 
     def _set_selected_mode(self, mode: AnalysisMode) -> None:
-        self.text_mode_radio.setChecked(mode is AnalysisMode.TEXT)
-        self.vision_mode_radio.setChecked(mode is AnalysisMode.VISION)
-        self._on_mode_radio_toggled(mode is AnalysisMode.TEXT)
+        self._active_mode = mode
+        self.text_mode_button.setProperty("selected", mode is AnalysisMode.TEXT)
+        self.vision_mode_button.setProperty("selected", mode is AnalysisMode.VISION)
+        self.text_mode_button.style().unpolish(self.text_mode_button)
+        self.text_mode_button.style().polish(self.text_mode_button)
+        self.vision_mode_button.style().unpolish(self.vision_mode_button)
+        self.vision_mode_button.style().polish(self.vision_mode_button)
 
-    @Slot()
-    def _start_selected_capture(self) -> bool:
-        if self.vision_mode_radio.isChecked():
-            return self.start_vision_capture()
-        return self.start_text_capture()
+    def _configured_shortcuts(self) -> tuple[str, str]:
+        """Use registered hotkeys first, then config/default values for display."""
+
+        try:
+            config = self.config_manager.load(require_api_key=False)
+        except ConfigError:
+            config = None
+        try:
+            text = self.hotkey_manager.shortcut if self.hotkey_manager is not None else None
+        except (AttributeError, NotImplementedError):
+            text = None
+        try:
+            vision = (
+                self.vision_hotkey_manager.shortcut
+                if self.vision_hotkey_manager is not None
+                else None
+            )
+        except (AttributeError, NotImplementedError):
+            vision = None
+        text = text or getattr(config, "global_shortcut", DEFAULT_SHORTCUT)
+        vision = vision or getattr(config, "vision_global_shortcut", DEFAULT_VISION_SHORTCUT)
+        return text, vision
+
+    def refresh_shortcut_labels(self) -> None:
+        """Refresh the two visible shortcut pills after settings are saved."""
+
+        text, vision = self._configured_shortcuts()
+        self.text_mode_button.set_shortcut(text)
+        self.vision_mode_button.set_shortcut(vision)
 
     @Slot()
     def start_capture(self) -> bool:
@@ -160,9 +249,9 @@ class MainWindow(QWidget):
 
         logger.info("capture requested mode=%s", mode.value)
         self._capture_mode = mode
-        self.state = AppState.CAPTURING
+        self._set_state(AppState.CAPTURING)
         self._busy = True
-        self.capture_button.setEnabled(False)
+        self._set_capture_controls_enabled(False)
         if not self.tray_mode:
             self.hide()
         try:
@@ -222,7 +311,7 @@ class MainWindow(QWidget):
             return
         self._shutting_down = True
         self._busy = True
-        self.capture_button.setEnabled(False)
+        self._set_capture_controls_enabled(False)
 
         if self._overlay is not None:
             self._overlay.close()
@@ -238,7 +327,7 @@ class MainWindow(QWidget):
 
         thread = self.processing_thread
         if thread is not None and thread.isRunning():
-            self.state = AppState.CANCELLING
+            self._set_state(AppState.CANCELLING)
             if self._answer_window is not None:
                 self._answer_window.set_cancelling()
             if self.processing_worker is not None:
@@ -279,8 +368,8 @@ class MainWindow(QWidget):
         mode = self._capture_mode
         self._set_selected_mode(mode)
         self._active_mode = mode
-        self.state = AppState.OCR_PROCESSING if mode is AnalysisMode.TEXT else AppState.AI_PROCESSING
-        self.capture_button.setEnabled(False)
+        self._set_state(AppState.OCR_PROCESSING if mode is AnalysisMode.TEXT else AppState.AI_PROCESSING)
+        self._set_capture_controls_enabled(False)
         self._last_ocr_text = ""
         self._last_vision_image = image.copy() if mode is AnalysisMode.VISION else None
         if not self.tray_mode:
@@ -431,7 +520,7 @@ class MainWindow(QWidget):
     def _on_ocr_started(self, job_id: str) -> None:
         if not self._is_active_job(job_id, "ocr_started"):
             return
-        self.state = AppState.OCR_PROCESSING
+        self._set_state(AppState.OCR_PROCESSING)
         if self._answer_window is not None:
             self._answer_window.set_ocr_processing()
 
@@ -447,7 +536,7 @@ class MainWindow(QWidget):
     def _on_ai_started(self, job_id: str) -> None:
         if not self._is_active_job(job_id, "ai_started"):
             return
-        self.state = AppState.AI_PROCESSING
+        self._set_state(AppState.AI_PROCESSING)
         if self._answer_window is not None:
             if self._active_mode is AnalysisMode.VISION:
                 self._answer_window.set_vision_ai_processing()
@@ -475,13 +564,13 @@ class MainWindow(QWidget):
             message = job_id
             job_id = self._active_job_id
             if job_id is None:
-                self.state = AppState.ERROR
+                self._set_state(AppState.ERROR)
                 if self._answer_window is not None:
                     self._answer_window.show_error(message)
                 return
         if not self._is_active_job(job_id, "error"):
             return
-        self.state = AppState.ERROR
+        self._set_state(AppState.ERROR)
         if self._answer_window is not None:
             self._answer_window.show_error(message)
 
@@ -490,7 +579,7 @@ class MainWindow(QWidget):
         if not self._is_active_job(job_id, "cancelled"):
             return
         self._cancelled_job_id = job_id
-        self.state = AppState.CANCELLING
+        self._set_state(AppState.CANCELLING)
         if self._answer_window is not None:
             self._answer_window.show_cancelled()
 
@@ -511,8 +600,8 @@ class MainWindow(QWidget):
         self.processing_worker = None
         self._active_job_id = None
         self._busy = False
-        self.state = AppState.IDLE
-        self.capture_button.setEnabled(True)
+        self._set_state(AppState.IDLE)
+        self._set_capture_controls_enabled(True)
         if self._answer_window is not None:
             if self._cancelled_job_id == job_id:
                 self._answer_window.show_cancelled()
@@ -550,7 +639,7 @@ class MainWindow(QWidget):
         if self.processing_worker is None or self._active_job_id is None:
             logger.info("cancel ignored: processing worker unavailable")
             return
-        self.state = AppState.CANCELLING
+        self._set_state(AppState.CANCELLING)
         if self._answer_window is not None:
             self._answer_window.set_cancelling()
         self.processing_worker.request_cancel()
@@ -563,7 +652,7 @@ class MainWindow(QWidget):
             logger.info("capture ignored: application busy")
             return
         self._busy = True
-        self.state = AppState.AI_PROCESSING
+        self._set_state(AppState.AI_PROCESSING)
         if self._answer_window is not None:
             if self._active_mode is AnalysisMode.VISION:
                 self._answer_window.set_vision_ai_processing()
@@ -631,11 +720,12 @@ class MainWindow(QWidget):
 
     def _restore_idle(self) -> None:
         self._busy = False
-        self.state = AppState.IDLE
-        self.capture_button.setEnabled(True)
+        self._set_state(AppState.IDLE)
+        self._set_capture_controls_enabled(True)
 
     @Slot()
     def _on_settings_saved(self) -> None:
+        self.refresh_shortcut_labels()
         self._schedule_or_stop_local_ocr()
 
     @Slot()

@@ -231,23 +231,94 @@ def test_vision_reanalyze_and_recapture_preserve_mode(monkeypatch, qt_app) -> No
     qt_app.processEvents()
 
 
-def test_main_window_radio_routes_physical_capture_without_starting_on_toggle(qt_app, monkeypatch) -> None:
+def test_main_window_mode_buttons_route_physical_capture(qt_app, monkeypatch) -> None:
     window = MainWindow(tray_mode=True)
     calls: list[AnalysisMode] = []
     monkeypatch.setattr(window, "start_text_capture", lambda: calls.append(AnalysisMode.TEXT) or True)
     monkeypatch.setattr(window, "start_vision_capture", lambda: calls.append(AnalysisMode.VISION) or True)
 
-    window.vision_mode_radio.click()
-    assert calls == []
-    assert window.capture_button.text() == "截图分析"
-    window.capture_button.click()
+    window.vision_mode_button.click()
     assert calls == [AnalysisMode.VISION]
 
-    window.text_mode_radio.click()
-    assert calls == [AnalysisMode.VISION]
-    assert window.capture_button.text() == "截图识别"
-    window.capture_button.click()
+    window.text_mode_button.click()
     assert calls == [AnalysisMode.VISION, AnalysisMode.TEXT]
+    window.close()
+    qt_app.processEvents()
+
+
+def test_main_window_controller_has_glass_mode_controls(qt_app) -> None:
+    window = MainWindow(tray_mode=True)
+
+    assert window.text_mode_button.text().startswith("Text / OCR")
+    assert window.vision_mode_button.text().startswith("Vision")
+    assert window.settings_button.toolTip() == "Settings"
+    assert window.status_label.text() == "●  Ready"
+    assert window.width() == 340
+    assert window.height() == 250
+    window.close()
+    qt_app.processEvents()
+
+
+def test_main_window_displays_configured_shortcuts(qt_app) -> None:
+    config = AppConfig(
+        api_key="test",
+        global_shortcut="Ctrl+Alt+T",
+        vision_global_shortcut="Ctrl+Alt+V",
+    )
+    manager = SimpleNamespace(load=lambda require_api_key=False: config)
+    window = MainWindow(
+        tray_mode=True,
+        config_manager=manager,
+        hotkey_manager=SimpleNamespace(shortcut="Ctrl+Alt+T"),
+        vision_hotkey_manager=SimpleNamespace(shortcut="Ctrl+Alt+V"),
+    )
+
+    assert "Ctrl+Alt+T" in window.text_mode_button.text()
+    assert "Ctrl+Alt+V" in window.vision_mode_button.text()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_main_window_shortcut_labels_refresh_after_settings_save(qt_app) -> None:
+    config_values = {"text": "Ctrl+Shift+A", "vision": "Ctrl+Shift+S"}
+    config = AppConfig(
+        api_key="test",
+        global_shortcut=config_values["text"],
+        vision_global_shortcut=config_values["vision"],
+    )
+    manager = SimpleNamespace(load=lambda require_api_key=False: config)
+    text_hotkey = SimpleNamespace(shortcut="Ctrl+Shift+A")
+    vision_hotkey = SimpleNamespace(shortcut="Ctrl+Shift+S")
+    window = MainWindow(
+        tray_mode=True,
+        config_manager=manager,
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+    )
+
+    text_hotkey.shortcut = "Ctrl+Alt+T"
+    vision_hotkey.shortcut = "Ctrl+Alt+V"
+    window._on_settings_saved()
+
+    assert "Ctrl+Alt+T" in window.text_mode_button.text()
+    assert "Ctrl+Alt+V" in window.vision_mode_button.text()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_main_window_disables_both_mode_controls_while_busy(qt_app) -> None:
+    window = MainWindow(tray_mode=True)
+    window._set_state(AppState.CAPTURING)
+    window._set_capture_controls_enabled(False)
+
+    assert window.text_mode_button.isEnabled() is False
+    assert window.vision_mode_button.isEnabled() is False
+    assert "Capturing" in window.status_label.text()
+
+    window._restore_idle()
+    assert window.text_mode_button.isEnabled() is True
+    assert window.vision_mode_button.isEnabled() is True
+    assert window.status_label.text() == "●  Ready"
     window.close()
     qt_app.processEvents()
 
@@ -257,14 +328,13 @@ def test_explicit_mode_entrypoints_override_radio_and_sync_selection(qt_app, mon
     calls: list[AnalysisMode] = []
     monkeypatch.setattr(window, "_start_capture", lambda mode: calls.append(mode) or True)
 
-    window.vision_mode_radio.setChecked(True)
     window.start_text_capture()
     assert calls == [AnalysisMode.TEXT]
-    assert window.text_mode_radio.isChecked()
+    assert window._active_mode is AnalysisMode.TEXT
 
     window.start_vision_capture()
     assert calls == [AnalysisMode.TEXT, AnalysisMode.VISION]
-    assert window.vision_mode_radio.isChecked()
+    assert window._active_mode is AnalysisMode.VISION
     window.close()
     qt_app.processEvents()
 
