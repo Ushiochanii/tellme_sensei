@@ -11,6 +11,7 @@ from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from app.analysis import AnalysisMode
 from app.capture.overlay import CaptureOverlay
 from app.config import AppConfig
 from app.state import AppState
@@ -82,6 +83,64 @@ def test_answer_window_copy_and_retry(qt_app) -> None:
     window.copy_button.click()
     assert QApplication.clipboard().text() == "【答案】复制测试"
     assert window.retry_button.isEnabled()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_answer_window_mode_titles_and_ocr_visibility(qt_app) -> None:
+    window = AnswerWindow()
+    window.show()
+    qt_app.processEvents()
+
+    window.set_mode(AnalysisMode.TEXT)
+    assert window.title_bar.title_label.text() == "Text / OCR Analysis"
+    assert window.ocr_section_label.isVisible()
+    assert window.ocr_edit.isVisible()
+
+    window.set_mode(AnalysisMode.VISION)
+    assert window.title_bar.title_label.text() == "Vision Analysis"
+    assert window.ocr_section_label.isVisible() is False
+    assert window.ocr_edit.isVisible() is False
+    window.close()
+    qt_app.processEvents()
+
+
+def test_answer_window_processing_and_result_button_hierarchy(qt_app) -> None:
+    window = AnswerWindow()
+    window.show()
+    qt_app.processEvents()
+    window.show_processing()
+    assert window.stop_button.isVisible()
+    assert window.stop_button.isEnabled()
+    assert window.retry_button.isEnabled() is False
+
+    window.set_ocr_text("题目")
+    window.set_result("答案")
+    assert window.stop_button.isVisible() is False
+    assert window.copy_button.isEnabled()
+    assert window.retry_button.isEnabled()
+
+    window.show_cancelled()
+    assert window.recapture_button.isVisible()
+    assert window.stop_button.isVisible() is False
+    window.close()
+    qt_app.processEvents()
+
+
+def test_answer_window_action_signals_emit_once(qt_app) -> None:
+    window = AnswerWindow()
+    window.set_ocr_text("题目")
+    window.set_result("答案")
+    events: list[str] = []
+    window.reanalyze_requested.connect(lambda: events.append("retry"))
+    window.recapture_requested.connect(lambda: events.append("recapture"))
+    window.stop_requested.connect(lambda: events.append("stop"))
+
+    window.retry_button.click()
+    window.recapture_button.click()
+    window.show_processing()
+    window.stop_button.click()
+    assert events == ["retry", "recapture", "stop"]
     window.close()
     qt_app.processEvents()
 
@@ -290,7 +349,7 @@ def test_main_window_ai_error_renders_terminal_answer_state(qt_app, monkeypatch)
 
     assert window.state is AppState.IDLE
     assert window._answer_window is not None
-    assert "401" in window._answer_window.status_label.text()
+    assert window._answer_window.status_label.text() == "!  Analysis failed"
     assert "AI 解析失败" in window._answer_window.answer_edit.toPlainText()
     assert window._answer_window.copy_button.isEnabled() is False
     window._answer_window.close()

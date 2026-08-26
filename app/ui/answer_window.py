@@ -8,6 +8,7 @@ from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -20,6 +21,12 @@ from PySide6.QtWidgets import (
 
 from app.analysis import AnalysisMode
 from app.settings.repository import SettingsRepository
+from app.ui.theme import (
+    TEXT_ACCENT,
+    VISION_ACCENT,
+    answer_window_stylesheet,
+    mode_icon,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +34,24 @@ logger = logging.getLogger(__name__)
 class _TitleBar(QWidget):
     """Small custom title bar that makes the frameless window draggable."""
 
-    def __init__(self, title: str, close_callback, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        close_callback,
+        mode: AnalysisMode = AnalysisMode.TEXT,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._drag_offset: QPoint | None = None
+        self.setObjectName("answerTitleBar")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 6, 6)
+        layout.setContentsMargins(14, 8, 8, 8)
+        layout.setSpacing(8)
+        self.mode_icon = QLabel()
+        self.mode_icon.setFixedSize(24, 24)
+        layout.addWidget(self.mode_icon)
         self.title_label = QLabel(title)
-        self.title_label.setObjectName("titleLabel")
+        self.title_label.setObjectName("answerTitleLabel")
         layout.addWidget(self.title_label)
         layout.addStretch(1)
         close_button = QToolButton()
@@ -41,6 +59,13 @@ class _TitleBar(QWidget):
         close_button.setObjectName("closeButton")
         close_button.clicked.connect(close_callback)
         layout.addWidget(close_button)
+        self.close_button = close_button
+        self.set_mode(mode)
+
+    def set_mode(self, mode: AnalysisMode) -> None:
+        is_vision = mode is AnalysisMode.VISION
+        self.title_label.setText("Vision Analysis" if is_vision else "Text / OCR Analysis")
+        self.mode_icon.setPixmap(mode_icon("vision" if is_vision else "text", VISION_ACCENT if is_vision else TEXT_ACCENT))
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt API name
         if event.button() == Qt.MouseButton.LeftButton:
@@ -84,53 +109,81 @@ class AnswerWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setMinimumSize(360, 420)
-        self.resize(450, 600)
+        self.resize(560, 640)
         self._restore_saved_geometry()
         self._ocr_text = ""
         self._answer_text = ""
         self._vision_mode = False
         self._closed_emitted = False
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        self.setObjectName("answerWindow")
 
-        self.title_bar = _TitleBar("AI 学习助手", self.close, self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(10)
+
+        self.title_bar = _TitleBar("Text / OCR Analysis", self.close, parent=self)
         root.addWidget(self.title_bar)
 
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(14, 10, 14, 8)
-        body_layout.setSpacing(6)
+        body_layout.setContentsMargins(4, 0, 4, 0)
+        body_layout.setSpacing(10)
 
-        self.status_label = QLabel("状态：等待处理")
+        self.status_label = QLabel()
         self.status_label.setObjectName("statusLabel")
+        self.status_label.setProperty("state", "ready")
         body_layout.addWidget(self.status_label)
 
-        self.ocr_section_label = self._section_label("识别题目")
-        body_layout.addWidget(self.ocr_section_label)
+        ocr_card = QFrame()
+        ocr_card.setObjectName("ocrCard")
+        self.ocr_card = ocr_card
+        ocr_layout = QVBoxLayout(ocr_card)
+        ocr_layout.setContentsMargins(14, 12, 14, 14)
+        ocr_layout.setSpacing(8)
+        self.ocr_section_label = self._section_label("Recognized Question")
+        ocr_layout.addWidget(self.ocr_section_label)
         self.ocr_edit = QPlainTextEdit()
+        self.ocr_edit.setObjectName("ocrEdit")
         self.ocr_edit.setReadOnly(True)
-        self.ocr_edit.setPlaceholderText("截图后将在这里显示 OCR 文本。")
-        self.ocr_edit.setMaximumHeight(150)
-        body_layout.addWidget(self.ocr_edit)
+        self.ocr_edit.setPlaceholderText("Recognized text will appear here.")
+        self.ocr_edit.setMaximumHeight(145)
+        ocr_layout.addWidget(self.ocr_edit)
+        body_layout.addWidget(ocr_card)
 
-        body_layout.addWidget(self._section_label("AI 解析"))
+        answer_card = QFrame()
+        answer_card.setObjectName("answerCard")
+        answer_layout = QVBoxLayout(answer_card)
+        answer_layout.setContentsMargins(14, 12, 14, 14)
+        answer_layout.setSpacing(8)
+        self.answer_section_label = self._section_label("Answer")
+        self.answer_section_label.setObjectName("answerSectionTitle")
+        answer_layout.addWidget(self.answer_section_label)
         self.answer_edit = QPlainTextEdit()
+        self.answer_edit.setObjectName("answerEdit")
         self.answer_edit.setReadOnly(True)
-        self.answer_edit.setPlaceholderText("正在等待 AI 解析……")
+        self.answer_edit.setPlaceholderText("The analysis will appear here.")
         self.answer_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
-        body_layout.addWidget(self.answer_edit, 1)
+        answer_layout.addWidget(self.answer_edit, 1)
+        body_layout.addWidget(answer_card, 1)
         root.addWidget(body, 1)
 
         footer = QWidget()
+        footer.setObjectName("answerFooter")
         footer_layout = QHBoxLayout(footer)
-        footer_layout.setContentsMargins(14, 8, 6, 8)
-        self.copy_button = QPushButton("复制答案")
-        self.retry_button = QPushButton("重新分析")
-        self.stop_button = QPushButton("停止")
-        self.recapture_button = QPushButton("重新截图")
-        close_button = QPushButton("关闭")
+        footer_layout.setContentsMargins(4, 0, 4, 0)
+        footer_layout.setSpacing(7)
+        self.copy_button = QPushButton("Copy")
+        self.copy_button.setObjectName("copyButton")
+        self.retry_button = QPushButton("Retry")
+        self.retry_button.setObjectName("retryButton")
+        self.stop_button = QPushButton("Stop")
+        self.stop_button.setObjectName("stopButton")
+        self.recapture_button = QPushButton("Recapture")
+        self.recapture_button.setObjectName("recaptureButton")
+        close_button = QPushButton("Close")
+        close_button.setObjectName("closeActionButton")
+        self.close_action_button = close_button
         self.copy_button.clicked.connect(self.copy_answer)
         self.retry_button.clicked.connect(self.reanalyze_requested.emit)
         self.stop_button.clicked.connect(self.stop_requested.emit)
@@ -149,23 +202,14 @@ class AnswerWindow(QWidget):
         footer_layout.addWidget(QSizeGrip(footer))
         root.addWidget(footer)
 
-        self.setStyleSheet(
-            """
-            AnswerWindow { background: #f7f8fa; border: 1px solid #8b95a5; }
-            #titleLabel { font-size: 15px; font-weight: 600; color: #000000; }
-            #closeButton { color: #000000; border: none; font-size: 20px; padding: 0 7px; }
-            #closeButton:hover { background: #d9534f; }
-            _TitleBar { background: #ffffff; }
-            #statusLabel { color: #335c8a; font-weight: 600; }
-            QPlainTextEdit { background: #ffffff; color: #000000; border: 1px solid #d4d9e1; border-radius: 4px; padding: 5px; }
-            QPushButton { min-height: 28px; padding: 2px 10px; }
-            """
-        )
+        self.setStyleSheet(answer_window_stylesheet())
+        self.set_mode(AnalysisMode.TEXT)
+        self.set_status("等待处理")
 
     @staticmethod
     def _section_label(text: str) -> QLabel:
-        label = QLabel(f"▼ {text}")
-        label.setStyleSheet("font-weight: 600; color: #344054; margin-top: 4px;")
+        label = QLabel(text)
+        label.setObjectName("sectionTitle")
         return label
 
     def show_processing(self) -> None:
@@ -201,6 +245,8 @@ class AnswerWindow(QWidget):
         }
         self.ocr_section_label.setVisible(not self._vision_mode)
         self.ocr_edit.setVisible(not self._vision_mode)
+        self.ocr_card.setVisible(not self._vision_mode)
+        self.title_bar.set_mode(AnalysisMode.VISION if self._vision_mode else AnalysisMode.TEXT)
         if self._vision_mode:
             self._ocr_text = ""
             self.ocr_edit.clear()
@@ -254,7 +300,24 @@ class AnswerWindow(QWidget):
             logger.exception("failed to save answer window geometry")
 
     def set_status(self, status: str) -> None:
-        self.status_label.setText(f"状态：{status}")
+        mapping = {
+            "等待处理": ("●  Ready", "ready"),
+            "正在识别题目...": ("◌  Recognizing text…", "busy"),
+            "正在请求 AI...": ("◌  Analyzing…", "busy"),
+            "正在分析截图...": ("◌  Analyzing image…", "busy"),
+            "正在取消...": ("◌  Cancelling…", "busy"),
+            "已取消": ("■  Cancelled", "cancelled"),
+            "完成": ("✓  Analysis completed", "complete"),
+            "答案已复制": ("✓  Copied", "complete"),
+        }
+        if status.startswith("失败："):
+            text, state = "!  Analysis failed", "error"
+        else:
+            text, state = mapping.get(status, (status, "busy"))
+        self.status_label.setText(text)
+        self.status_label.setProperty("state", state)
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
 
     def set_ocr_text(self, text: str) -> None:
         self._ocr_text = text
