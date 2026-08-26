@@ -23,9 +23,17 @@ class ManifestError(ValueError):
 
 def _production_url_for_spec(platform_spec: object | None = None) -> str:
     release_tag = local_ocr_release_tag_for_spec(platform_spec)
+    platform_id = getattr(platform_spec or current_spec(), "platform_id", "")
+    manifest_name = {
+        "windows-x64": "local-ocr-manifest-windows-x64.json",
+        "macos-x64": "local-ocr-manifest-macos-x64.json",
+        "macos-arm64": "local-ocr-manifest-macos-arm64.json",
+    }.get(platform_id)
+    if manifest_name is None:
+        raise ManifestError(f"unsupported Local OCR production platform: {platform_id}")
     return (
         f"https://github.com/{DISTRIBUTION_REPOSITORY}/releases/download/"
-        f"{release_tag}/local-ocr-manifest.json"
+        f"{release_tag}/{manifest_name}"
     )
 
 

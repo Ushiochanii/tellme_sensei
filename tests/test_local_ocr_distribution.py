@@ -15,10 +15,7 @@ from app.local_ocr.manifest import (
 from app.local_ocr.platform import spec_for_manifest
 from app.local_ocr.version import (
     LOCAL_OCR_VERSION,
-    MACOS_ARM64_LOCAL_OCR_RELEASE_TAG,
-    MACOS_ARM64_LOCAL_OCR_VERSION,
-    MACOS_LOCAL_OCR_RELEASE_TAG,
-    MACOS_LOCAL_OCR_VERSION,
+    LOCAL_OCR_RELEASE_TAG,
     current_local_ocr_version,
     local_ocr_version_for_spec,
     local_ocr_release_tag_for_spec,
@@ -28,30 +25,37 @@ from app.local_ocr.component_manager import LocalOCRComponentManager
 
 
 def test_local_ocr_version_and_production_manifest_url() -> None:
-    assert LOCAL_OCR_VERSION == "1.1.0"
-    assert MACOS_LOCAL_OCR_VERSION == "1.2.0"
-    assert MACOS_LOCAL_OCR_RELEASE_TAG == "local-ocr-v1.2.0-macos-x64"
+    assert LOCAL_OCR_VERSION == "1.4.0"
+    assert LOCAL_OCR_RELEASE_TAG == "local-ocr-v1.4.0"
     assert DISTRIBUTION_REPOSITORY == "Ushiochanii/tellme_sensei"
     intel_spec = spec_for_manifest("macos", "x86_64")
-    assert local_ocr_release_tag_for_spec(intel_spec) == "local-ocr-v1.2.0-macos-x64"
+    assert local_ocr_release_tag_for_spec(intel_spec) == LOCAL_OCR_RELEASE_TAG
     assert production_manifest_url(intel_spec) == (
         "https://github.com/Ushiochanii/tellme_sensei/releases/download/"
-        "local-ocr-v1.2.0-macos-x64/local-ocr-manifest.json"
+        "local-ocr-v1.4.0/local-ocr-manifest-macos-x64.json"
     )
+
+
+def test_all_supported_platforms_share_version_and_release_tag() -> None:
+    for platform, arch in (("windows", "x86_64"), ("macos", "x86_64"), ("macos", "arm64")):
+        spec = spec_for_manifest(platform, arch)
+        assert spec is not None
+        assert local_ocr_version_for_spec(spec) == "1.4.0"
+        assert local_ocr_release_tag_for_spec(spec) == "local-ocr-v1.4.0"
 
 
 def test_platform_production_manifest_routes_are_pinned() -> None:
     assert production_manifest_url(spec_for_manifest("windows", "x86_64")) == (
         "https://github.com/Ushiochanii/tellme_sensei/releases/download/"
-        "local-ocr-v1.1.0/local-ocr-manifest.json"
+        "local-ocr-v1.4.0/local-ocr-manifest-windows-x64.json"
     )
     assert production_manifest_url(spec_for_manifest("macos", "x86_64")) == (
         "https://github.com/Ushiochanii/tellme_sensei/releases/download/"
-        "local-ocr-v1.2.0-macos-x64/local-ocr-manifest.json"
+        "local-ocr-v1.4.0/local-ocr-manifest-macos-x64.json"
     )
     assert production_manifest_url(spec_for_manifest("macos", "arm64")) == (
         "https://github.com/Ushiochanii/tellme_sensei/releases/download/"
-        "local-ocr-v1.3.0-macos-arm64/local-ocr-manifest.json"
+        "local-ocr-v1.4.0/local-ocr-manifest-macos-arm64.json"
     )
 
 
@@ -59,14 +63,14 @@ def test_arm64_version_is_a_pinned_production_route() -> None:
     arm_spec = spec_for_manifest("macos", "arm64")
     assert arm_spec is not None
     assert arm_spec.supported is True
-    assert local_ocr_version_for_spec(arm_spec) == MACOS_ARM64_LOCAL_OCR_VERSION
-    assert local_ocr_release_tag_for_spec(arm_spec) == MACOS_ARM64_LOCAL_OCR_RELEASE_TAG
+    assert local_ocr_version_for_spec(arm_spec) == LOCAL_OCR_VERSION
+    assert local_ocr_release_tag_for_spec(arm_spec) == LOCAL_OCR_RELEASE_TAG
 
 
 def test_arm64_manifest_requires_macos_arm64_pair() -> None:
     payload = {
         "component": "local-ocr",
-        "version": MACOS_ARM64_LOCAL_OCR_VERSION,
+        "version": LOCAL_OCR_VERSION,
         "platform": "macos",
         "arch": "arm64",
         "url": "http://127.0.0.1:8765/arm64.zip",
@@ -112,9 +116,7 @@ def test_arm_distribution_uses_pinned_route_with_explicit_override(
     arm_spec = spec_for_manifest("macos", "arm64")
     assert arm_spec is not None
     arm_url = production_manifest_url(arm_spec)
-    assert arm_url.endswith(
-        "/local-ocr-v1.3.0-macos-arm64/local-ocr-manifest.json"
-    )
+    assert arm_url.endswith("/local-ocr-v1.4.0/local-ocr-manifest-macos-arm64.json")
     monkeypatch.setenv("LOCAL_OCR_MANIFEST_URL", arm_url)
     assert manifest_url_available(tmp_path) is True
     assert resolve_manifest_url(tmp_path) == arm_url

@@ -27,10 +27,11 @@ $version = (& $pythonPath -c "from app.local_ocr.version import LOCAL_OCR_VERSIO
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) {
     throw "Could not read the Local OCR component version."
 }
-$archiveName = "TellMeSensei-LocalOCR-$version-win-x64.zip"
+$archiveName = "TellMeSensei-LocalOCR-$version-windows-x64.zip"
 $releaseTag = "local-ocr-v$version"
 $archivePath = Join-Path $outputPath $archiveName
-$manifestPath = Join-Path $outputPath "local-ocr-manifest.json"
+$manifestName = "local-ocr-manifest-windows-x64.json"
+$manifestPath = Join-Path $outputPath $manifestName
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 if (Test-Path -LiteralPath $archivePath) { Remove-Item -LiteralPath $archivePath -Force }
 Compress-Archive -Path (Join-Path $sourcePath "*") -DestinationPath $archivePath -CompressionLevel Optimal
@@ -40,7 +41,7 @@ $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerI
 if ([string]::IsNullOrWhiteSpace($DownloadUrl)) {
     $DownloadUrl = "https://github.com/$DistributionRepository/releases/download/$releaseTag/$archiveName"
 }
-$manifestUrl = "https://github.com/$DistributionRepository/releases/download/$releaseTag/local-ocr-manifest.json"
+$manifestUrl = "https://github.com/$DistributionRepository/releases/download/$releaseTag/$manifestName"
 $manifest = [ordered]@{
     schema_version = 1
     component = "local-ocr"
