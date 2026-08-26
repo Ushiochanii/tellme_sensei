@@ -41,4 +41,3 @@ class VisionLiteTray(QObject):
 
     def hide(self) -> None:
         self.tray.hide()
-
