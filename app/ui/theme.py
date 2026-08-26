@@ -16,6 +16,10 @@ TEXT_ACCENT = "#2f6fe4"
 VISION_ACCENT = "#6546d8"
 BORDER = "#c9d8f7"
 SUCCESS = "#20a35a"
+DANGER = "#c85b68"
+CARD = "#fbfdff"
+CARD_BORDER = "#d6e2f8"
+FOCUS_BORDER = "#8bb2f2"
 
 RADIUS_SM = 8
 RADIUS_MD = 12
@@ -30,6 +34,120 @@ SPACE_XL = 20
 FONT_SMALL = 10
 FONT_BODY = 12
 FONT_TITLE = 16
+
+
+def answer_window_stylesheet() -> str:
+    """Return the AnswerWindow stylesheet using the shared visual tokens."""
+
+    return f"""
+    QWidget#answerWindow {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+            stop:0 #edf5ff, stop:1 #f1edff);
+        color: {TEXT};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_LG}px;
+    }}
+    QWidget#answerTitleBar {{
+        background: rgba(255, 255, 255, 150);
+        border-bottom: 1px solid rgba(201, 216, 247, 180);
+        border-top-left-radius: {RADIUS_LG}px;
+        border-top-right-radius: {RADIUS_LG}px;
+    }}
+    QLabel#answerTitleLabel {{
+        color: {TEXT};
+        font-size: {FONT_TITLE}px;
+        font-weight: 700;
+    }}
+    QToolButton#closeButton {{
+        color: {SECONDARY_TEXT};
+        background: transparent;
+        border: none;
+        border-radius: {RADIUS_SM}px;
+        font-size: 20px;
+        padding: 2px 8px;
+    }}
+    QToolButton#closeButton:hover {{
+        color: {DANGER};
+        background: rgba(216, 113, 126, 35);
+    }}
+    QLabel#statusLabel {{
+        color: {SECONDARY_TEXT};
+        background: rgba(255, 255, 255, 155);
+        border: 1px solid rgba(201, 216, 247, 170);
+        border-radius: {RADIUS_MD}px;
+        padding: 8px 12px;
+        font-size: {FONT_BODY}px;
+        font-weight: 600;
+    }}
+    QLabel#statusLabel[state="ready"], QLabel#statusLabel[state="complete"] {{ color: {SUCCESS}; }}
+    QLabel#statusLabel[state="error"] {{ color: {DANGER}; }}
+    QFrame#ocrCard, QFrame#answerCard {{
+        background: rgba(255, 255, 255, 190);
+        border: 1px solid {CARD_BORDER};
+        border-radius: {RADIUS_LG}px;
+    }}
+    QFrame#answerCard {{
+        background: rgba(255, 255, 255, 220);
+        border-color: #c9d8f7;
+    }}
+    QLabel#sectionTitle {{
+        color: {SECONDARY_TEXT};
+        font-size: {FONT_BODY}px;
+        font-weight: 700;
+    }}
+    QLabel#answerSectionTitle {{ color: {TEXT}; }}
+    QPlainTextEdit#ocrEdit, QPlainTextEdit#answerEdit {{
+        background: {CARD};
+        color: {TEXT};
+        border: 1px solid {CARD_BORDER};
+        border-radius: {RADIUS_MD}px;
+        padding: 10px;
+        selection-background-color: #cfe0ff;
+        selection-color: {TEXT};
+        font-size: 13px;
+    }}
+    QPlainTextEdit#answerEdit {{ border-color: #c7d8f8; font-size: 14px; }}
+    QPlainTextEdit#ocrEdit:focus, QPlainTextEdit#answerEdit:focus {{ border-color: {FOCUS_BORDER}; }}
+    QScrollBar:vertical {{
+        background: transparent;
+        width: 9px;
+        margin: 4px 2px 4px 0;
+    }}
+    QScrollBar::handle:vertical {{
+        background: #b9c9e6;
+        min-height: 28px;
+        border-radius: 4px;
+    }}
+    QScrollBar::handle:vertical:hover {{ background: #9fb6de; }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+    QPushButton#copyButton, QPushButton#retryButton, QPushButton#recaptureButton,
+    QPushButton#closeActionButton, QPushButton#stopButton {{
+        min-height: 30px;
+        padding: 4px 13px;
+        border-radius: {RADIUS_MD}px;
+        font-size: {FONT_SMALL + 2}px;
+    }}
+    QPushButton#copyButton, QPushButton#retryButton {{
+        color: {TEXT}; background: rgba(255, 255, 255, 205); border: 1px solid {CARD_BORDER};
+    }}
+    QPushButton#copyButton:hover, QPushButton#retryButton:hover {{
+        background: #eef5ff; border-color: {TEXT_ACCENT};
+    }}
+    QPushButton#recaptureButton {{
+        color: {VISION_ACCENT}; background: rgba(239, 234, 255, 210); border: 1px solid #c7b8f4;
+    }}
+    QPushButton#recaptureButton:hover {{ background: #e9e0ff; border-color: {VISION_ACCENT}; }}
+    QPushButton#stopButton {{
+        color: {DANGER}; background: rgba(255, 241, 244, 210); border: 1px solid #efc5cc;
+    }}
+    QPushButton#stopButton:hover {{ background: #ffe7eb; border-color: {DANGER}; }}
+    QPushButton#closeActionButton {{
+        color: {SECONDARY_TEXT}; background: transparent; border: 1px solid transparent;
+    }}
+    QPushButton#closeActionButton:hover {{ background: rgba(255, 255, 255, 150); border-color: {CARD_BORDER}; }}
+    QPushButton:disabled {{ color: #9aa8c2; background: rgba(242, 245, 252, 130); border-color: #dce4f2; }}
+    QSizeGrip {{ width: 10px; height: 10px; }}
+    """
 
 
 def controller_stylesheet() -> str:

@@ -222,7 +222,7 @@ def test_real_qthread_cancel_during_ai_restores_idle(qt_app, monkeypatch) -> Non
 
     assert window.state is AppState.IDLE
     assert window._busy is False
-    assert window._answer_window.status_label.text() == "状态：已取消"
+    assert window._answer_window.status_label.text() == "■  Cancelled"
     window.shutdown()
 
 
@@ -252,7 +252,7 @@ def test_cancelled_job_restores_idle_and_preserves_ocr(qt_app) -> None:
     assert window.state is AppState.IDLE
     assert window._busy is False
     assert window._answer_window.ocr_edit.toPlainText() == "已识别题目"
-    assert window._answer_window.status_label.text() == "状态：已取消"
+    assert window._answer_window.status_label.text() == "■  Cancelled"
     assert window._answer_window.retry_button.isEnabled()
     window.shutdown()
 
