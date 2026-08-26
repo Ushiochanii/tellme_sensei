@@ -2,9 +2,6 @@ name: Vision Lite release build
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/vision-lite
 
 permissions:
   contents: read
