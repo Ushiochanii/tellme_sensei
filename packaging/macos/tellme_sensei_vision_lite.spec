@@ -4,9 +4,12 @@
 from pathlib import Path
 import sys
 
-
 ROOT = Path(SPECPATH).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from app.lite_version import __version__ as LITE_VERSION
+
+
+version = LITE_VERSION
 
 
 a = Analysis(
@@ -69,6 +72,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleDisplayName": "TellMeSensei Lite",
         "CFBundleName": "TellMeSensei Lite",
+        "CFBundleShortVersionString": LITE_VERSION,
+        "CFBundleVersion": LITE_VERSION,
         "LSUIElement": False,
         "NSHighResolutionCapable": True,
     },

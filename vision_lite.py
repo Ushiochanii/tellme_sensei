@@ -1,4 +1,4 @@
-"""Minimal Vision-only TellMeSensei prototype.
+"""Minimal Vision-only TellMeSensei Lite application entry point.
 
 This entry point deliberately does not import the Full application's MainWindow,
 OCR providers, Local OCR runtime, settings UI, or tray controller.
@@ -11,10 +11,12 @@ import sys
 import uuid
 
 from PySide6.QtCore import QThread, Qt, Signal, Slot
-from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from app.capture.overlay import CaptureOverlay
 from app.config import AppConfig, ConfigError, ConfigManager
+from app.lite_settings import VisionLiteSettings
+from app.lite_tray import VisionLiteTray
 from app.platform.factory import create_global_hotkey_manager
 from app.platform.hotkey import DEFAULT_VISION_SHORTCUT, VISION_HOTKEY_ID
 from app.platform import screen_permissions
@@ -24,6 +26,7 @@ from app.ui.answer_window import AnswerWindow
 from app.workers.vision_processing_worker import VisionProcessingWorker
 
 logger = logging.getLogger(__name__)
+LITE_SERVER_NAME = "tellme-sensei-lite-single-instance"
 
 
 class VisionLiteWindow(QWidget):
@@ -50,16 +53,20 @@ class VisionLiteWindow(QWidget):
         self._busy = False
         self._closing = False
         self._screen_permission_request_attempted = False
+        self._settings_window: VisionLiteSettings | None = None
 
         self.setWindowTitle("TellMeSensei Lite")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setFixedSize(240, 120)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("TellMeSensei Lite"))
         self.capture_button = QPushButton("截图分析")
         self.capture_button.clicked.connect(self.start_capture)
         layout.addWidget(self.capture_button)
+        self.status_label = QLabel()
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
         layout.addWidget(QLabel(DEFAULT_VISION_SHORTCUT))
 
         if self.hotkey_manager is not None:
@@ -107,27 +114,37 @@ class VisionLiteWindow(QWidget):
             self._request_config = config
             return config
 
-        key, accepted = QInputDialog.getText(
-            self,
-            "需要 DeepSeek API Key",
-            "请输入 DeepSeek API Key：",
-            QLineEdit.EchoMode.Password,
-        )
-        if not accepted or not key.strip():
-            return None
-        try:
-            self.config_manager.save_settings(
-                api_key=key.strip(),
-                model=config.model,
-                request_timeout=config.request_timeout,
+        self.show_settings(missing_key=True)
+        return None
+
+    @Slot()
+    def show_controller(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    @Slot()
+    def show_settings(self, missing_key: bool = False) -> None:
+        if self._settings_window is None:
+            self._settings_window = VisionLiteSettings(
+                self.config_manager,
+                self.hotkey_manager,
+                self,
             )
-            config = self.config_manager.load(require_api_key=True)
-        except Exception as exc:
-            logger.warning("Vision Lite API key save failed exception_type=%s", type(exc).__name__)
-            QMessageBox.warning(self, "保存失败", "无法保存 DeepSeek API Key。")
-            return None
-        self._request_config = config
-        return config
+            self._settings_window.finished.connect(self._on_settings_finished)
+        if missing_key:
+            self._settings_window.show_missing_key_message()
+        self._settings_window.show()
+        self._settings_window.raise_()
+        self._settings_window.activateWindow()
+
+    @Slot(int)
+    def _on_settings_finished(self, _result: int) -> None:
+        if self._settings_window is not None:
+            self._settings_window.hide()
+
+    def show_hotkey_warning(self) -> None:
+        self.status_label.setText("快捷键注册失败，请在 Settings 中修改快捷键。")
 
     def _ensure_screen_recording_permission(self) -> bool:
         try:
@@ -265,21 +282,27 @@ class VisionLiteWindow(QWidget):
         if self._answer_window is not None:
             self._answer_window.close()
             self._answer_window = None
+        if self._settings_window is not None:
+            self._settings_window.close()
+            self._settings_window = None
         if self._processing_worker is not None:
             self._processing_worker.request_cancel()
         else:
             QApplication.quit()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
-        self.shutdown()
-        event.accept()
+        if self._closing:
+            event.accept()
+            return
+        self.hide()
+        event.ignore()
 
 
 def main(argv: list[str] | None = None) -> int:
     del argv
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("TellMeSensei Lite")
-    guard = SingleInstanceGuard(parent=app)
+    guard = SingleInstanceGuard(server_name=LITE_SERVER_NAME, parent=app)
     if not guard.acquire():
         return 0
     config_manager = ConfigManager()
@@ -292,9 +315,18 @@ def main(argv: list[str] | None = None) -> int:
     if not hotkey.register():
         logger.warning("Vision Lite global hotkey registration failed")
     window = VisionLiteWindow(config_manager=config_manager, hotkey_manager=hotkey)
+    tray = VisionLiteTray(parent=app)
+    tray.capture_requested.connect(window.start_capture)
+    tray.show_controller_requested.connect(window.show_controller)
+    tray.settings_requested.connect(window.show_settings)
+    tray.quit_requested.connect(tray.hide)
+    tray.quit_requested.connect(window.shutdown)
     app.aboutToQuit.connect(window.shutdown)
     app.aboutToQuit.connect(guard.release)
     window.show()
+    tray.show()
+    if not hotkey.registered:
+        window.show_hotkey_warning()
     return app.exec()
 
 
