@@ -29,11 +29,9 @@ All releases are published in the [canonical repository Releases](https://github
 
 | Platform | TellMeSensei | Local OCR component |
 |---|---|---|
-| Windows x64 | [v0.5.0 — TellMeSensei-Setup-0.5.0.exe](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.5.0) | [Local OCR 1.1.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.1.0) |
-| macOS Intel x86_64 | [v0.6.0 — TellMeSensei-0.6.0-macos-x64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.6.0) | [Local OCR 1.2.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.2.0-macos-x64) |
-| macOS Apple Silicon arm64 | [v0.6.0 — TellMeSensei-0.6.0-macos-arm64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.6.0) | [Local OCR 1.3.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.3.0-macos-arm64) |
-
-The current Windows binary is still v0.5.0; both macOS binaries are v0.6.0.
+| Windows x64 | [v0.7.0 — TellMeSensei-Setup-0.7.0.exe](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.7.0) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
+| macOS Intel x86_64 | [v0.7.0 — TellMeSensei-0.7.0-macos-x64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.7.0) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
+| macOS Apple Silicon arm64 | [v0.7.0 — TellMeSensei-0.7.0-macos-arm64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.7.0) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
 
 macOS builds are ad-hoc signed and not notarized. macOS may require **Open Anyway** in **Privacy & Security**, and Screen Recording permission is required for capture.
 
@@ -63,7 +61,7 @@ Vision Mode always uses `deepseek-v4-flash-vision-exp` and sends the captured sc
 | Processing | On-device | Online |
 | Screenshot upload | No | Yes |
 | OCR API key | No | Yes |
-| Extra download | Approximately 255–391 MB, depending on platform | No |
+| Extra download | Platform-dependent; see the Local OCR 1.4.0 release assets | No |
 
 Local OCR is distributed as a separate, platform-specific component. TellMeSensei does **not** silently switch between OCR providers.
 
@@ -91,8 +89,8 @@ The Core/GUI environment is intentionally separate from Local OCR worker depende
 
 ## Status
 
-- **Application development target:** v0.7.0; published macOS binaries remain v0.6.0 and the Windows stable binary remains v0.5.0
-- **Local OCR:** Windows 1.1.0 · macOS Intel 1.2.0 · macOS Apple Silicon 1.3.0
-- **Auto updater:** not implemented yet
+- **Current application release:** v0.7.0
+- **Local OCR:** 1.4.0 on all supported platforms
+- **Auto updater:** not implemented
 
-See the [v0.6.0 release notes](./docs/releases/v0.6.0.md) for details.
+See the [v0.7.0 release notes](./docs/releases/v0.7.0.md) for details.

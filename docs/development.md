@@ -88,8 +88,7 @@ development environment or the Core CI workflow.
 
 ## Release model from v0.7.0 onward
 
-This is the intended future application release model; it does not change the
-current version or create a release.
+This is the established application release model:
 
 - one application version
 - one Git tag
@@ -97,15 +96,16 @@ current version or create a release.
 - one shared product feature set
 - one asset for each supported application target
 
-For example, a future `v0.7.0` release may contain:
+The `v0.7.0` release contains:
 
-- `TellMeSensei-0.7.0-windows-x64-setup.exe`
+- `TellMeSensei-Setup-0.7.0.exe`
 - `TellMeSensei-0.7.0-macos-x64.dmg`
 - `TellMeSensei-0.7.0-macos-arm64.dmg`
 
-Local OCR component versions remain independently versioned by platform:
-Windows 1.1.0, macOS Intel 1.2.0, and macOS Apple Silicon 1.3.0 at the
-current release baseline.
+Local OCR uses one shared component version across all supported platforms,
+with platform-specific native packages and manifests. The current baseline is
+Local OCR 1.4.0 for Windows x64, macOS Intel x86_64, and macOS Apple Silicon
+arm64.
 
 ## Feature parity
 
@@ -128,3 +128,13 @@ non-interactive `python gui.py --smoke-core` check.
 The workflow does not build or download Local OCR components, build installers
 or DMGs, publish releases, sign binaries, or require API secrets. Native
 release acceptance remains on the corresponding physical platform.
+
+## Packaging and release workflows
+
+Release builds are produced by the existing GitHub Actions workflows:
+
+- `.github/workflows/release-build.yml` builds the three application assets.
+- `.github/workflows/local-ocr-build.yml` builds the three platform-specific
+  Local OCR 1.4.0 packages and manifests.
+
+Core CI remains separate from packaging and release workflows.
