@@ -12,6 +12,8 @@ __pycache__/
 .env
 logs/
 temp/
+fe_benchmark/
+benchmark_results/
 *.log
 *.png
 *.jpg
