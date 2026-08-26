@@ -105,12 +105,16 @@ class LocalOCRComponentManager:
         cancel_event: threading.Event | None = None,
         progress: ProgressCallback | None = None,
     ) -> Path:
-        if manifest.version != self.version:
-            raise ComponentError("Local OCR component version is not supported by this application.")
         manifest_spec = spec_for_manifest(manifest.platform, manifest.arch)
         if manifest_spec is None:
             raise ComponentError("Local OCR component platform or architecture is unsupported.")
         expected_spec = self.platform_spec if self._platform_spec_explicit else current_spec()
+        try:
+            expected_version = local_ocr_version_for_spec(expected_spec)
+        except ValueError as exc:
+            raise ComponentError("Local OCR component platform or architecture is unsupported.") from exc
+        if self.version != expected_version or manifest.version != expected_version:
+            raise ComponentError("Local OCR component version is not supported by this application.")
         if manifest_spec.platform_id != expected_spec.platform_id:
             raise ComponentError("Local OCR component platform or architecture does not match the target.")
         # ComponentManifest has already performed host validation. Selecting

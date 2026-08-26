@@ -41,10 +41,11 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) {
 }
 
 $tag = "local-ocr-v$version"
-$archiveName = "TellMeSensei-LocalOCR-$version-win-x64.zip"
+$archiveName = "TellMeSensei-LocalOCR-$version-windows-x64.zip"
 $componentsPath = Join-Path $repoRoot "dist\components"
 $archivePath = Join-Path $componentsPath $archiveName
-$manifestPath = Join-Path $componentsPath "local-ocr-manifest.json"
+$manifestName = "local-ocr-manifest-windows-x64.json"
+$manifestPath = Join-Path $componentsPath $manifestName
 foreach ($requiredPath in @($archivePath, $manifestPath)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required distribution artifact was not found: $requiredPath"
@@ -80,12 +81,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $baseUrl = "https://github.com/$DistributionRepository/releases/download/$tag"
-$manifestUrl = "$baseUrl/local-ocr-manifest.json"
+$manifestUrl = "$baseUrl/$manifestName"
 $archiveUrl = "$baseUrl/$archiveName"
 $verifyRoot = Join-Path ([IO.Path]::GetTempPath()) ("tellme-sensei-release-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $verifyRoot -Force | Out-Null
 try {
-    $downloadedManifestPath = Join-Path $verifyRoot "local-ocr-manifest.json"
+    $downloadedManifestPath = Join-Path $verifyRoot $manifestName
     $downloadedArchivePath = Join-Path $verifyRoot $archiveName
     Invoke-WebRequest -Uri $manifestUrl -OutFile $downloadedManifestPath -UseBasicParsing -TimeoutSec 600
     Invoke-WebRequest -Uri $archiveUrl -OutFile $downloadedArchivePath -UseBasicParsing -TimeoutSec 600
