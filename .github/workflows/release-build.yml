@@ -45,6 +45,16 @@ jobs:
           if ($file.Length -le 0) {
             throw "Installer is empty: $installer"
           }
+          $bytes = [System.IO.File]::ReadAllBytes($portable)
+          if ($bytes.Length -lt 0x40 -or [System.BitConverter]::ToUInt16($bytes, 0) -ne 0x5A4D) {
+            throw "Packaged application is not a PE executable: $portable"
+          }
+          $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3C)
+          if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length -or
+              [System.BitConverter]::ToUInt32($bytes, $peOffset) -ne 0x00004550 -or
+              [System.BitConverter]::ToUInt16($bytes, $peOffset + 4) -ne 0x8664) {
+            throw "Packaged application is not a Windows x64 PE: $portable"
+          }
           Write-Host "Runner architecture: $env:PROCESSOR_ARCHITECTURE"
           Write-Host "Python: $(python --version)"
           if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
