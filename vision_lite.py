@@ -67,7 +67,9 @@ class VisionLiteWindow(QWidget):
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
-        layout.addWidget(QLabel(DEFAULT_VISION_SHORTCUT))
+        self.shortcut_label = QLabel()
+        layout.addWidget(self.shortcut_label)
+        self.refresh_shortcut_label()
 
         if self.hotkey_manager is not None:
             self.hotkey_manager.triggered.connect(self.start_capture)
@@ -132,11 +134,22 @@ class VisionLiteWindow(QWidget):
                 self,
             )
             self._settings_window.finished.connect(self._on_settings_finished)
+            self._settings_window.settings_saved.connect(self.refresh_shortcut_label)
         if missing_key:
             self._settings_window.show_missing_key_message()
         self._settings_window.show()
         self._settings_window.raise_()
         self._settings_window.activateWindow()
+
+    @Slot()
+    def refresh_shortcut_label(self) -> None:
+        shortcut = getattr(self.hotkey_manager, "shortcut", None)
+        if not shortcut:
+            try:
+                shortcut = self.config_manager.load(require_api_key=False).vision_global_shortcut
+            except Exception:
+                shortcut = DEFAULT_VISION_SHORTCUT
+        self.shortcut_label.setText(f"快捷键：{shortcut}")
 
     @Slot(int)
     def _on_settings_finished(self, _result: int) -> None:
@@ -241,8 +254,16 @@ class VisionLiteWindow(QWidget):
         self._processing_worker = None
         self._active_job_id = None
         self._restore_idle()
-        if self._closing:
-            QApplication.quit()
+        self._maybe_quit_after_shutdown()
+
+    @Slot()
+    def _maybe_quit_after_shutdown(self) -> None:
+        if not self._closing or self._processing_worker is not None:
+            return
+        if self._settings_window is not None and self._settings_window.connection_running:
+            return
+        self._settings_window = None
+        QApplication.quit()
 
     @Slot()
     def _reanalyze(self) -> None:
@@ -283,12 +304,14 @@ class VisionLiteWindow(QWidget):
             self._answer_window.close()
             self._answer_window = None
         if self._settings_window is not None:
-            self._settings_window.close()
-            self._settings_window = None
+            self._settings_window.shutdown_ready.connect(self._maybe_quit_after_shutdown)
+            self._settings_window.cancel_and_close()
+            if not self._settings_window.connection_running:
+                self._settings_window = None
         if self._processing_worker is not None:
             self._processing_worker.request_cancel()
         else:
-            QApplication.quit()
+            self._maybe_quit_after_shutdown()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
         if self._closing:

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QKeySequence
+from PySide6.QtTest import QTest
 
 from app.config import AppConfig
 from app.state import AppState
@@ -157,6 +158,37 @@ def test_tray_show_controller_routes_to_lite_window(qt_app, monkeypatch) -> None
     window.deleteLater()
 
 
+def test_tray_quit_routes_to_shutdown(qt_app) -> None:
+    from app.lite_tray import VisionLiteTray
+
+    tray = VisionLiteTray()
+    called: list[bool] = []
+    tray.quit_requested.connect(lambda: called.append(True))
+    tray.quit_requested.emit()
+    assert called == [True]
+    tray.deleteLater()
+
+
+def test_custom_shortcut_is_shown_on_controller(qt_app) -> None:
+    window, _manager, hotkey = _window(qt_app, AppConfig(api_key="key", vision_global_shortcut="Ctrl+Shift+T"))
+    hotkey._shortcut = "Ctrl+Shift+T"
+    window.refresh_shortcut_label()
+    assert "Ctrl+Shift+T" in window.shortcut_label.text()
+    window.deleteLater()
+
+
+def test_shortcut_label_refreshes_only_after_successful_rebind(qt_app) -> None:
+    window, manager, hotkey = _window(qt_app)
+    window.show_settings()
+    settings = window._settings_window
+    assert settings is not None
+    settings.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+T"))
+    settings.save()
+    assert "Ctrl+Shift+T" in window.shortcut_label.text()
+    assert manager.saved is True
+    window.deleteLater()
+
+
 def test_lite_settings_saves_key_and_shortcut(qt_app) -> None:
     from app.lite_settings import VisionLiteSettings
 
@@ -221,13 +253,74 @@ def test_lite_settings_connection_test_uses_short_timeout(qt_app, monkeypatch) -
         def __init__(self, config):
             observed.append(config.request_timeout)
 
-        def test_connection(self):
+        def test_connection(self, _cancel_event):
             return True
 
     monkeypatch.setattr(lite_settings, "DeepSeekService", _Service)
     dialog.test_connection()
+    assert dialog.connection_running is True
+    assert dialog.test_button.isEnabled() is False
+    for _ in range(100):
+        qt_app.processEvents()
+        if not dialog.connection_running:
+            break
+        QTest.qWait(10)
     assert observed == [10.0]
     assert "成功" in dialog.status_label.text()
+    assert dialog.test_button.isEnabled() is True
+    dialog.deleteLater()
+
+
+def test_lite_settings_connection_failure_is_user_visible(qt_app, monkeypatch) -> None:
+    from app import lite_settings
+    from app.services.deepseek_service import DeepSeekError
+
+    manager = _ConfigManager(AppConfig(api_key="test-key"))
+    dialog = lite_settings.VisionLiteSettings(manager, _Hotkey())
+
+    class _Service:
+        def __init__(self, _config):
+            pass
+
+        def test_connection(self, _cancel_event):
+            raise DeepSeekError("DeepSeek API Key 无效（401）。")
+
+    monkeypatch.setattr(lite_settings, "DeepSeekService", _Service)
+    dialog.test_connection()
+    for _ in range(100):
+        qt_app.processEvents()
+        if not dialog.connection_running:
+            break
+        QTest.qWait(10)
+    assert "401" in dialog.status_label.text()
+    assert dialog.test_button.isEnabled() is True
+    dialog.deleteLater()
+
+
+def test_lite_settings_close_cancels_connection_thread(qt_app, monkeypatch) -> None:
+    from app import lite_settings
+
+    manager = _ConfigManager(AppConfig(api_key="test-key"))
+    dialog = lite_settings.VisionLiteSettings(manager, _Hotkey())
+
+    class _Service:
+        def __init__(self, _config):
+            pass
+
+        def test_connection(self, cancel_event):
+            cancel_event.wait(0.1)
+
+    monkeypatch.setattr(lite_settings, "DeepSeekService", _Service)
+    dialog.test_connection()
+    assert dialog.connection_running is True
+    dialog.close()
+    assert dialog.isVisible() is False
+    for _ in range(100):
+        qt_app.processEvents()
+        if not dialog.connection_running:
+            break
+        QTest.qWait(10)
+    assert dialog.connection_running is False
     dialog.deleteLater()
 
 

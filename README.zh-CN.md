@@ -53,30 +53,6 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
 
 视觉模式固定使用 `deepseek-v4-flash-vision-exp`，会把截图直接发送给 DeepSeek。模式由用户通过快捷键或托盘菜单明确选择，不会自动切换，也不会在两种模式之间回退。
 
-## FE Benchmark：Text/OCR vs Vision
-
-我们使用 40 道日本 IPA 官方公开的基本情報技術者試験（FE）科目 A 题目进行了本地 benchmark，其中 2024 年 20 题、2025 年 20 题。每道题都使用同一张原始 PNG，分别只运行一次两条 TellMeSensei 路径：Text/OCR 路径使用持久 Local OCR 后发送给 `deepseek-v4-flash`；Vision 路径直接把原始 PNG 发送给 `deepseek-v4-flash-vision-exp`。80 次请求全部成功，且答案都成功解析为 `ア` / `イ` / `ウ` / `エ`。
-
-| 指标 | Text/OCR | Vision |
-|---|---:|---:|
-| 准确率 | 38/40（95.0%） | **39/40（97.5%）** |
-| 2024 准确率 | 19/20 | 19/20 |
-| 2025 准确率 | 19/20 | **20/20** |
-| Prompt tokens 平均值 | 306.4 | 516.4 |
-| Completion tokens 平均值 | 2349.8 | **943.5** |
-| Reasoning tokens 平均值 | 2170.1 | **713.2** |
-| Total tokens 平均值 | 2656.2 | **1459.9** |
-| Total tokens 中位数 | **871** | 1107 |
-| 首个可见 token 中位数 | **4.223 s** | 4.422 s |
-| API 总耗时中位数 | **5.899 s** | 6.581 s |
-| 端到端耗时中位数 | 15.636 s | **6.583 s** |
-
-配对结果为：38 题两者都正确、1 题只有 Vision 正确、0 题只有 Text 正确、1 题两者都错误。Vision 单独答对的是 `fe-2025-a-14`；两种模式都答错的是 `fe-2024-a-13`。
-
-这组结果表明，在这份规模较小的 FE 样本上，Vision 在保持几乎相同高准确率的同时，绕过了 Local OCR 的延迟，并且平均 token 消耗明显更低。不过准确率只相差 1/40，因此不能据此断言 Vision 普遍更准确。另一个值得注意的点是：Text 的 total-token **中位数反而更低**，但平均值显著更高，说明 Text 存在少数 completion/reasoning 特别长的离群请求。当前 benchmark 机器上 Local OCR 稳态中位耗时约 8.7 秒，这解释了大部分端到端延迟差距；该数值依赖具体机器和 OCR runtime，不应视为通用性能保证。
-
-Benchmark harness 位于 `tools/benchmark_text_vs_vision.py`。题目图片和原始 benchmark 输出有意保留在 Git 之外。题目集整理自 [IPA 官方公开 FE 试题](https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/index.html)。
-
 ## OCR 模式
 
 | | Local OCR | Google Cloud Vision |

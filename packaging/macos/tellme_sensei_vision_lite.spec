@@ -74,7 +74,7 @@ app = BUNDLE(
         "CFBundleName": "TellMeSensei Lite",
         "CFBundleShortVersionString": LITE_VERSION,
         "CFBundleVersion": LITE_VERSION,
-        "LSUIElement": False,
+        "LSUIElement": True,
         "NSHighResolutionCapable": True,
     },
 )

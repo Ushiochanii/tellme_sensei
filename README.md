@@ -53,30 +53,6 @@ macOS builds are ad-hoc signed and not notarized. macOS may require **Open Anywa
 
 Vision Mode always uses `deepseek-v4-flash-vision-exp` and sends the captured screenshot directly to DeepSeek. The user explicitly chooses the mode; TellMeSensei does not automatically switch or fall back between Text and Vision.
 
-## FE benchmark: Text/OCR vs Vision
-
-A local benchmark was run on 40 official Japanese IPA Fundamental Information Technology Engineer Examination (FE) Subject A questions: 20 public questions from 2024 and 20 from 2025. Each question was evaluated once through both TellMeSensei paths using the same source PNG. The Text/OCR path used persistent Local OCR followed by `deepseek-v4-flash`; the Vision path sent the original PNG directly to `deepseek-v4-flash-vision-exp`. All 80 requests completed successfully and all answers were parsed as `ア` / `イ` / `ウ` / `エ`.
-
-| Metric | Text/OCR | Vision |
-|---|---:|---:|
-| Accuracy | 38/40 (95.0%) | **39/40 (97.5%)** |
-| 2024 accuracy | 19/20 | 19/20 |
-| 2025 accuracy | 19/20 | **20/20** |
-| Mean prompt tokens | 306.4 | 516.4 |
-| Mean completion tokens | 2349.8 | **943.5** |
-| Mean reasoning tokens | 2170.1 | **713.2** |
-| Mean total tokens | 2656.2 | **1459.9** |
-| Median total tokens | **871** | 1107 |
-| Median first visible token | **4.223 s** | 4.422 s |
-| Median API time | **5.899 s** | 6.581 s |
-| Median end-to-end time | 15.636 s | **6.583 s** |
-
-Paired outcomes were 38 both correct, 1 Vision-only correct, 0 Text-only correct, and 1 both wrong. The Vision-only win was `fe-2025-a-14`; both modes missed `fe-2024-a-13`.
-
-The benchmark suggests that, on this small FE sample, Vision preserved essentially the same high accuracy while avoiding the Local OCR latency and using substantially fewer tokens on average. The accuracy difference is only one question out of 40, so it should not be treated as evidence that Vision is universally more accurate. Text also had a lower median total-token count, while its much higher mean was driven by large completion/reasoning outliers. On the benchmark machine, steady-state Local OCR itself took about 8.7 seconds median, which explains most of the end-to-end latency gap; this timing is machine- and OCR-runtime-dependent rather than a general performance guarantee.
-
-The benchmark harness is in `tools/benchmark_text_vs_vision.py`. The source question images and raw benchmark outputs are intentionally kept outside Git. The question set was prepared from [IPA's publicly released FE questions](https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/index.html).
-
 ## OCR modes
 
 | | Local OCR | Google Cloud Vision |

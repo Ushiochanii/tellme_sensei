@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import replace
 
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import QThread, QObject, Signal, Slot
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
@@ -27,10 +28,42 @@ logger = logging.getLogger(__name__)
 CONNECTION_TEST_TIMEOUT = 10.0
 
 
+class _ConnectionTestWorker(QObject):
+    succeeded = Signal()
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, config: AppConfig) -> None:
+        super().__init__()
+        self.config = config
+        self.cancel_event = threading.Event()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            DeepSeekService(self.config).test_connection(self.cancel_event)
+            if not self.cancel_event.is_set():
+                self.succeeded.emit()
+        except DeepSeekError as exc:
+            if not self.cancel_event.is_set():
+                self.failed.emit(str(exc))
+        except Exception:
+            logger.exception("Vision Lite connection test failed")
+            if not self.cancel_event.is_set():
+                self.failed.emit("连接测试失败，请检查网络和 API Key。")
+        finally:
+            self.finished.emit()
+
+    @Slot()
+    def request_cancel(self) -> None:
+        self.cancel_event.set()
+
+
 class VisionLiteSettings(QDialog):
     """Edit only the API key and Vision shortcut used by Lite."""
 
     settings_saved = Signal()
+    shutdown_ready = Signal()
 
     def __init__(
         self,
@@ -42,6 +75,9 @@ class VisionLiteSettings(QDialog):
         self.config_manager = config_manager
         self.hotkey_manager = hotkey_manager
         self._loaded_config = self._load_config()
+        self._connection_thread: QThread | None = None
+        self._connection_worker: _ConnectionTestWorker | None = None
+        self._close_requested = False
         self.setWindowTitle("TellMeSensei Lite Settings")
         self.setModal(False)
         self.setMinimumWidth(360)
@@ -85,23 +121,58 @@ class VisionLiteSettings(QDialog):
 
     @Slot()
     def test_connection(self) -> None:
+        if self._connection_thread is not None:
+            return
         config = self._config_for_request()
         if config is None:
             self.status_label.setText("请先输入 DeepSeek API Key。")
             return
         self.test_button.setEnabled(False)
-        try:
-            test_config = replace(config, request_timeout=min(config.request_timeout, CONNECTION_TEST_TIMEOUT))
-            DeepSeekService(test_config).test_connection()
-        except DeepSeekError as exc:
-            self.status_label.setText(str(exc))
-        except Exception:
-            logger.exception("Vision Lite connection test failed")
-            self.status_label.setText("连接测试失败，请检查网络和 API Key。")
-        else:
+        test_config = replace(config, request_timeout=min(config.request_timeout, CONNECTION_TEST_TIMEOUT))
+        thread = QThread(self)
+        worker = _ConnectionTestWorker(test_config)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._on_connection_success)
+        worker.failed.connect(self._on_connection_failure)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_connection_finished)
+        self._connection_thread = thread
+        self._connection_worker = worker
+        self.status_label.setText("测试连接中……")
+        thread.start()
+
+    @property
+    def connection_running(self) -> bool:
+        return self._connection_thread is not None
+
+    @Slot()
+    def _on_connection_success(self) -> None:
+        if not self._close_requested:
             self.status_label.setText("连接成功。")
-        finally:
-            self.test_button.setEnabled(True)
+
+    @Slot(str)
+    def _on_connection_failure(self, message: str) -> None:
+        if not self._close_requested:
+            self.status_label.setText(message)
+
+    def cancel_and_close(self) -> None:
+        self._close_requested = True
+        if self._connection_worker is not None:
+            self._connection_worker.request_cancel()
+        else:
+            self.close()
+
+    @Slot()
+    def _on_connection_finished(self) -> None:
+        self._connection_thread = None
+        self._connection_worker = None
+        self.test_button.setEnabled(True)
+        self.shutdown_ready.emit()
+        if self._close_requested:
+            self.close()
 
     def _config_for_request(self) -> AppConfig | None:
         entered = self.api_key_edit.text().strip()
@@ -154,6 +225,16 @@ class VisionLiteSettings(QDialog):
         self.status_label.setText("设置已保存。")
         self.settings_saved.emit()
         self.accept()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
+        if self._connection_thread is not None:
+            self._close_requested = True
+            if self._connection_worker is not None:
+                self._connection_worker.request_cancel()
+            event.ignore()
+            self.hide()
+            return
+        event.accept()
 
 
 __all__ = ["VisionLiteSettings", "CONNECTION_TEST_TIMEOUT"]

@@ -51,7 +51,9 @@ file "$executable_path" | grep -F "Mach-O 64-bit executable arm64" >/dev/null
 plist_path="$app_path/Contents/Info.plist"
 bundle_identifier="$(plutil -extract CFBundleIdentifier raw -o - "$plist_path")"
 bundle_version="$(plutil -extract CFBundleVersion raw -o - "$plist_path")"
-if [[ "$bundle_identifier" != "com.tellmesensei.vision-lite" || "$bundle_version" != "0.1.0" ]]; then
+ls_ui_element="$(plutil -extract LSUIElement raw -o - "$plist_path")"
+if [[ "$bundle_identifier" != "com.tellmesensei.vision-lite" || "$bundle_version" != "0.1.0" ]] || \
+    [[ "$ls_ui_element" != "1" && "$ls_ui_element" != "true" ]]; then
     echo "Unexpected Lite bundle metadata" >&2
     plutil -p "$plist_path" >&2
     exit 1
@@ -77,6 +79,7 @@ ln -s /Applications "$tmp_dir/Applications"
 
 echo "Lite app: $app_path"
 echo "Lite DMG: $dmg_path"
+echo "LSUIElement: $ls_ui_element"
 echo "App bytes: $(du -sh "$app_path" | awk '{print $1}')"
 echo "Executable bytes: $(stat -f '%z' "$executable_path")"
 echo "DMG bytes: $(stat -f '%z' "$dmg_path")"

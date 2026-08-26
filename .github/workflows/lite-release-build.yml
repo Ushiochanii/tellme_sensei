@@ -37,7 +37,11 @@ jobs:
         run: |
           set -euo pipefail
           test -s dist/release/TellMeSensei-Lite-0.1.0-macos-arm64.dmg
-          file "dist/vision-lite-macos-arm64/TellMeSensei Lite.app/Contents/MacOS/TellMeSenseiLite" | grep -F "Mach-O 64-bit executable arm64"
+          app="dist/vision-lite-macos-arm64/TellMeSensei Lite.app"
+          file "$app/Contents/MacOS/TellMeSenseiLite" | grep -F "Mach-O 64-bit executable arm64"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "com.tellmesensei.vision-lite"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "0.1.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$app/Contents/Info.plist")" = "true"
 
       - name: Upload Lite DMG
         uses: actions/upload-artifact@v4
