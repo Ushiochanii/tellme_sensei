@@ -127,11 +127,18 @@ class AnswerWindow(QWidget):
         self.setGraphicsEffect(shadow)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 10, 10, 10)
-        root.setSpacing(10)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        surface = QFrame(self)
+        surface.setObjectName("answerSurface")
+        self.answer_surface = surface
+        root.addWidget(surface)
+        surface_layout = QVBoxLayout(surface)
+        surface_layout.setContentsMargins(14, 12, 14, 12)
+        surface_layout.setSpacing(10)
 
         self.title_bar = _TitleBar("Text / OCR Analysis", self.close, parent=self)
-        root.addWidget(self.title_bar)
+        surface_layout.addWidget(self.title_bar)
 
         body = QWidget()
         body_layout = QVBoxLayout(body)
@@ -174,12 +181,12 @@ class AnswerWindow(QWidget):
         self.answer_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         answer_layout.addWidget(self.answer_edit, 1)
         body_layout.addWidget(answer_card, 1)
-        root.addWidget(body, 1)
+        surface_layout.addWidget(body, 1)
 
         footer = QWidget()
         footer.setObjectName("answerFooter")
         footer_layout = QHBoxLayout(footer)
-        footer_layout.setContentsMargins(4, 0, 4, 0)
+        footer_layout.setContentsMargins(10, 8, 10, 8)
         footer_layout.setSpacing(7)
         self.copy_button = QPushButton("Copy")
         self.copy_button.setObjectName("copyButton")
@@ -208,7 +215,7 @@ class AnswerWindow(QWidget):
         footer_layout.addWidget(close_button)
         footer_layout.addStretch(1)
         footer_layout.addWidget(QSizeGrip(footer))
-        root.addWidget(footer)
+        surface_layout.addWidget(footer)
 
         self.setStyleSheet(answer_window_stylesheet())
         self.set_mode(AnalysisMode.TEXT)

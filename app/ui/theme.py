@@ -40,10 +40,10 @@ def answer_window_stylesheet() -> str:
     """Return the AnswerWindow stylesheet using the shared visual tokens."""
 
     return f"""
-    QWidget#answerWindow {{
+    QWidget#answerWindow {{ background: transparent; color: {TEXT}; }}
+    QFrame#answerSurface {{
         background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
             stop:0 #edf5ff, stop:1 #f1edff);
-        color: {TEXT};
         border: 1px solid {BORDER};
         border-radius: {RADIUS_LG}px;
     }}
@@ -55,7 +55,7 @@ def answer_window_stylesheet() -> str:
     }}
     QLabel#answerTitleLabel {{
         color: {TEXT};
-        font-size: {FONT_TITLE}px;
+        font-size: 18px;
         font-weight: 700;
     }}
     QToolButton#closeButton {{
@@ -76,7 +76,7 @@ def answer_window_stylesheet() -> str:
         border: 1px solid rgba(201, 216, 247, 170);
         border-radius: {RADIUS_MD}px;
         padding: 8px 12px;
-        font-size: {FONT_BODY}px;
+        font-size: 13px;
         font-weight: 600;
     }}
     QLabel#statusLabel[state="ready"], QLabel#statusLabel[state="complete"] {{ color: {SUCCESS}; }}
@@ -92,7 +92,7 @@ def answer_window_stylesheet() -> str:
     }}
     QLabel#sectionTitle {{
         color: {SECONDARY_TEXT};
-        font-size: {FONT_BODY}px;
+        font-size: 13px;
         font-weight: 700;
     }}
     QLabel#answerSectionTitle {{ color: {TEXT}; }}
@@ -104,9 +104,9 @@ def answer_window_stylesheet() -> str:
         padding: 10px;
         selection-background-color: #cfe0ff;
         selection-color: {TEXT};
-        font-size: 13px;
+        font-size: 12px;
     }}
-    QPlainTextEdit#answerEdit {{ border-color: #c7d8f8; font-size: 14px; }}
+    QPlainTextEdit#answerEdit {{ border-color: #c7d8f8; font-size: 13px; }}
     QPlainTextEdit#ocrEdit:focus, QPlainTextEdit#answerEdit:focus {{ border-color: {FOCUS_BORDER}; }}
     QScrollBar:vertical {{
         background: transparent;
@@ -146,6 +146,11 @@ def answer_window_stylesheet() -> str:
     }}
     QPushButton#closeActionButton:hover {{ background: rgba(255, 255, 255, 150); border-color: {CARD_BORDER}; }}
     QPushButton:disabled {{ color: #9aa8c2; background: rgba(242, 245, 252, 130); border-color: #dce4f2; }}
+    QWidget#answerFooter {{
+        background: rgba(255, 255, 255, 115);
+        border-top: 1px solid rgba(201, 216, 247, 150);
+        border-radius: {RADIUS_MD}px;
+    }}
     QSizeGrip {{ width: 10px; height: 10px; }}
     """
 
