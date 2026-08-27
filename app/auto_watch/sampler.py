@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil, floor
 from typing import Callable
 
 from PySide6.QtCore import QRect, QTimer
@@ -43,8 +44,11 @@ class ScreenSampler:
         if geometry.width() <= 0 or geometry.height() <= 0:
             raise RuntimeError("screen geometry must have positive width and height")
         sx, sy = shot.width() / geometry.width(), shot.height() / geometry.height()
-        physical = QRect(round(self.logical_roi.x() * sx), round(self.logical_roi.y() * sy),
-                         max(1, round(self.logical_roi.width() * sx)), max(1, round(self.logical_roi.height() * sy)))
+        left = floor(self.logical_roi.x() * sx)
+        top = floor(self.logical_roi.y() * sy)
+        right = ceil((self.logical_roi.x() + self.logical_roi.width()) * sx)
+        bottom = ceil((self.logical_roi.y() + self.logical_roi.height()) * sy)
+        physical = QRect(left, top, right - left, bottom - top)
         physical = physical.intersected(QRect(0, 0, shot.width(), shot.height()))
         if physical.isEmpty():
             raise RuntimeError("logical ROI maps outside the captured screen")

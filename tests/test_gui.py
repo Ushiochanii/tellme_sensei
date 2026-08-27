@@ -23,6 +23,7 @@ from app.services.deepseek_service import DeepSeekError, DeepSeekService
 from app.services.ocr_service import OCRLine, OCRResult
 from app.ocr.providers.local_worker import LocalOCRProvider
 from app.ui import main_window as main_window_module
+from app.ui import answer_window as answer_window_module
 from app.ui.main_window import MainWindow, _AutoWatchFakeHandle
 from app.ui.answer_window import AnswerWindow
 from app.workers.processing_worker import ProcessingWorker
@@ -87,6 +88,14 @@ def test_answer_window_copy_and_retry(qt_app) -> None:
     window.copy_button.click()
     assert QApplication.clipboard().text() == "【答案】复制测试"
     assert window.retry_button.isEnabled()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_answer_window_keeps_tool_window_visible_on_macos_when_deactivated(qt_app, monkeypatch) -> None:
+    monkeypatch.setattr(answer_window_module.sys, "platform", "darwin")
+    window = AnswerWindow()
+    assert window.testAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
     window.close()
     qt_app.processEvents()
 

@@ -49,7 +49,10 @@ class WatchRegion:
         screens = QGuiApplication.screens()
         if self.screen not in screens:
             return False
-        return QRect(self.screen.geometry()) == self.screen_geometry
+        if QRect(self.screen.geometry()) != self.screen_geometry:
+            return False
+        current_dpr = float(self.screen.devicePixelRatio()) if hasattr(self.screen, "devicePixelRatio") else 1.0
+        return abs(current_dpr - self.device_pixel_ratio) <= 1e-6
 
 
 class AutoWatchSession(QObject):
@@ -104,7 +107,7 @@ class AutoWatchSession(QObject):
 
     def start(self) -> bool:
         if not self.region.is_valid():
-            self._fault("屏幕不可用或显示器几何已改变")
+            self._fault("屏幕不可用或显示器配置已改变")
             return False
         self._stopped = False; self._faulted = False; self._stop_emitted = False; self._cleanup_started = False
         self.sampler = self.sampler_factory(self.region.screen, self.region.logical_roi, self.settings)
@@ -127,7 +130,7 @@ class AutoWatchSession(QObject):
     def tick(self) -> None:
         if self._stopped or self._faulted: return
         if not self.region.is_valid():
-            self._fault("屏幕不可用或显示器几何已改变"); return
+            self._fault("屏幕不可用或显示器配置已改变"); return
         try:
             image = self.sampler.sample()
             if image.isNull() or image.width() <= 0 or image.height() <= 0: raise RuntimeError("屏幕截图为空")

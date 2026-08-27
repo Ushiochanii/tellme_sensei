@@ -1,5 +1,6 @@
 """Small interactive controller positioned outside a watched ROI."""
 from __future__ import annotations
+import sys
 from PySide6.QtCore import QRect, Signal, Qt
 from PySide6.QtWidgets import QFrame, QWidget, QLabel, QPushButton, QHBoxLayout, QVBoxLayout
 from app.analysis import AnalysisMode
@@ -32,6 +33,8 @@ class WatchMiniController(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent); self.setObjectName("watchMiniController")
         self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+        if sys.platform == "darwin":
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
         self.setStyleSheet(watch_mini_controller_stylesheet())
         self.setAttribute(Qt.WA_TranslucentBackground); self._closing_from_session = False; self._paused = False
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)

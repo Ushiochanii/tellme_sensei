@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixma
 from PySide6.QtWidgets import QPushButton
 
 
-# Soft blue/lavender palette used only by the v0.7.1 controller in Phase 1.
+# Shared soft blue/lavender palette for the application UI.
 BACKGROUND = "#eef4ff"
 PANEL = "#f8fbff"
 TEXT = "#172b63"

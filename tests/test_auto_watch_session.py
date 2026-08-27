@@ -7,6 +7,7 @@ from app.analysis import AnalysisMode
 from app.auto_watch.coordinator import CoordinatorEvent
 from app.auto_watch.models import AutoWatchSettings, DetectorFrame, MonitorState, WatchEvent
 from app.ui.auto_watch_session import WatchRegion
+from app.ui import watch_mini_controller as watch_mini_controller_module
 from app.ui.watch_mini_controller import WatchMiniController, place_mini_controller
 from app.ui.watch_overlay import WatchOverlay, outside_roi_segments
 
@@ -138,6 +139,18 @@ def test_watch_region_uses_screen_local_roi_and_global_coordinates(qt_app: QAppl
     assert region.session_id == "session-1"
 
 
+def test_watch_region_invalidates_geometry_or_dpr_snapshot_changes(qt_app: QApplication):
+    screen = qt_app.primaryScreen()
+    if screen is None:
+        return
+    region = WatchRegion.create(screen, QRect(2, 3, 40, 30), "snapshot")
+    assert region.is_valid()
+    from dataclasses import replace
+    assert not replace(region, screen=object()).is_valid()
+    assert not replace(region, screen_geometry=region.screen_geometry.adjusted(0, 0, 1, 0)).is_valid()
+    assert not replace(region, device_pixel_ratio=region.device_pixel_ratio + 0.25).is_valid()
+
+
 def test_watch_overlay_is_input_transparent_and_does_not_store_image(qt_app):
     screen = qt_app.primaryScreen()
     if screen is None:
@@ -180,6 +193,14 @@ def test_mini_controller_placement_and_controls(qt_app):
     mini.set_analysis_state("error")
     assert mini.analysis_label.text() == "Analysis failed"
     mini.close_from_session()
+
+
+def test_mini_controller_keeps_tool_window_visible_on_macos_when_deactivated(qt_app, monkeypatch):
+    monkeypatch.setattr(watch_mini_controller_module.sys, "platform", "darwin")
+    mini = WatchMiniController()
+    assert mini.testAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
+    mini.close()
+    qt_app.processEvents()
 
 
 def test_mini_pause_button_switches_between_pause_and_resume(qt_app):
@@ -282,3 +303,19 @@ def test_session_fault_pauses_once_and_late_callbacks_are_ignored(qt_app):
     request = _Request(1, AnalysisMode.TEXT, image, "session-text")
     session._on_result(request, object()); session._on_error(request, "late"); session._on_cancelled(request); session._on_finished(request)
     assert results == errors == cancelled == finished == []
+
+
+def test_session_dpr_fault_stops_polling_once_and_stop_remains_available(qt_app):
+    session, repo, config, timer, sampler, coordinator, dispatcher, overlay, mini, image = _session(qt_app)
+    from dataclasses import replace
+    states = []
+    session.monitor_state_changed.connect(states.append)
+    session.start()
+    session.region = replace(session.region, device_pixel_ratio=session.region.device_pixel_ratio + 0.25)
+    session.tick(); session.tick()
+    assert not timer.active and len(overlay.errors) == 1
+    assert "配置已改变" in overlay.errors[0]
+    assert len(states) == 2 and states[-1]["state"] is MonitorState.PAUSED
+    dispatcher.active_request = None
+    session.stop()
+    assert session.region is None and dispatcher.stop_count == 1

@@ -94,7 +94,10 @@ def test_delay_replaced_and_stop_cancels_everything():
     dispatcher, workers = make(settings=AutoWatchSettings(analysis_delay_ms=50), scheduler=scheduler)
     dispatcher.submit(image()); dispatcher.submit(image())
     assert scheduler.jobs[0][2] and len(workers) == 0
-    dispatcher.stop(); assert scheduler.jobs[1][2] and dispatcher.pending_request is None
+    dispatcher.stop(); dispatcher.stop()
+    assert scheduler.jobs[1][2] and dispatcher.pending_request is None
+    assert dispatcher.state is AnalysisState.IDLE
+    assert not workers
     scheduler.fire(1); assert not workers and dispatcher.state is AnalysisState.IDLE
 
 
@@ -182,6 +185,22 @@ def test_stop_while_cancelling_waits_for_real_finished_cleanup():
     dispatcher.stop()
     assert dispatcher.state is AnalysisState.CANCELLING and dispatcher.pending_request is None
     workers[0].done(); assert dispatcher.state is AnalysisState.IDLE and dispatcher.active_request is None
+
+
+def test_stop_during_analysis_delay_never_starts_worker_after_late_timer_callback():
+    scheduler = FakeScheduler()
+    dispatcher, workers = make(
+        settings=AutoWatchSettings(analysis_delay_ms=50), scheduler=scheduler
+    )
+    dispatcher.submit(image())
+    dispatcher.stop()
+    # A scheduler callback can still be invoked by a real event loop after
+    # cancellation; it must be harmless and must not start a worker.
+    scheduler.jobs[0][1]()
+    assert workers == []
+    assert dispatcher.active_request is None
+    assert dispatcher.pending_request is None
+    assert dispatcher.state is AnalysisState.IDLE
 
 
 def test_full_resolution_copy_and_vision_request():
