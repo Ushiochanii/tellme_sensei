@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
 
+import pytest
+
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
 
 from app.config import AppConfig, ConfigManager
 from app.services.deepseek_service import DeepSeekError
+from app.auto_watch.models import AutoWatchSettings
 from app.settings.repository import SettingsRepository
 from app.settings.secret_store import SecretStore
 from app.ui import settings_window as settings_window_module
@@ -793,4 +798,129 @@ def test_repeated_settings_open_reuses_one_window(qt_app, tmp_path) -> None:
     assert first is window._settings_window
     window.shutdown()
     window.close()
+    qt_app.processEvents()
+
+
+def test_auto_watch_repository_round_trip_partial_and_validation(tmp_path) -> None:
+    repository = SettingsRepository(tmp_path / "settings.json")
+    defaults = AutoWatchSettings()
+    assert repository.auto_watch_settings() == defaults
+    repository.save({"model": "kept", "poll_interval_ms": 1, "novelty_ratio": 0.0})
+    repository.update({"stable_samples_required": 1000, "analysis_delay_ms": 60000})
+    assert repository.auto_watch_settings().poll_interval_ms == 1
+    assert repository.auto_watch_settings().novelty_ratio == 0.0
+    assert repository.load()["model"] == "kept"
+    for key, value in {
+        "poll_interval_ms": 1, "pixel_delta_threshold": 1,
+        "novelty_ratio": 0.0, "stability_ratio": 0.0,
+        "stable_samples_required": 1, "analysis_delay_ms": 0,
+    }.items():
+        repository.update({key: value})
+        assert getattr(repository.auto_watch_settings(), key) == value
+    for key, value in {"pixel_delta_threshold": 255, "novelty_ratio": 1.0, "stability_ratio": 1.0}.items():
+        repository.update({key: value})
+        assert getattr(repository.auto_watch_settings(), key) == value
+    for key, value in {
+        "poll_interval_ms": 0, "pixel_delta_threshold": 256,
+        "novelty_ratio": 1.1, "stability_ratio": -0.1,
+        "stable_samples_required": 0, "analysis_delay_ms": -1,
+    }.items():
+        with pytest.raises(ValueError):
+            repository.update({key: value})
+    for key in ("poll_interval_ms", "pixel_delta_threshold", "novelty_ratio", "stability_ratio", "stable_samples_required", "analysis_delay_ms"):
+        with pytest.raises(ValueError):
+            repository.update({key: True})
+        with pytest.raises(ValueError):
+            repository.update({key: "invalid"})
+    for key in ("novelty_ratio", "stability_ratio"):
+        for value in (float("nan"), float("inf")):
+            with pytest.raises(ValueError):
+                repository.update({key: value})
+
+
+def test_auto_watch_corrupt_values_fall_back_independently(tmp_path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"model": "kept", "poll_interval_ms": "bad", "novelty_ratio": 0.25}), encoding="utf-8")
+    repository = SettingsRepository(path)
+    defaults = AutoWatchSettings()
+    settings = repository.auto_watch_settings()
+    assert settings.poll_interval_ms == defaults.poll_interval_ms
+    assert settings.novelty_ratio == 0.25
+    path.write_text("[not an object]", encoding="utf-8")
+    assert repository.load() == {}
+
+
+def test_auto_watch_settings_window_load_save_and_navigation(qt_app, tmp_path) -> None:
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.update({
+        "poll_interval_ms": 500, "pixel_delta_threshold": 20,
+        "novelty_ratio": 0.125, "stability_ratio": 0.25,
+        "stable_samples_required": 4, "analysis_delay_ms": 30,
+    })
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
+    assert isinstance(window.poll_interval_ms_spin, QSpinBox)
+    assert isinstance(window.novelty_ratio_spin, QDoubleSpinBox)
+    assert window.poll_interval_ms_spin.value() == 500
+    assert window.novelty_ratio_spin.value() == 12.5
+    assert next(button for button in window._navigation_buttons if button.text() == "Auto Watch").property("navLevel") == "primary"
+    window.poll_interval_ms_spin.setValue(200)
+    window.pixel_delta_threshold_spin.setValue(25)
+    window.novelty_ratio_spin.setValue(12.5)
+    window.stability_ratio_spin.setValue(50.0)
+    window.stable_samples_required_spin.setValue(6)
+    window.analysis_delay_ms_spin.setValue(40)
+    window.save()
+    saved = repository.auto_watch_settings()
+    assert saved.poll_interval_ms == 200
+    assert saved.pixel_delta_threshold == 25
+    assert saved.novelty_ratio == 0.125
+    assert saved.stability_ratio == 0.5
+    assert saved.stable_samples_required == 6
+    assert saved.analysis_delay_ms == 40
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_auto_watch_settings_window_cancel_restore_and_expected_time(qt_app, tmp_path) -> None:
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.update({"poll_interval_ms": 500, "stable_samples_required": 4})
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
+    window.poll_interval_ms_spin.setValue(200)
+    window.stable_samples_required_spin.setValue(6)
+    assert "1200 ms" in window.expected_stability_label.text()
+    window.restore_auto_watch_button.click()
+    assert window.poll_interval_ms_spin.value() == AutoWatchSettings().poll_interval_ms
+    assert repository.auto_watch_settings().poll_interval_ms == 500
+    window.save()
+    assert repository.auto_watch_settings() == AutoWatchSettings()
+    repository.update({"poll_interval_ms": 500})
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
+    window.poll_interval_ms_spin.setValue(200)
+    window.cancel_button.click()
+    assert repository.auto_watch_settings().poll_interval_ms == 500
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
+    window.poll_interval_ms_spin.setValue(200)
+    window.close()
+    assert repository.auto_watch_settings().poll_interval_ms == 500
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_auto_watch_save_failure_is_shown_without_storage_damage(qt_app, tmp_path, monkeypatch) -> None:
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.update({"poll_interval_ms": 500})
+    manager = make_manager(tmp_path, FakeSecretStore("key"))
+    manager.settings_repository = repository
+    window = SettingsWindow(manager)
+    window.poll_interval_ms_spin.setValue(200)
+    before = repository.load()
+
+    def fail_update(_settings) -> None:
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(repository, "update", fail_update)
+    window.save()
+    assert "disk unavailable" in window.status_label.text()
+    assert SettingsRepository(tmp_path / "settings.json").load() == before
+    window.deleteLater()
     qt_app.processEvents()

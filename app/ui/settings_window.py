@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QSpinBox,
+    QDoubleSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -40,6 +42,7 @@ from app.ocr.types import OCRCancelled, OCRError
 from app.platform.ocr import is_local_ocr_supported
 from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
 from app.settings.secret_store import SecretStoreError
+from app.auto_watch.models import AutoWatchSettings
 from app.ui.theme import settings_window_stylesheet
 
 logger = logging.getLogger(__name__)
@@ -173,6 +176,7 @@ class SettingsWindow(QWidget):
         self._google_cancel_event: threading.Event | None = None
         self._loaded_api_key = ""
         self._loaded_google_vision_api_key = ""
+        self._loaded_auto_watch_values: dict[str, int | float] = {}
 
         self.setWindowTitle("TellMeSensei Settings")
         self.setMinimumSize(760, 540)
@@ -319,6 +323,30 @@ class SettingsWindow(QWidget):
         self.test_button.setObjectName("testConnectionButton")
         self.test_button.clicked.connect(self.test_connection)
 
+        self.poll_interval_ms_spin = QSpinBox()
+        self.poll_interval_ms_spin.setRange(1, 60000)
+        self.poll_interval_ms_spin.setSuffix(" ms")
+        self.pixel_delta_threshold_spin = QSpinBox()
+        self.pixel_delta_threshold_spin.setRange(1, 255)
+        self.novelty_ratio_spin = QDoubleSpinBox()
+        self.stability_ratio_spin = QDoubleSpinBox()
+        for control in (self.novelty_ratio_spin, self.stability_ratio_spin):
+            control.setRange(0.0, 100.0)
+            control.setDecimals(2)
+            control.setSingleStep(0.5)
+            control.setSuffix(" %")
+        self.stable_samples_required_spin = QSpinBox()
+        self.stable_samples_required_spin.setRange(1, 1000)
+        self.analysis_delay_ms_spin = QSpinBox()
+        self.analysis_delay_ms_spin.setRange(0, 60000)
+        self.analysis_delay_ms_spin.setSuffix(" ms")
+        self.expected_stability_label = QLabel()
+        self.expected_stability_label.setWordWrap(True)
+        self.restore_auto_watch_button = QPushButton("Restore Defaults")
+        self.restore_auto_watch_button.clicked.connect(self._restore_auto_watch_defaults)
+        self.poll_interval_ms_spin.valueChanged.connect(self._refresh_expected_stability)
+        self.stable_samples_required_spin.valueChanged.connect(self._refresh_expected_stability)
+
         def make_page(page_title: str, description: str) -> tuple[QWidget, QVBoxLayout]:
             page = QWidget()
             page_layout = QVBoxLayout(page)
@@ -423,7 +451,33 @@ class SettingsWindow(QWidget):
         google_page_layout.addWidget(self.google_vision_group)
         google_page_layout.addStretch(1)
 
-        for page in (deepseek_page, shortcuts_page, ocr_page, local_page, google_page):
+        auto_watch_page, auto_watch_layout = make_page(
+            "Auto Watch", "Tune automatic change detection and analysis timing."
+        )
+        auto_watch_card = QFrame()
+        auto_watch_card.setObjectName("settingsCard")
+        auto_watch_card_layout = QVBoxLayout(auto_watch_card)
+        auto_watch_card_layout.setContentsMargins(16, 14, 16, 16)
+        auto_watch_form = QFormLayout()
+        auto_watch_form.addRow("Detection interval", self.poll_interval_ms_spin)
+        auto_watch_form.addRow("Pixel delta threshold", self.pixel_delta_threshold_spin)
+        auto_watch_form.addRow("New-question ratio", self.novelty_ratio_spin)
+        auto_watch_form.addRow("Stability ratio", self.stability_ratio_spin)
+        auto_watch_form.addRow("Stable samples required", self.stable_samples_required_spin)
+        auto_watch_form.addRow("Analysis delay", self.analysis_delay_ms_spin)
+        auto_watch_card_layout.addLayout(auto_watch_form)
+        auto_watch_card_layout.addWidget(QLabel(
+            "Ratios are stored as 0–1 values. Lower thresholds detect smaller changes."
+        ))
+        auto_watch_card_layout.addWidget(self.expected_stability_label)
+        auto_watch_buttons = QHBoxLayout()
+        auto_watch_buttons.addWidget(self.restore_auto_watch_button)
+        auto_watch_buttons.addStretch(1)
+        auto_watch_card_layout.addLayout(auto_watch_buttons)
+        auto_watch_layout.addWidget(auto_watch_card)
+        auto_watch_layout.addStretch(1)
+
+        for page in (deepseek_page, shortcuts_page, ocr_page, local_page, google_page, auto_watch_page):
             self.page_stack.addWidget(page)
 
         page_scroll = QScrollArea()
@@ -443,10 +497,10 @@ class SettingsWindow(QWidget):
         sidebar_layout.setContentsMargins(8, 10, 8, 10)
         sidebar_layout.setSpacing(4)
         self._navigation_buttons: list[QPushButton] = []
-        for index, label in enumerate(("DeepSeek", "Shortcuts", "OCR", "Local OCR", "Google Vision")):
+        for index, label in enumerate(("DeepSeek", "Shortcuts", "OCR", "Local OCR", "Google Vision", "Auto Watch")):
             nav_button = QPushButton(label)
             nav_button.setObjectName("navigationButton")
-            nav_button.setProperty("navLevel", "child" if index >= 3 else "primary")
+            nav_button.setProperty("navLevel", "child" if index in (3, 4) else "primary")
             nav_button.setCheckable(True)
             nav_button.clicked.connect(
                 lambda _checked=False, page_index=index: self._select_page(page_index)
@@ -481,6 +535,61 @@ class SettingsWindow(QWidget):
         self._refresh_local_ocr_state()
         self._apply_local_ocr_capability()
         self._select_page(0)
+
+    def _refresh_expected_stability(self) -> None:
+        milliseconds = self.poll_interval_ms_spin.value() * self.stable_samples_required_spin.value()
+        self.expected_stability_label.setText(
+            f"Expected stable confirmation: {milliseconds} ms "
+            "(actual timing also depends on page changes)."
+        )
+
+    def _load_auto_watch_values(self) -> None:
+        saved = self.config_manager.settings_repository.load()
+        settings = self.config_manager.settings_repository.auto_watch_settings()
+        self._loaded_auto_watch_values = {
+            key: saved[key]
+            for key in (
+                "poll_interval_ms", "pixel_delta_threshold", "novelty_ratio",
+                "stability_ratio", "stable_samples_required", "analysis_delay_ms",
+            ) if key in saved
+        }
+        self.poll_interval_ms_spin.setValue(settings.poll_interval_ms)
+        self.pixel_delta_threshold_spin.setValue(settings.pixel_delta_threshold)
+        self.novelty_ratio_spin.setValue(settings.novelty_ratio * 100.0)
+        self.stability_ratio_spin.setValue(settings.stability_ratio * 100.0)
+        self.stable_samples_required_spin.setValue(settings.stable_samples_required)
+        self.analysis_delay_ms_spin.setValue(settings.analysis_delay_ms)
+        self._refresh_expected_stability()
+
+    def _auto_watch_values(self) -> dict[str, int | float]:
+        return {
+            "poll_interval_ms": self.poll_interval_ms_spin.value(),
+            "pixel_delta_threshold": self.pixel_delta_threshold_spin.value(),
+            "novelty_ratio": self.novelty_ratio_spin.value() / 100.0,
+            "stability_ratio": self.stability_ratio_spin.value() / 100.0,
+            "stable_samples_required": self.stable_samples_required_spin.value(),
+            "analysis_delay_ms": self.analysis_delay_ms_spin.value(),
+        }
+
+    def _changed_auto_watch_values(self) -> dict[str, int | float]:
+        current = self._auto_watch_values()
+        defaults = AutoWatchSettings()
+        return {
+            key: value
+            for key, value in current.items()
+            if value != self._loaded_auto_watch_values.get(key, getattr(defaults, key))
+        }
+
+    @Slot()
+    def _restore_auto_watch_defaults(self) -> None:
+        defaults = AutoWatchSettings()
+        self.poll_interval_ms_spin.setValue(defaults.poll_interval_ms)
+        self.pixel_delta_threshold_spin.setValue(defaults.pixel_delta_threshold)
+        self.novelty_ratio_spin.setValue(defaults.novelty_ratio * 100.0)
+        self.stability_ratio_spin.setValue(defaults.stability_ratio * 100.0)
+        self.stable_samples_required_spin.setValue(defaults.stable_samples_required)
+        self.analysis_delay_ms_spin.setValue(defaults.analysis_delay_ms)
+        self._refresh_expected_stability()
 
     def _select_page(self, index: int) -> None:
         """Switch pages without changing provider or persisted configuration."""
@@ -567,6 +676,7 @@ class SettingsWindow(QWidget):
         self.ocr_provider_override_label.setVisible(provider_env_override)
         self._on_provider_changed()
         self._show_environment_override_warnings()
+        self._load_auto_watch_values()
 
     def reload_values(self) -> None:
         """Reload persisted values when the window is shown again."""
@@ -1036,7 +1146,10 @@ class SettingsWindow(QWidget):
                 google_vision_api_key=google_key_to_save,
                 online_ocr_timeout=config.online_ocr_timeout,
             )
-        except (ConfigError, SecretStoreError, ValueError) as exc:
+            changed_auto_watch = self._changed_auto_watch_values()
+            if changed_auto_watch:
+                self.config_manager.settings_repository.update(changed_auto_watch)
+        except (ConfigError, SecretStoreError, OSError, ValueError) as exc:
             self._restore_shortcut_changes(changed_shortcuts)
             self._set_status(str(exc))
             return

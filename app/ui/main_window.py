@@ -10,6 +10,7 @@ from pathlib import Path
 import threading
 
 from PySide6.QtCore import QThread, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QObject
 from PySide6.QtGui import QIcon, QImage
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -17,10 +18,13 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QVBoxLayout,
+    QRadioButton,
     QWidget,
 )
 
 from app.analysis import AnalysisMode
+from app.ocr.types import OCRLine, OCRResult
+from app.pipeline import PipelineResult
 from app.capture.overlay import CaptureOverlay
 from app.config import ConfigError, ConfigManager
 from app.local_ocr.component_manager import LocalOCRComponentManager
@@ -46,8 +50,55 @@ from app.ui.theme import (
 from app.workers.processing_worker import ProcessingWorker
 from app.workers.local_ocr_prewarm_worker import LocalOCRPrewarmWorker
 from app.workers.vision_processing_worker import VisionProcessingWorker
+from app.ui.auto_watch_session import AutoWatchSession, WatchRegion
+from app.ui.watch_mini_controller import WatchMiniController
 
 logger = logging.getLogger(__name__)
+
+
+class _AutoWatchFakeHandle(QObject):
+    """Local-only handle used by the manual UI demo; never calls a provider."""
+    result_ready = Signal(object)
+    error_occurred = Signal(str)
+    finished = Signal()
+    cancelled = Signal()
+
+    def __init__(self, request=None):
+        super().__init__()
+        self.request = request
+        self._started = False
+        self._done = False
+        self._cancelled = False
+
+    def start(self):
+        if self._done or self._started:
+            return
+        self._started = True
+        QTimer.singleShot(0, self._emit_fake_result)
+
+    def _emit_fake_result(self):
+        if self._done:
+            return
+        generation = getattr(self.request, "generation", None)
+        mode = getattr(self.request, "mode", None)
+        if mode is AnalysisMode.VISION:
+            result = "Fake Vision answer"
+        else:
+            result = PipelineResult(
+                ocr=OCRResult("Fake OCR question", (OCRLine("Fake OCR question"),)),
+                answer="Fake OCR answer",
+            )
+        self.result_ready.emit(result)
+        self._done = True
+        self.finished.emit()
+
+    def request_cancel(self):
+        if self._done or self._cancelled:
+            return
+        self._cancelled = True
+        self.cancelled.emit()
+        self._done = True
+        self.finished.emit()
 
 
 class MainWindow(QWidget):
@@ -65,6 +116,7 @@ class MainWindow(QWidget):
         vision_hotkey_manager: GlobalHotkeyManager | None = None,
         local_ocr_session: LocalOCRSession | None = None,
         component_manager: LocalOCRComponentManager | None = None,
+        auto_watch_fake: bool = False,
     ) -> None:
         super().__init__()
         self.debug_capture_path = debug_capture_path
@@ -77,6 +129,7 @@ class MainWindow(QWidget):
         self.state = AppState.IDLE
         self._shutting_down = False
         self._overlay: CaptureOverlay | None = None
+        self._auto_watch_selection_overlay: CaptureOverlay | None = None
         self._answer_window: AnswerWindow | None = None
         self._settings_window: SettingsWindow | None = None
         self.processing_thread: QThread | None = None
@@ -93,11 +146,19 @@ class MainWindow(QWidget):
         self._prewarm_thread: QThread | None = None
         self._prewarm_worker: LocalOCRPrewarmWorker | None = None
         self._prewarm_cancel_event: threading.Event | None = None
+        self._auto_watch_session = None
+        self._auto_watch_active = False
+        self._auto_watch_in_setup = False
+        self._auto_watch_fake = auto_watch_fake
+        self._auto_watch_restore_visible = False
+        self._auto_watch_session_id = None
+        self._auto_watch_generation = 0
+        self._auto_watch_region = None
         self.setWindowTitle("TellMeSensei")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setObjectName("mainController")
-        self.setFixedSize(340, 250)
+        self.setFixedSize(340, 330)
         self.setStyleSheet(controller_stylesheet())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
@@ -151,7 +212,31 @@ class MainWindow(QWidget):
         self._set_status(AppState.IDLE)
 
         layout.addLayout(header)
-        layout.addLayout(mode_layout)
+        self.auto_watch_main_view = QWidget(self)
+        main_view_layout = QVBoxLayout(self.auto_watch_main_view)
+        main_view_layout.setContentsMargins(0, 0, 0, 0)
+        mode_view = QWidget(self.auto_watch_main_view)
+        mode_view.setLayout(mode_layout)
+        main_view_layout.addWidget(mode_view)
+        self.auto_watch_button = QPushButton("Auto Watch")
+        self.auto_watch_button.setObjectName("autoWatchButton")
+        self.auto_watch_button.clicked.connect(self.enter_auto_watch_setup)
+        main_view_layout.addWidget(self.auto_watch_button)
+        layout.addWidget(self.auto_watch_main_view)
+        self.auto_watch_setup = QWidget(self)
+        setup_layout = QVBoxLayout(self.auto_watch_setup)
+        self.auto_watch_text_radio = QRadioButton("Text / OCR")
+        self.auto_watch_vision_radio = QRadioButton("Vision")
+        self.auto_watch_text_radio.setChecked(True)
+        self.auto_watch_select_button = QPushButton("Select Region")
+        self.auto_watch_back_button = QPushButton("Back")
+        self.auto_watch_setup_status = QLabel("Region is kept for this session only.")
+        setup_layout.addWidget(self.auto_watch_text_radio); setup_layout.addWidget(self.auto_watch_vision_radio)
+        setup_layout.addWidget(self.auto_watch_select_button); setup_layout.addWidget(self.auto_watch_back_button); setup_layout.addWidget(self.auto_watch_setup_status)
+        self.auto_watch_select_button.clicked.connect(self.start_auto_watch_selection)
+        self.auto_watch_back_button.clicked.connect(self.exit_auto_watch_setup)
+        layout.addWidget(self.auto_watch_setup)
+        self.auto_watch_setup.hide()
         layout.addWidget(self.status_label)
 
     def _set_capture_controls_enabled(self, enabled: bool) -> None:
@@ -159,6 +244,191 @@ class MainWindow(QWidget):
 
         self.text_mode_button.setEnabled(enabled)
         self.vision_mode_button.setEnabled(enabled)
+        if hasattr(self, "auto_watch_button"): self.auto_watch_button.setEnabled(enabled and not self._auto_watch_active)
+
+    def enter_auto_watch_setup(self):
+        if self._auto_watch_active or self._auto_watch_selection_overlay is not None:
+            return False
+        self._auto_watch_in_setup = True
+        self.auto_watch_main_view.hide(); self.auto_watch_setup.show()
+        self._set_capture_controls_enabled(False)
+        return True
+
+    def exit_auto_watch_setup(self):
+        if self._auto_watch_selection_overlay is not None:
+            self._auto_watch_selection_overlay.close()
+            self._auto_watch_selection_overlay = None
+        self._auto_watch_in_setup = False
+        self.auto_watch_setup.hide(); self.auto_watch_main_view.show(); self._restore_idle()
+
+    def start_auto_watch_selection(self):
+        if (self._shutting_down or self._auto_watch_active or self._overlay is not None
+                or self._auto_watch_selection_overlay is not None or self._busy
+                or not self._auto_watch_in_setup
+                or not self._ensure_screen_recording_permission()): return False
+        try:
+            self._auto_watch_selection_overlay = CaptureOverlay()
+        except Exception as exc:
+            self.auto_watch_setup_status.setText(str(exc)); return False
+        self._auto_watch_selection_overlay.captured.connect(self._on_auto_watch_capture)
+        self._auto_watch_selection_overlay.cancelled.connect(self._on_auto_watch_selection_cancelled)
+        self._auto_watch_selection_overlay.begin(); return True
+
+    def _on_auto_watch_selection_cancelled(self):
+        self._auto_watch_selection_overlay = None
+        self._auto_watch_in_setup = True
+        self.auto_watch_setup.show(); self.auto_watch_main_view.hide()
+
+    def _cleanup_failed_auto_watch_session(self, session) -> None:
+        cleanup = getattr(session, "shutdown", None) or getattr(session, "stop", None)
+        try:
+            if callable(cleanup):
+                cleanup()
+        except Exception:
+            logger.exception("failed to clean up Auto Watch session after start failure")
+        finally:
+            self._auto_watch_session = None
+            self._auto_watch_in_setup = True
+            self.auto_watch_setup.show(); self.auto_watch_main_view.hide()
+
+    def _on_auto_watch_capture(self, _image):
+        overlay = self._auto_watch_selection_overlay; self._auto_watch_selection_overlay = None
+        if overlay is None:
+            return False
+        session = None
+        try:
+            screen, roi = overlay.selection_metadata
+            region = WatchRegion.create(screen, roi)
+            mode = AnalysisMode.VISION if self.auto_watch_vision_radio.isChecked() else AnalysisMode.TEXT
+            worker_factory = (lambda request: _AutoWatchFakeHandle(request)) if self._auto_watch_fake else None
+            session = AutoWatchSession(region, mode, config_manager=self.config_manager, local_ocr_session=self._local_ocr_session, worker_factory=worker_factory)
+            self._auto_watch_session = session
+            self._auto_watch_session_id = region.session_id
+            self._auto_watch_region = region
+            self._connect_auto_watch_signals(session, region)
+            try:
+                started = session.start()
+            except Exception as exc:
+                self._cleanup_failed_auto_watch_session(session)
+                self.auto_watch_setup_status.setText(str(exc))
+                return False
+            if not started:
+                self._cleanup_failed_auto_watch_session(session)
+                self.auto_watch_setup_status.setText("Unable to start Auto Watch.")
+                return False
+            self._auto_watch_restore_visible = self.isVisible()
+            self._auto_watch_active = True; self._auto_watch_in_setup = False; self.auto_watch_main_view.hide(); self.auto_watch_setup.hide(); self._set_capture_controls_enabled(False)
+            if not self.tray_mode:
+                self.hide()
+            return True
+        except Exception as exc:
+            if session is not None:
+                self._cleanup_failed_auto_watch_session(session)
+            self._auto_watch_session = None
+            self._auto_watch_in_setup = True
+            self.auto_watch_setup_status.setText(str(exc))
+            self.auto_watch_setup.show(); self.auto_watch_main_view.hide()
+            return False
+
+    def _on_auto_watch_stopped(self):
+        if self._answer_window is not None and self._auto_watch_session is not None:
+            self._answer_window.end_auto_watch()
+        self._auto_watch_session = None; self._auto_watch_active = False
+        self._auto_watch_session_id = None; self._auto_watch_generation = 0; self._auto_watch_region = None
+        if not self._shutting_down:
+            self.auto_watch_main_view.show(); self.auto_watch_setup.hide(); self._restore_idle()
+            if self._auto_watch_restore_visible and not self.tray_mode:
+                self.show(); self.raise_()
+        self._auto_watch_restore_visible = False
+
+    def _connect_auto_watch_signals(self, session, region) -> None:
+        """Connect one session's callbacks with immutable session identity guards."""
+        expected_id = region.session_id
+        session.analysis_requested.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_requested(s, sid, payload))
+        session.analysis_started.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_started(s, sid, payload))
+        session.analysis_result.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_result(s, sid, payload))
+        session.analysis_error.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_error(s, sid, payload))
+        session.analysis_cancelled.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_cancelled(s, sid, payload))
+        session.analysis_finished.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_finished(s, sid, payload))
+        session.session_stopped.connect(lambda s=session, sid=expected_id: self._on_auto_watch_session_stopped(s, sid))
+
+    def _auto_watch_payload(self, session, expected_id, payload):
+        if self._auto_watch_session is not session or self._auto_watch_session_id != expected_id:
+            return None
+        request = payload if hasattr(payload, "generation") else (payload or {}).get("request")
+        generation = getattr(request, "generation", None)
+        if generation is None:
+            generation = (payload or {}).get("generation")
+        session_id = getattr(request, "session_id", None)
+        if session_id is None:
+            session_id = (payload or {}).get("session_id") or (payload or {}).get("session")
+        if session_id != expected_id or not isinstance(generation, int):
+            return None
+        return request, generation
+
+    def _auto_watch_answer(self, mode, generation):
+        if self._answer_window is None:
+            self._show_or_create_answer()
+            region = self._auto_watch_region
+            roi = region.global_roi if region is not None else None
+            screen = region.screen if region is not None else None
+            self._answer_window.begin_auto_watch(mode, generation, roi, screen)
+        elif not getattr(self._answer_window, "_auto_watch_active", False):
+            region = self._auto_watch_region
+            self._answer_window.begin_auto_watch(mode, generation, region.global_roi if region else None, region.screen if region else None)
+        return self._answer_window
+
+    def _on_auto_watch_requested(self, session, expected_id, payload):
+        checked = self._auto_watch_payload(session, expected_id, payload)
+        if checked is None:
+            return
+        request, generation = checked
+        if generation < self._auto_watch_generation:
+            return
+        self._auto_watch_generation = generation
+        answer = self._auto_watch_answer(request.mode, generation)
+        answer.show_auto_watch_analyzing(generation)
+
+    def _on_auto_watch_started(self, session, expected_id, payload):
+        checked = self._auto_watch_payload(session, expected_id, payload)
+        if checked is None or checked[1] != self._auto_watch_generation:
+            return
+        request, generation = checked
+        answer = self._auto_watch_answer(getattr(request, "mode", self._active_mode), generation)
+        answer.show_auto_watch_analyzing(generation)
+
+    def _on_auto_watch_result(self, session, expected_id, payload):
+        checked = self._auto_watch_payload(session, expected_id, payload)
+        if checked is None or checked[1] != self._auto_watch_generation:
+            return
+        request, generation = checked
+        answer = self._auto_watch_answer(payload.get("mode", request.mode), generation)
+        answer.show_auto_watch_result(generation, payload.get("result"))
+
+    def _on_auto_watch_error(self, session, expected_id, payload):
+        checked = self._auto_watch_payload(session, expected_id, payload)
+        if checked is None or checked[1] != self._auto_watch_generation:
+            return
+        _request, generation = checked
+        self._auto_watch_answer(payload.get("mode", self._active_mode), generation).show_auto_watch_error(generation, payload.get("error", "Unknown error"))
+
+    def _on_auto_watch_cancelled(self, session, expected_id, payload):
+        checked = self._auto_watch_payload(session, expected_id, payload)
+        if checked is None or checked[1] != self._auto_watch_generation:
+            return
+        _request, generation = checked
+        if self._answer_window is not None:
+            self._answer_window.show_auto_watch_cancelled(generation)
+
+    def _on_auto_watch_finished(self, session, expected_id, payload):
+        checked = self._auto_watch_payload(session, expected_id, payload)
+        if checked is None or checked[1] != self._auto_watch_generation:
+            return
+
+    def _on_auto_watch_session_stopped(self, session, expected_id):
+        if self._auto_watch_session is not session or self._auto_watch_session_id != expected_id:
+            return
+        self._on_auto_watch_stopped()
 
     def _set_state(self, state: AppState) -> None:
         self.state = state
@@ -240,7 +510,9 @@ class MainWindow(QWidget):
     def _start_capture(self, mode: AnalysisMode) -> bool:
         """Start one explicitly selected capture mode unless the app is busy."""
 
-        if self._shutting_down or self.state is not AppState.IDLE or self._busy or self._overlay is not None:
+        if (self._shutting_down or self._auto_watch_active or self._auto_watch_in_setup or self._auto_watch_selection_overlay is not None
+                or self.auto_watch_setup.isVisible() or self.state is not AppState.IDLE
+                or self._busy or self._overlay is not None):
             logger.info("capture ignored: application busy")
             return False
 
@@ -312,6 +584,20 @@ class MainWindow(QWidget):
         self._shutting_down = True
         self._busy = True
         self._set_capture_controls_enabled(False)
+
+        if self._auto_watch_selection_overlay is not None:
+            self._auto_watch_selection_overlay.close()
+            self._auto_watch_selection_overlay = None
+
+        if self._auto_watch_session is not None:
+            self._auto_watch_session.session_stopped.connect(self._continue_shutdown_after_watch)
+            self._auto_watch_session.stop()
+            return
+
+        self._continue_shutdown_after_watch()
+
+    def _continue_shutdown_after_watch(self) -> None:
+        """Continue the existing shutdown chain after Auto Watch cleanup."""
 
         if self._overlay is not None:
             self._overlay.close()
@@ -624,6 +910,8 @@ class MainWindow(QWidget):
                 return
             if self._prewarm_thread is not None and self._prewarm_thread.isRunning():
                 return
+            if self._auto_watch_session is not None:
+                return
             self._emit_shutdown_ready()
 
     @Slot()
@@ -685,6 +973,8 @@ class MainWindow(QWidget):
         if answer is not None:
             answer.deleteLater()
         self._last_vision_image = None
+        if self._auto_watch_active:
+            return
         if not self.tray_mode and not self._shutting_down:
             self.show()
             self.raise_()
