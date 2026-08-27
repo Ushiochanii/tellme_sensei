@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QEventLoop, QPoint, QTimer, Qt
+from PySide6.QtCore import QEventLoop, QPoint, QRect, QTimer, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -216,6 +216,15 @@ def test_capture_overlay_emits_selected_image(qt_app) -> None:
     qt_app.processEvents()
     assert len(captured) == 1
     assert not captured[0].isNull()
+
+
+def test_capture_overlay_exposes_read_only_watch_metadata(qt_app) -> None:
+    overlay = CaptureOverlay()
+    overlay._selection = QRect(1, 1, 30, 30)
+    screen, selection = overlay.selection_metadata
+    assert screen is overlay.screen
+    selection.setX(selection.x() + 10)
+    assert selection.x() != overlay.selection.x()
 
 
 def test_retry_worker_skips_ocr(qt_app) -> None:
