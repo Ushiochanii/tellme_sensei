@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 import math
-
 import numpy as np
+from PySide6.QtGui import QImage
+
+from app.analysis import AnalysisMode
 
 
 class MonitorState(Enum):
@@ -18,6 +20,39 @@ class MonitorState(Enum):
 class WatchEvent(Enum):
     INITIAL_STABLE_FRAME = auto()
     NEW_STABLE_FRAME = auto()
+
+
+class AnalysisState(Enum):
+    IDLE = auto()
+    RUNNING = auto()
+    CANCELLING = auto()
+
+
+@dataclass(frozen=True)
+class AnalysisRequest:
+    """Detached, full-resolution input handed to one analysis generation."""
+
+    generation: int
+    mode: AnalysisMode
+    image: QImage
+    source: str = "auto_watch"
+    session_id: str = "auto-watch"
+    request_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.generation, int) or isinstance(self.generation, bool) or self.generation <= 0:
+            raise ValueError("generation must be a positive integer")
+        if not isinstance(self.mode, AnalysisMode):
+            raise ValueError("mode must be AnalysisMode.TEXT or AnalysisMode.VISION")
+        if self.source != "auto_watch":
+            raise ValueError("source must be auto_watch")
+        for name in ("session_id", "request_id"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a non-empty string")
+        if not isinstance(self.image, QImage) or self.image.isNull():
+            raise ValueError("analysis request requires a non-empty QImage")
+        object.__setattr__(self, "image", self.image.copy())
 
 
 @dataclass(frozen=True)

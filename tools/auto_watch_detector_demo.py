@@ -7,6 +7,7 @@ import re
 import signal
 import sys
 import time
+import uuid
 from queue import Empty, Queue
 from threading import Thread
 from pathlib import Path
@@ -28,6 +29,8 @@ from app.auto_watch import (
     format_ratio,
     preprocess_qimage,
     state_label,
+    AnalysisDispatcher,
+    AutoWatchDispatcherBridge,
 )
 from app.auto_watch.models import MonitorState, WatchEvent
 from app.capture.overlay import CaptureOverlay
@@ -36,6 +39,35 @@ from app.capture.overlay import CaptureOverlay
 _DELETED_QT_WRAPPER = re.compile(
     r"^Internal C\+\+ object \([^)]*\) already deleted\.?$"
 )
+
+
+def _preflight_diagnosis(error: BaseException) -> str:
+    """Map Local OCR startup failures to the operator-facing diagnosis names."""
+
+    message = str(error).lower()
+    if "timed out" in message or "timeout" in message:
+        return "model_load_timeout"
+    if "找不到" in str(error) or "not found" in message or "no such file" in message:
+        return "component_missing"
+    return "worker_start_failed"
+
+
+def run_ocr_preflight(config, session, output: Callable[[str], None] = print) -> bool:
+    """Warm the shared local session and report a retryable startup failure."""
+
+    if config.ocr_provider != "local":
+        return False
+    try:
+        session.prepare()
+    except Exception as exc:
+        diagnosis = _preflight_diagnosis(exc)
+        output(f"real OCR preflight failed diagnosis={diagnosis}: {exc}")
+        return False
+    output(
+        "real OCR preflight passed: persistent worker ready; same session reused "
+        "for subsequent generations."
+    )
+    return True
 
 
 def safe_close(qt_object) -> None:
@@ -61,6 +93,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--poll-interval-ms", type=int, default=250)
     parser.add_argument("--stable-samples", type=int, default=3)
+    parser.add_argument("--mode", choices=["text", "vision"], default="text")
+    parser.add_argument("--real", action="store_true")
+    parser.add_argument("--analysis-delay-ms", type=int, default=0)
     return parser
 
 
@@ -235,8 +270,50 @@ def main(
     app = app_factory([sys.argv[0]])
     overlay = overlay_factory()
     settings = AutoWatchSettings(poll_interval_ms=args.poll_interval_ms,
-                                 stable_samples_required=args.stable_samples)
+                                 stable_samples_required=args.stable_samples,
+                                 analysis_delay_ms=args.analysis_delay_ms)
     collector = FakeAnalysisCollector(output)
+    local_ocr_session = None
+    from app.analysis import AnalysisMode
+    def observe(kind, fields):
+        output("dispatcher %s generation=%s delay_ms=%s active=%s pending=%s state=%s%s" % (
+            kind, fields.get("generation", "-"), fields["delay_ms"], fields["active"],
+            fields["pending"], fields["state"],
+            " stale_discard=%s" % fields["count"] if kind == "stale_discard" else ""))
+    if args.real:
+        from app.config import ConfigManager
+        from app.ocr.factory import create_ocr_provider
+        from app.ocr.local_session import LocalOCRSession
+        local_ocr_session = LocalOCRSession()
+        try:
+            config_value = ConfigManager().load(require_api_key=True)
+            local_ocr_session.language = config_value.ocr_language
+            ocr_provider = create_ocr_provider(
+                config_value, local_ocr_session=local_ocr_session
+            )
+        except Exception:
+            local_ocr_session.stop()
+            raise
+        if config_value.ocr_provider == "local":
+            output("real OCR 初始化：复用一个 LocalOCRSession；即将执行 persistent worker preflight。")
+        else:
+            output(f"real OCR 初始化：provider={config_value.ocr_provider}；不执行 local OCR preflight。")
+        dispatcher = AnalysisDispatcher(settings=settings, config=config_value,
+                                        local_ocr_session=local_ocr_session,
+                                        ocr_provider=ocr_provider,
+                                        on_result=lambda _request, _value: output("analysis result received"),
+                                        on_error=lambda request, value: output(
+                                            f"analysis error generation={request.generation}: {value}"
+                                        ),
+                                        on_finished=lambda request: output(f"dispatcher finished generation={request.generation}"),
+                                        on_observe=observe)
+    else:
+        from tools.auto_watch_dispatcher_demo import FakeWorker
+        dispatcher = AnalysisDispatcher(settings=settings, worker_factory=FakeWorker,
+                                        on_result=lambda _request, _value: output("fake result received"),
+                                        on_finished=lambda request: output(f"dispatcher finished generation={request.generation}"),
+                                        on_observe=observe)
+    bridge = AutoWatchDispatcherBridge(dispatcher, AnalysisMode(args.mode))
     coordinator = AutoWatchCoordinator(settings=settings, analysis_callback=collector)
     selected = []
     cancelled = []
@@ -269,11 +346,15 @@ def main(
 
     overlay.captured.connect(on_captured)
     overlay.cancelled.connect(on_cancelled)
-    reporter.selection_prompt()
     try:
+        if args.real:
+            run_ocr_preflight(config_value, local_ocr_session, output)
+        reporter.selection_prompt()
         overlay.begin()
         selection_loop.exec()
         if interrupted or cancelled or not selected:
+            dispatcher.stop()
+            bridge.reset_session(uuid.uuid4().hex)
             if cancelled:
                 reporter.cancelled()
             return 0
@@ -284,8 +365,9 @@ def main(
         config = settings.detector_config
         debug_overlay = debug_overlay_factory(screen, roi)
         debug_overlay_ref[0] = debug_overlay
+        last_image = [None]
         timer = sampler.create_timer(
-            lambda: tick(sampler, coordinator, config, debug_overlay, reporter),
+            lambda: tick(sampler, coordinator, config, debug_overlay, reporter, bridge, last_image),
             config.poll_interval_ms,
         )
         timer_ref[0] = timer
@@ -300,18 +382,24 @@ def main(
             for command in command_reader.drain():
                 if command in {"pause", "p"}:
                     coordinator.pause()
+                    dispatcher.pause()
                     timer.stop()
                 elif command in {"resume", "r"}:
                     coordinator.resume()
+                    dispatcher.resume()
                     if coordinator.state is MonitorState.ARMING:
                         timer.start()
                 elif command in {"analyze now", "analyze", "a"}:
                     event = coordinator.analyze_now()
+                    if event is not None and last_image[0] is not None:
+                        bridge.submit_event(event, last_image[0])
                     reporter.command_result(command, event)
                 elif command in {"stop", "s", "quit", "exit", "q"}:
                     stopped_by_command[0] = True
                     command_timer.stop()
                     stop_watch(timer, coordinator, debug_overlay=debug_overlay)
+                    dispatcher.stop()
+                    bridge.reset_session(uuid.uuid4().hex)
                     app.quit()
                 if not stopped_by_command[0]:
                     debug_overlay.set_status(coordinator.state, generation=coordinator.generation)
@@ -325,13 +413,19 @@ def main(
         if 'command_timer' in locals():
             command_timer.stop()
         stop_watch(timer_ref[0], coordinator, app, debug_overlay_ref[0])
+        dispatcher.stop()
+        bridge.reset_session(uuid.uuid4().hex)
         safe_close(overlay)
+        if local_ocr_session is not None:
+            local_ocr_session.stop()
         signal.signal(signal.SIGINT, old_sigint)
 
 
-def tick(sampler, coordinator, config, debug_overlay=None, reporter=None):
+def tick(sampler, coordinator, config, debug_overlay=None, reporter=None, bridge=None, last_image=None):
     started = time.perf_counter()
     image = sampler.sample()
+    if last_image is not None:
+        last_image[0] = image.copy()
     capture_ms = (time.perf_counter() - started) * 1000
     started = time.perf_counter()
     frame = preprocess_qimage(image, config.max_side)
@@ -340,6 +434,8 @@ def tick(sampler, coordinator, config, debug_overlay=None, reporter=None):
     baseline = coordinator.baseline
     previous = coordinator.previous
     event = coordinator.tick(frame)
+    if event is not None and bridge is not None:
+        bridge.submit_event(event, image)
     compare_ms = (time.perf_counter() - started) * 1000
     tick_ms = capture_ms + preprocess_ms + compare_ms
     novelty_metrics = (

@@ -1,8 +1,16 @@
 import numpy as np
 import pytest
+import os
+import subprocess
+import sys
+from pathlib import Path
+from PySide6.QtGui import QImage
 
 from app.auto_watch.debug_overlay import event_label, format_ratio, state_label
 from app.auto_watch.models import DetectorConfig, MonitorState, WatchEvent
+from app.analysis import AnalysisMode
+from app.auto_watch import AnalysisDispatcher, AnalysisState, AutoWatchDispatcherBridge, AutoWatchSettings
+from tests.test_auto_watch_dispatcher import FakeScheduler, FakeWorker
 from app.auto_watch.coordinator import AutoWatchCoordinator
 from tools.auto_watch_detector_demo import (
     FakeAnalysisCollector,
@@ -10,9 +18,16 @@ from tools.auto_watch_detector_demo import (
     build_parser,
     make_interrupt_handler,
     safe_close,
+    run_ocr_preflight,
     start_watch,
     stop_watch,
+    tick,
 )
+
+
+class FakeSampler:
+    def __init__(self, image): self.image = image
+    def sample(self): return self.image.copy()
 
 
 class FakeTimer:
@@ -208,3 +223,85 @@ def test_demo_settings_cli_and_fake_collector_are_shared_and_once_per_generation
         analysis_callback=collector)
     c.start(); c.tick(np.zeros((2, 2), dtype=np.uint8)); c.analyze_now(); c.analyze_now()
     assert [generation for _, generation in collector.events] == [1, 2]
+
+
+def test_real_local_preflight_prepares_shared_session_and_reports_ready():
+    class Session:
+        def __init__(self): self.prepare_calls = 0
+        def prepare(self): self.prepare_calls += 1
+
+    output = []
+    session = Session()
+    config = type("Config", (), {"ocr_provider": "local"})()
+
+    assert run_ocr_preflight(config, session, output.append) is True
+    assert session.prepare_calls == 1
+    assert output == [
+        "real OCR preflight passed: persistent worker ready; same session reused "
+        "for subsequent generations."
+    ]
+
+
+@pytest.mark.parametrize(
+    ("message", "diagnosis"),
+    [
+        ("找不到本地 OCR 组件", "component_missing"),
+        ("Local OCR persistent worker failed to start.", "worker_start_failed"),
+        ("Local OCR persistent worker startup timed out.", "model_load_timeout"),
+    ],
+)
+def test_real_local_preflight_reports_classified_failure_and_is_retryable(message, diagnosis):
+    class Session:
+        def prepare(self): raise RuntimeError(message)
+
+    output = []
+    config = type("Config", (), {"ocr_provider": "local"})()
+
+    assert run_ocr_preflight(config, Session(), output.append) is False
+    assert output == [f"real OCR preflight failed diagnosis={diagnosis}: {message}"]
+
+
+@pytest.mark.parametrize("mode", [AnalysisMode.TEXT, AnalysisMode.VISION])
+def test_tick_bridge_submits_full_resolution_once_per_stable_generation(mode):
+    settings = AutoWatchSettings(stable_samples_required=1)
+    source = QImage(640, 360, QImage.Format.Format_RGBA8888); source.fill(0)
+    sampler = FakeSampler(source)
+    coordinator = AutoWatchCoordinator(settings=settings); coordinator.start()
+    workers = []
+    dispatcher = AnalysisDispatcher(worker_factory=lambda request: (workers.append(FakeWorker(request)) or workers[-1]))
+    bridge = AutoWatchDispatcherBridge(dispatcher, mode)
+    tick(sampler, coordinator, settings.detector_config, bridge=bridge)
+    event = tick(sampler, coordinator, settings.detector_config, bridge=bridge)
+    assert event is not None and len(workers) == 1
+    assert workers[0].request.generation == event.generation
+    assert workers[0].request.image.size() == source.size()
+    assert bridge.submit_event(event, source) is None
+
+
+def test_analyze_now_uses_same_delay_and_stop_cancels_delayed_request():
+    scheduler = FakeScheduler(); settings = AutoWatchSettings(stable_samples_required=1, analysis_delay_ms=25)
+    source = QImage(500, 300, QImage.Format.Format_RGBA8888); source.fill(0)
+    sampler = FakeSampler(source); coordinator = AutoWatchCoordinator(settings=settings); coordinator.start()
+    workers = []
+    dispatcher = AnalysisDispatcher(settings=settings, scheduler=scheduler,
+                                    worker_factory=lambda request: (workers.append(FakeWorker(request)) or workers[-1]))
+    bridge = AutoWatchDispatcherBridge(dispatcher)
+    tick(sampler, coordinator, settings.detector_config, bridge=bridge)
+    event = tick(sampler, coordinator, settings.detector_config, bridge=bridge)
+    assert event is not None and not workers
+    manual = coordinator.analyze_now()
+    request = bridge.submit_event(manual, source)
+    assert request is not None and not workers and len(scheduler.jobs) == 2
+    dispatcher.stop(); scheduler.fire(1)
+    assert not workers and dispatcher.state is AnalysisState.IDLE
+
+
+def test_dispatcher_demo_nonzero_delay_event_loop_finishes():
+    root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy(); env["QT_QPA_PLATFORM"] = "offscreen"
+    result = subprocess.run([sys.executable, str(root / "tools/auto_watch_dispatcher_demo.py"),
+                             "--mode", "vision", "--delay-ms", "5"], cwd=root,
+                            env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0
+    assert "active generation=1 mode=vision" in result.stdout
+    assert "finished generation=1 state=IDLE" in result.stdout
