@@ -150,6 +150,88 @@ def answer_window_stylesheet() -> str:
     """
 
 
+def settings_window_stylesheet() -> str:
+    """Return the local stylesheet for the native-framed Settings window."""
+
+    return f"""
+    QWidget#settingsWindow {{ background: {BACKGROUND}; color: {TEXT}; }}
+    QFrame#settingsSurface {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+            stop:0 #edf5ff, stop:1 #f1edff);
+        border: 1px solid {BORDER}; border-radius: {RADIUS_LG}px;
+    }}
+    QLabel#settingsTitle {{ color: {TEXT}; font-size: 22px; font-weight: 700; }}
+    QLabel#settingsSubtitle, QLabel#pageDescription {{ color: {SECONDARY_TEXT}; font-size: 12px; }}
+    QLabel#pageTitle {{ color: {TEXT}; font-size: 18px; font-weight: 700; }}
+    QFrame#settingsSidebar {{
+        background: rgba(255, 255, 255, 135);
+        border: 1px solid rgba(201, 216, 247, 180);
+        border-radius: {RADIUS_LG}px;
+    }}
+    QScrollArea#settingsPageScroll {{ background: transparent; border: none; }}
+    QScrollArea#settingsPageScroll QWidget {{ background: transparent; }}
+    QStackedWidget#settingsPages, QStackedWidget#settingsPages > QWidget {{ background: transparent; }}
+    QPushButton#navigationButton {{
+        color: {SECONDARY_TEXT}; background: transparent; border: 1px solid transparent;
+        border-radius: {RADIUS_MD}px; padding: 10px 12px; text-align: left; font-size: 13px;
+    }}
+    QPushButton#navigationButton:hover {{ background: rgba(255, 255, 255, 160); color: {TEXT}; }}
+    QPushButton#navigationButton:checked {{
+        color: {TEXT_ACCENT}; background: rgba(221, 235, 255, 220); border-color: #b5cff6;
+        font-weight: 700;
+    }}
+    QFrame#settingsCard, QGroupBox#localOcrCard, QGroupBox#googleVisionCard {{
+        background: rgba(255, 255, 255, 195); border: 1px solid {CARD_BORDER};
+        border-radius: {RADIUS_LG}px; padding: 8px;
+    }}
+    QLabel#settingsStatusLabel {{
+        color: {SECONDARY_TEXT}; background: rgba(255, 255, 255, 145);
+        border: 1px solid rgba(201, 216, 247, 160); border-radius: {RADIUS_MD}px;
+        padding: 7px 10px; font-size: 12px;
+    }}
+    QLineEdit, QKeySequenceEdit, QComboBox {{
+        background: {CARD}; color: {TEXT}; border: 1px solid {CARD_BORDER};
+        border-radius: {RADIUS_MD}px; padding: 7px 9px; min-height: 20px;
+    }}
+    QLineEdit:focus, QKeySequenceEdit:focus, QComboBox:focus {{ border-color: {FOCUS_BORDER}; }}
+    QRadioButton {{ color: {TEXT}; spacing: 6px; padding: 6px 10px; }}
+    QRadioButton::indicator {{ width: 14px; height: 14px; }}
+    QComboBox::drop-down {{ border: none; width: 24px; }}
+    QProgressBar {{
+        background: #e8eef9; color: {TEXT}; border: none; border-radius: 5px;
+        min-height: 9px; text-align: center;
+    }}
+    QProgressBar::chunk {{ background: {TEXT_ACCENT}; border-radius: 5px; }}
+    QPushButton#testConnectionButton, QPushButton#googleVisionTestButton,
+    QPushButton#downloadOcrButton, QPushButton#verifyOcrButton {{
+        color: {TEXT_ACCENT}; background: #edf5ff; border: 1px solid #b9d1f5;
+        border-radius: {RADIUS_MD}px; padding: 7px 12px; min-height: 24px;
+    }}
+    QPushButton#testConnectionButton:hover, QPushButton#googleVisionTestButton:hover,
+    QPushButton#downloadOcrButton:hover, QPushButton#verifyOcrButton:hover {{
+        background: #e1edff; border-color: {TEXT_ACCENT};
+    }}
+    QPushButton#removeOcrButton, QPushButton#cancelDownloadButton {{
+        color: {DANGER}; background: #fff1f4; border: 1px solid #efc5cc;
+        border-radius: {RADIUS_MD}px; padding: 7px 12px; min-height: 24px;
+    }}
+    QPushButton#removeOcrButton:hover, QPushButton#cancelDownloadButton:hover {{
+        background: #ffe7eb; border-color: {DANGER};
+    }}
+    QPushButton#saveButton {{
+        color: white; background: {TEXT_ACCENT}; border: 1px solid {TEXT_ACCENT};
+        border-radius: {RADIUS_MD}px; padding: 8px 18px; min-height: 26px; font-weight: 700;
+    }}
+    QPushButton#saveButton:hover {{ background: #255fc7; }}
+    QPushButton#cancelButton {{
+        color: {SECONDARY_TEXT}; background: transparent; border: 1px solid transparent;
+        border-radius: {RADIUS_MD}px; padding: 8px 16px; min-height: 26px;
+    }}
+    QPushButton#cancelButton:hover {{ background: rgba(255, 255, 255, 155); border-color: {CARD_BORDER}; }}
+    QPushButton:disabled {{ color: #9aa8c2; background: rgba(242, 245, 252, 135); border-color: #dce4f2; }}
+    """
+
+
 def controller_stylesheet() -> str:
     """Return the controller-only stylesheet; other windows stay untouched."""
 

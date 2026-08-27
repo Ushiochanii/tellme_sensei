@@ -80,7 +80,9 @@ def test_provider_defaults_local_and_saved_google_is_loaded(qt_app, tmp_path) ->
     window, _ = _window(tmp_path, secrets)
     assert window.online_mode_radio.isChecked()
     assert window.google_vision_api_key_edit.text() == "stored-google"
-    assert window.local_ocr_group.isHidden()
+    # Navigation keeps both service pages available; provider selection is
+    # still represented by the radio buttons and is saved independently.
+    assert not window.local_ocr_group.isHidden()
     assert not window.google_vision_group.isHidden()
     window.close()
 

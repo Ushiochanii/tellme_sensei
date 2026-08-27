@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -21,6 +22,8 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QScrollArea,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +40,7 @@ from app.ocr.types import OCRCancelled, OCRError
 from app.platform.ocr import is_local_ocr_supported
 from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
 from app.settings.secret_store import SecretStoreError
+from app.ui.theme import settings_window_stylesheet
 
 logger = logging.getLogger(__name__)
 CONNECTION_TEST_TIMEOUT = 10.0
@@ -170,12 +174,32 @@ class SettingsWindow(QWidget):
         self._loaded_api_key = ""
         self._loaded_google_vision_api_key = ""
 
-        self.setWindowTitle("设置")
-        self.setMinimumWidth(430)
+        self.setWindowTitle("TellMeSensei Settings")
+        self.setMinimumSize(760, 540)
+        self.resize(860, 680)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        self.setObjectName("settingsWindow")
+        self.setStyleSheet(settings_window_stylesheet())
 
         root = QVBoxLayout(self)
-        form = QFormLayout()
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(0)
+        surface = QFrame()
+        surface.setObjectName("settingsSurface")
+        root.addWidget(surface)
+        surface_layout = QVBoxLayout(surface)
+        surface_layout.setContentsMargins(22, 20, 22, 18)
+        surface_layout.setSpacing(14)
+
+        header = QVBoxLayout()
+        header.setSpacing(2)
+        title = QLabel("Settings")
+        title.setObjectName("settingsTitle")
+        subtitle = QLabel("Configure TellMeSensei for your workflow.")
+        subtitle.setObjectName("settingsSubtitle")
+        header.addWidget(title)
+        header.addWidget(subtitle)
+        surface_layout.addLayout(header)
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_edit.setPlaceholderText("输入 DeepSeek API Key")
@@ -213,20 +237,13 @@ class SettingsWindow(QWidget):
         )
         self.local_ocr_unsupported_label.setWordWrap(True)
         self.local_ocr_unsupported_label.setVisible(False)
-        form.addRow("DeepSeek API Key", self.api_key_edit)
-        form.addRow("Text model", self.model_edit)
-        form.addRow("Request timeout", self.timeout_edit)
-        form.addRow("Text shortcut", self.shortcut_edit)
-        form.addRow("Vision shortcut", self.vision_shortcut_edit)
-        form.addRow("OCR Mode", mode_widget)
-        root.addLayout(form)
-        root.addWidget(self.ocr_provider_override_label)
-        root.addWidget(self.local_ocr_unsupported_label)
-
-        self.local_ocr_group = QGroupBox("Local OCR Engine")
+        self.local_ocr_group = QGroupBox()
+        self.local_ocr_group.setObjectName("localOcrCard")
         ocr_layout = QVBoxLayout(self.local_ocr_group)
+        ocr_layout.setContentsMargins(16, 14, 16, 16)
+        ocr_layout.setSpacing(10)
         local_engine_form = QFormLayout()
-        local_engine_form.addRow("Local OCR Engine", self.local_engine_combo)
+        local_engine_form.addRow("Engine", self.local_engine_combo)
         ocr_layout.addLayout(local_engine_form)
         self.local_ocr_privacy_label = QLabel(
             "Screenshots are processed on this device."
@@ -238,10 +255,14 @@ class SettingsWindow(QWidget):
         self.local_ocr_progress.setRange(0, 100)
         self.local_ocr_progress.setVisible(False)
         ocr_buttons = QHBoxLayout()
-        self.download_ocr_button = QPushButton("Download Local OCR")
+        self.download_ocr_button = QPushButton("Download")
+        self.download_ocr_button.setObjectName("downloadOcrButton")
         self.cancel_download_button = QPushButton("Cancel")
+        self.cancel_download_button.setObjectName("cancelDownloadButton")
         self.verify_ocr_button = QPushButton("Verify")
+        self.verify_ocr_button.setObjectName("verifyOcrButton")
         self.remove_ocr_button = QPushButton("Remove Local OCR")
+        self.remove_ocr_button.setObjectName("removeOcrButton")
         self.cancel_download_button.setVisible(False)
         self.download_ocr_button.clicked.connect(self.download_local_ocr)
         self.cancel_download_button.clicked.connect(self.cancel_local_ocr_download)
@@ -256,12 +277,13 @@ class SettingsWindow(QWidget):
         ocr_layout.addWidget(self.local_ocr_size_label)
         ocr_layout.addWidget(self.local_ocr_progress)
         ocr_layout.addLayout(ocr_buttons)
-        root.addWidget(self.local_ocr_group)
-
-        self.google_vision_group = QGroupBox("Online OCR Service")
+        self.google_vision_group = QGroupBox()
+        self.google_vision_group.setObjectName("googleVisionCard")
         google_layout = QVBoxLayout(self.google_vision_group)
+        google_layout.setContentsMargins(16, 14, 16, 16)
+        google_layout.setSpacing(10)
         online_service_form = QFormLayout()
-        online_service_form.addRow("Online OCR Service", self.online_service_combo)
+        online_service_form.addRow("Service", self.online_service_combo)
         google_layout.addLayout(online_service_form)
         self.google_vision_privacy_label = QLabel(
             "Online OCR. Screenshots will be uploaded to Google Cloud Vision for OCR."
@@ -278,6 +300,7 @@ class SettingsWindow(QWidget):
         self.google_vision_override_label.setWordWrap(True)
         self.google_vision_override_label.setVisible(False)
         self.google_vision_test_button = QPushButton("Test Google Vision")
+        self.google_vision_test_button.setObjectName("googleVisionTestButton")
         self.google_vision_test_button.clicked.connect(self.test_google_vision)
         self.google_vision_status_label = QLabel()
         self.google_vision_status_label.setWordWrap(True)
@@ -286,28 +309,147 @@ class SettingsWindow(QWidget):
         google_layout.addWidget(self.google_vision_override_label)
         google_layout.addWidget(self.google_vision_test_button)
         google_layout.addWidget(self.google_vision_status_label)
-        root.addWidget(self.google_vision_group)
+        self.test_button = QPushButton("Test Connection")
+        self.test_button.setObjectName("testConnectionButton")
+        self.test_button.clicked.connect(self.test_connection)
+
+        def make_page(page_title: str, description: str) -> tuple[QWidget, QVBoxLayout]:
+            page = QWidget()
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(4, 2, 4, 8)
+            page_layout.setSpacing(12)
+            page_heading = QLabel(page_title)
+            page_heading.setObjectName("pageTitle")
+            page_description = QLabel(description)
+            page_description.setObjectName("pageDescription")
+            page_description.setWordWrap(True)
+            page_layout.addWidget(page_heading)
+            page_layout.addWidget(page_description)
+            return page, page_layout
+
+        self.page_stack = QStackedWidget()
+        self.page_stack.setObjectName("settingsPages")
+        deepseek_page, deepseek_layout = make_page(
+            "DeepSeek", "Configure the AI service used for analysis."
+        )
+        deepseek_card = QFrame()
+        deepseek_card.setObjectName("settingsCard")
+        deepseek_card_layout = QVBoxLayout(deepseek_card)
+        deepseek_card_layout.setContentsMargins(16, 14, 16, 16)
+        deepseek_card_layout.setSpacing(10)
+        deepseek_form = QFormLayout()
+        deepseek_form.addRow("API Key", self.api_key_edit)
+        deepseek_form.addRow("Text Model", self.model_edit)
+        deepseek_form.addRow("Request Timeout", self.timeout_edit)
+        deepseek_card_layout.addLayout(deepseek_form)
+        deepseek_card_layout.addWidget(self.test_button, 0, Qt.AlignmentFlag.AlignLeft)
+        deepseek_layout.addWidget(deepseek_card)
+        deepseek_layout.addStretch(1)
+
+        shortcuts_page, shortcuts_layout = make_page(
+            "Shortcuts", "Choose the global shortcuts for Text/OCR and Vision capture."
+        )
+        shortcuts_card = QFrame()
+        shortcuts_card.setObjectName("settingsCard")
+        shortcuts_form = QFormLayout(shortcuts_card)
+        shortcuts_form.setContentsMargins(16, 14, 16, 16)
+        shortcuts_form.setVerticalSpacing(14)
+        shortcuts_form.addRow("Text / OCR", self.shortcut_edit)
+        shortcuts_form.addRow("Vision", self.vision_shortcut_edit)
+        shortcuts_layout.addWidget(shortcuts_card)
+        shortcuts_layout.addStretch(1)
+
+        ocr_page, ocr_page_layout = make_page(
+            "OCR", "Select the OCR provider used by Text mode."
+        )
+        ocr_card = QFrame()
+        ocr_card.setObjectName("settingsCard")
+        ocr_card_layout = QVBoxLayout(ocr_card)
+        ocr_card_layout.setContentsMargins(16, 14, 16, 16)
+        ocr_card_layout.setSpacing(10)
+        ocr_card_layout.addWidget(QLabel("OCR Provider"))
+        ocr_card_layout.addWidget(mode_widget)
+        ocr_card_layout.addWidget(self.ocr_provider_override_label)
+        ocr_page_layout.addWidget(ocr_card)
+        ocr_page_layout.addStretch(1)
+
+        local_page, local_page_layout = make_page(
+            "Local OCR", "Manage the on-device OCR component and its native engine."
+        )
+        local_page_layout.addWidget(self.local_ocr_group)
+        local_page_layout.addWidget(self.local_ocr_unsupported_label)
+        local_page_layout.addStretch(1)
+
+        google_page, google_page_layout = make_page(
+            "Google Vision", "Configure online OCR through Google Cloud Vision."
+        )
+        google_page_layout.addWidget(self.google_vision_group)
+        google_page_layout.addStretch(1)
+
+        for page in (deepseek_page, shortcuts_page, ocr_page, local_page, google_page):
+            self.page_stack.addWidget(page)
+
+        page_scroll = QScrollArea()
+        page_scroll.setObjectName("settingsPageScroll")
+        page_scroll.setWidgetResizable(True)
+        page_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        page_scroll.setWidget(self.page_stack)
+        self.page_scroll = page_scroll
+
+        content = QHBoxLayout()
+        content.setSpacing(14)
+        sidebar = QFrame()
+        sidebar.setObjectName("settingsSidebar")
+        sidebar.setFixedWidth(170)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(8, 10, 8, 10)
+        sidebar_layout.setSpacing(4)
+        self._navigation_buttons: list[QPushButton] = []
+        for index, label in enumerate(("DeepSeek", "Shortcuts", "OCR", "Local OCR", "Google Vision")):
+            nav_button = QPushButton(label)
+            nav_button.setObjectName("navigationButton")
+            nav_button.setCheckable(True)
+            nav_button.clicked.connect(
+                lambda _checked=False, page_index=index: self._select_page(page_index)
+            )
+            sidebar_layout.addWidget(nav_button)
+            self._navigation_buttons.append(nav_button)
+        sidebar_layout.addStretch(1)
+        content.addWidget(sidebar)
+        content.addWidget(page_scroll, 1)
+        surface_layout.addLayout(content, 1)
 
         self.status_label = QLabel()
+        self.status_label.setObjectName("settingsStatusLabel")
         self.status_label.setWordWrap(True)
-        root.addWidget(self.status_label)
+        self.status_label.setVisible(False)
+        surface_layout.addWidget(self.status_label)
 
-        buttons = QHBoxLayout()
-        self.test_button = QPushButton("测试连接")
-        self.save_button = QPushButton("保存")
-        self.cancel_button = QPushButton("取消")
-        self.test_button.clicked.connect(self.test_connection)
+        self.save_button = QPushButton("Save")
+        self.save_button.setObjectName("saveButton")
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setObjectName("cancelButton")
         self.save_button.clicked.connect(self.save)
         self.cancel_button.clicked.connect(self.close)
-        buttons.addWidget(self.test_button)
-        buttons.addStretch(1)
-        buttons.addWidget(self.save_button)
-        buttons.addWidget(self.cancel_button)
-        root.addLayout(buttons)
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
+        footer.addStretch(1)
+        footer.addWidget(self.cancel_button)
+        footer.addWidget(self.save_button)
+        surface_layout.addLayout(footer)
 
         self._load_current_values()
         self._refresh_local_ocr_state()
         self._apply_local_ocr_capability()
+        self._select_page(0)
+
+    def _select_page(self, index: int) -> None:
+        """Switch pages without changing provider or persisted configuration."""
+
+        self.page_stack.setCurrentIndex(index)
+        for page_index, button in enumerate(self._navigation_buttons):
+            button.setChecked(page_index == index)
 
     def _apply_local_ocr_capability(self) -> None:
         """Apply separate platform-capability and distribution-availability states."""
@@ -396,9 +538,8 @@ class SettingsWindow(QWidget):
 
     @Slot()
     def _on_provider_changed(self) -> None:
-        is_google = self.online_mode_radio.isChecked()
-        self.local_ocr_group.setVisible(not is_google)
-        self.google_vision_group.setVisible(is_google)
+        # Navigation keeps both service pages available; the radios still
+        # determine which provider is used by Text mode.
         self._refresh_operation_controls()
 
     def _current_provider_from_ui(self) -> str:
@@ -925,6 +1066,7 @@ class SettingsWindow(QWidget):
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)
+        self.status_label.setVisible(bool(text.strip()))
 
     def is_connection_running(self) -> bool:
         return self._connection_thread is not None and self._connection_thread.isRunning()

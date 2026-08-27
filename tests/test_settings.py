@@ -620,6 +620,24 @@ def test_settings_repository_round_trip_and_invalid_json(tmp_path) -> None:
     assert repository.load() == {}
 
 
+def test_settings_navigation_switches_pages_without_changing_provider(qt_app, tmp_path) -> None:
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
+    assert window.page_stack.currentIndex() == 0
+    assert window._navigation_buttons[0].isChecked()
+    assert window.local_mode_radio.isChecked()
+
+    window._navigation_buttons[3].click()
+    assert window.page_stack.currentIndex() == 3
+    assert window._navigation_buttons[3].isChecked()
+    assert window.local_mode_radio.isChecked()
+
+    window._navigation_buttons[4].click()
+    assert window.page_stack.currentIndex() == 4
+    assert window.online_mode_radio.isChecked() is False
+    window.close()
+    qt_app.processEvents()
+
+
 def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
     secret_store = FakeSecretStore("stored-key")
     manager = make_manager(tmp_path, secret_store)
