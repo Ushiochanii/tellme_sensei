@@ -44,6 +44,17 @@ def test_debug_overlay_success_feedback_is_temporary_and_closes_cleanly(qt_app):
     assert not overlay._feedback_timer.isActive()
 
 
+def test_explicit_zero_generation_is_visible_but_legacy_call_is_unchanged(qt_app):
+    overlay = DebugOverlay(GeometryOnlyScreen(), QRect(30, 40, 200, 120))
+    overlay.set_status(MonitorState.ARMING)
+    assert overlay.status_text == "正在建立基准"
+    overlay.set_status(MonitorState.ARMING, generation=0)
+    assert "G0" in overlay.status_text
+    overlay.set_status(MonitorState.WATCHING, generation=4)
+    assert "G4" in overlay.status_text
+    overlay.close()
+
+
 def test_overlay_bounds_maps_local_roi_to_nonzero_screen_origin():
     screen = QRect(100, 50, 800, 600)
     roi = QRect(20, 30, 200, 120)

@@ -75,11 +75,13 @@ class OverlayPresentation:
 
     state: MonitorState
     event: WatchEvent | None = None
+    generation: int | None = None
 
     @property
     def text(self) -> str:
         message = event_label(self.event)
-        return f"{state_label(self.state)} · {message}" if message else state_label(self.state)
+        text = f"{state_label(self.state)} · {message}" if message else state_label(self.state)
+        return f"{text} · G{self.generation}" if self.generation is not None else text
 
 
 class DebugOverlay(QWidget):
@@ -137,14 +139,14 @@ class DebugOverlay(QWidget):
         self.show()
         self.raise_()
 
-    def set_status(self, state: MonitorState, event: WatchEvent | None = None) -> None:
+    def set_status(self, state: MonitorState, event: WatchEvent | None = None, generation: int | None = None) -> None:
         """Update the border and optionally show a short success acknowledgement."""
 
         # Keep the success acknowledgement visible across the next few polling
         # ticks; the coordinator only emits an event on the accepting tick.
         if event is None and self._feedback_timer.isActive() and self._presentation.event is not None:
             event = self._presentation.event
-        self._presentation = OverlayPresentation(state, event)
+        self._presentation = OverlayPresentation(state, event, generation)
         self._label_size = self._measure_label()
         self._set_content_geometry(self.screen.geometry())
         if event is not None:
@@ -202,7 +204,7 @@ class DebugOverlay(QWidget):
         }[self._presentation.state]
 
     def _clear_event(self) -> None:
-        self._presentation = OverlayPresentation(self._presentation.state)
+        self._presentation = OverlayPresentation(self._presentation.state, generation=self._presentation.generation)
         self._label_size = self._measure_label()
         self._set_content_geometry(self.screen.geometry())
         self.update()

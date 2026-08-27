@@ -7,6 +7,8 @@ import re
 import signal
 import sys
 import time
+from queue import Empty, Queue
+from threading import Thread
 from pathlib import Path
 
 from PySide6.QtCore import QEventLoop
@@ -17,6 +19,7 @@ if __package__ in (None, ""):
 
 from app.auto_watch import (
     AutoWatchCoordinator,
+    AutoWatchSettings,
     DebugOverlay,
     DetectorConfig,
     ScreenSampler,
@@ -56,7 +59,42 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print per-frame ratios and timing details (default output is low-noise)",
     )
+    parser.add_argument("--poll-interval-ms", type=int, default=250)
+    parser.add_argument("--stable-samples", type=int, default=3)
     return parser
+
+
+class FakeAnalysisCollector:
+    """Demo-only analysis sink: records events, never sends frames to an AI."""
+    def __init__(self, output: Callable[[str], None] = print) -> None:
+        self.events: list[tuple[WatchEvent, int]] = []
+        self._generations: set[int] = set()
+        self.output = output
+
+    def __call__(self, event) -> None:
+        if event.generation in self._generations:
+            return
+        self._generations.add(event.generation)
+        self.events.append((event.kind, event.generation))
+        self.output(f"fake analysis: {event.kind.name} generation={event.generation}")
+
+
+class CommandReader:
+    """Background stdin reader; command execution remains on the Qt thread."""
+    def __init__(self, input_stream=sys.stdin) -> None:
+        self.commands: Queue[str] = Queue()
+        self._thread = Thread(target=self._read, args=(input_stream,), daemon=True)
+        self._thread.start()
+
+    def _read(self, stream) -> None:
+        for line in stream:
+            self.commands.put(line.strip().lower())
+
+    def drain(self) -> list[str]:
+        result = []
+        while True:
+            try: result.append(self.commands.get_nowait())
+            except Empty: return result
 
 
 class WatchReporter:
@@ -89,7 +127,7 @@ class WatchReporter:
         self._write("Auto-watch 已取消：未开始采样。")
 
     def started(self, state: MonitorState) -> None:
-        self._write(f"开始监控；状态：{state_label(state)}。")
+        self._write(f"开始监控；状态：{state_label(state)}；generation=0。命令：Pause/Resume/Analyze Now/Stop/Quit")
         self._last_state = state
         self._last_output_at = self._clock()
 
@@ -97,6 +135,7 @@ class WatchReporter:
         self,
         *,
         state: MonitorState,
+        generation: int = 0,
         event: WatchEvent | None,
         novelty_ratio: float | None,
         frame_ratio: float | None,
@@ -115,7 +154,7 @@ class WatchReporter:
 
         line = (
             f"状态：{state_label(state)}；相对基准变化：{format_ratio(novelty_ratio)}；"
-            f"帧间变化：{format_ratio(frame_ratio)}"
+            f"帧间变化：{format_ratio(frame_ratio)}；generation={generation}"
         )
         if event is not None:
             line += f"；事件：{event_label(event)}"
@@ -133,13 +172,19 @@ class WatchReporter:
     def _write(self, message: str) -> None:
         self._output(message)
 
+    def command_result(self, command: str, event=None) -> None:
+        if event is None:
+            self._write(f"命令 {command}：no-op（当前无可用采样或状态不允许）。")
+        else:
+            self._write(f"命令 {command}：{event_label(event.kind)}；generation={event.generation}")
+
 
 def start_watch(timer, coordinator, debug_overlay=None) -> None:
     """Start the pure state machine before starting periodic sampling."""
 
     coordinator.start()
     if debug_overlay is not None:
-        debug_overlay.set_status(coordinator.state)
+        debug_overlay.set_status(coordinator.state, generation=coordinator.generation)
     timer.start()
 
 
@@ -189,7 +234,10 @@ def main(
     # Keep demo-only argparse flags away from Qt's argument parser.
     app = app_factory([sys.argv[0]])
     overlay = overlay_factory()
-    coordinator = AutoWatchCoordinator(DetectorConfig())
+    settings = AutoWatchSettings(poll_interval_ms=args.poll_interval_ms,
+                                 stable_samples_required=args.stable_samples)
+    collector = FakeAnalysisCollector(output)
+    coordinator = AutoWatchCoordinator(settings=settings, analysis_callback=collector)
     selected = []
     cancelled = []
     interrupted = []
@@ -232,8 +280,8 @@ def main(
 
         screen, roi = selected[0]
         reporter.selected(roi)
-        sampler = ScreenSampler(screen, roi)
-        config = coordinator.config
+        sampler = ScreenSampler(screen, roi, settings=settings)
+        config = settings.detector_config
         debug_overlay = debug_overlay_factory(screen, roi)
         debug_overlay_ref[0] = debug_overlay
         timer = sampler.create_timer(
@@ -244,10 +292,38 @@ def main(
         start_watch(timer, coordinator, debug_overlay)
         debug_overlay.begin()
         reporter.started(coordinator.state)
+        command_reader = CommandReader()
+        command_timer = __import__("PySide6.QtCore", fromlist=["QTimer"]).QTimer()
+        stopped_by_command = [False]
+
+        def handle_commands() -> None:
+            for command in command_reader.drain():
+                if command in {"pause", "p"}:
+                    coordinator.pause()
+                    timer.stop()
+                elif command in {"resume", "r"}:
+                    coordinator.resume()
+                    if coordinator.state is MonitorState.ARMING:
+                        timer.start()
+                elif command in {"analyze now", "analyze", "a"}:
+                    event = coordinator.analyze_now()
+                    reporter.command_result(command, event)
+                elif command in {"stop", "s", "quit", "exit", "q"}:
+                    stopped_by_command[0] = True
+                    command_timer.stop()
+                    stop_watch(timer, coordinator, debug_overlay=debug_overlay)
+                    app.quit()
+                if not stopped_by_command[0]:
+                    debug_overlay.set_status(coordinator.state, generation=coordinator.generation)
+
+        command_timer.timeout.connect(handle_commands)
+        command_timer.start(100)
         return app.exec()
     except KeyboardInterrupt:
         return 0
     finally:
+        if 'command_timer' in locals():
+            command_timer.stop()
         stop_watch(timer_ref[0], coordinator, app, debug_overlay_ref[0])
         safe_close(overlay)
         signal.signal(signal.SIGINT, old_sigint)
@@ -277,10 +353,11 @@ def tick(sampler, coordinator, config, debug_overlay=None, reporter=None):
         else None
     )
     if debug_overlay is not None:
-        debug_overlay.set_status(coordinator.state, event.kind if event is not None else None)
+        debug_overlay.set_status(coordinator.state, event.kind if event is not None else None, coordinator.generation)
     if reporter is not None:
         reporter.tick(
             state=coordinator.state,
+            generation=coordinator.generation,
             event=event.kind if event is not None else None,
             novelty_ratio=novelty_metrics.change_ratio if novelty_metrics else None,
             frame_ratio=stability_metrics.change_ratio if stability_metrics else None,

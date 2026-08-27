@@ -1,6 +1,7 @@
 import numpy as np
 from app.auto_watch.coordinator import AutoWatchCoordinator
-from app.auto_watch.models import DetectorConfig, MonitorState, WatchEvent
+import pytest
+from app.auto_watch.models import AutoWatchSettings, DetectorConfig, DetectorFrame, MonitorState, WatchEvent
 
 
 def frames(value): return np.full((10, 10), value, dtype=np.uint8)
@@ -78,3 +79,52 @@ def test_resume_changed_baseline_emits_new_after_final_stability():
     assert c.tick(frames(200)) is None
     event = c.tick(frames(200))
     assert event is not None and event.kind is WatchEvent.NEW_STABLE_FRAME
+
+
+def test_lifecycle_calls_are_idempotent_and_stop_clears_everything():
+    c = AutoWatchCoordinator(); c.start(); c.start()
+    assert c.state is MonitorState.ARMING
+    c.pause(); c.pause(); assert c.state is MonitorState.PAUSED
+    c.resume(); c.resume(); assert c.state is MonitorState.ARMING
+    c.stop(); c.stop()
+    assert (c.state, c.baseline, c.previous, c.generation) == (MonitorState.STOPPED, None, None, 0)
+
+
+def test_analyze_now_boundaries_consistency_and_callback_errors():
+    seen = []
+    def bad(event):
+        seen.append(event); raise RuntimeError("demo callback failure")
+    c = AutoWatchCoordinator(analysis_callback=bad)
+    assert c.analyze_now() is None
+    c.start(); frame = np.full((3, 3), 7, dtype=np.uint8); c.tick(frame)
+    first = c.analyze_now(); assert first.kind is WatchEvent.INITIAL_STABLE_FRAME
+    assert first.generation == 1 and c.baseline is c.previous
+    second = c.analyze_now(); assert second.kind is WatchEvent.NEW_STABLE_FRAME
+    assert [e.generation for e in seen] == [1, 2] and len(c.callback_errors) == 2
+    assert c.tick(frame) is None
+    c.pause(); assert c.analyze_now() is None
+    c.stop(); assert c.analyze_now() is None
+
+
+def test_falsey_explicit_callback_is_still_used():
+    seen = []
+    class FalseyCallback:
+        def __bool__(self): return False
+        def __call__(self, event): seen.append(event.generation)
+    fallback = lambda _event: seen.append("fallback")
+    c = AutoWatchCoordinator(analysis_callback=fallback)
+    c.start(); c.tick(frames(1))
+    c.analyze_now(FalseyCallback())
+    assert seen == [1]
+
+
+def test_settings_defaults_ranges_freezing_and_safe_frame_copy():
+    settings = AutoWatchSettings(); assert settings.poll_interval_ms == 250
+    assert settings.estimated_stability_ms == 750
+    with pytest.raises((ValueError, TypeError)): AutoWatchSettings(poll_interval_ms=True)
+    with pytest.raises(ValueError): AutoWatchSettings(analysis_delay_ms=-1)
+    with pytest.raises(ValueError): DetectorConfig(max_side=0)
+    with pytest.raises(ValueError): DetectorConfig(stable_samples_required=1.5)
+    with pytest.raises((AttributeError, TypeError)): settings.poll_interval_ms = 1
+    source = np.zeros((2, 2), dtype=np.uint8); frame = DetectorFrame(source); source[0, 0] = 99
+    assert frame.pixels[0, 0] == 0 and not frame.pixels.flags.writeable

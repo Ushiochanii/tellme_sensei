@@ -5,6 +5,7 @@ from app.auto_watch.debug_overlay import event_label, format_ratio, state_label
 from app.auto_watch.models import DetectorConfig, MonitorState, WatchEvent
 from app.auto_watch.coordinator import AutoWatchCoordinator
 from tools.auto_watch_detector_demo import (
+    FakeAnalysisCollector,
     WatchReporter,
     build_parser,
     make_interrupt_handler,
@@ -53,6 +54,15 @@ def test_start_watch_starts_coordinator_before_timer():
     start_watch(timer, coordinator)
     assert coordinator.state is MonitorState.ARMING
     assert timer.started == 1
+
+
+def test_start_watch_explicitly_presents_initial_generation_zero():
+    class Overlay:
+        def __init__(self): self.calls = []
+        def set_status(self, *args, **kwargs): self.calls.append((args, kwargs))
+    overlay = Overlay()
+    start_watch(FakeTimer(), AutoWatchCoordinator(), overlay)
+    assert overlay.calls == [((MonitorState.ARMING,), {"generation": 0})]
 
 
 def test_stop_watch_cleans_timer_and_coordinator():
@@ -187,3 +197,14 @@ def test_verbose_parser_and_reporter_include_each_frame_timing():
     )
     assert len(output) == 2
     assert "timing capture=" in output[-1]
+
+
+def test_demo_settings_cli_and_fake_collector_are_shared_and_once_per_generation():
+    args = build_parser().parse_args(["--poll-interval-ms", "80", "--stable-samples", "5"])
+    assert (args.poll_interval_ms, args.stable_samples) == (80, 5)
+    output = []; collector = FakeAnalysisCollector(output.append)
+    c = AutoWatchCoordinator(settings=__import__('app.auto_watch', fromlist=['AutoWatchSettings']).AutoWatchSettings(
+        poll_interval_ms=args.poll_interval_ms, stable_samples_required=args.stable_samples),
+        analysis_callback=collector)
+    c.start(); c.tick(np.zeros((2, 2), dtype=np.uint8)); c.analyze_now(); c.analyze_now()
+    assert [generation for _, generation in collector.events] == [1, 2]

@@ -1,6 +1,7 @@
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage
 from app.auto_watch.sampler import ScreenSampler
+from app.auto_watch.models import AutoWatchSettings
 
 
 class FakeScreen:
@@ -35,3 +36,15 @@ def test_empty_roi_rejected():
     import pytest
     with pytest.raises(ValueError): ScreenSampler(FakeScreen(), QRect())
     with pytest.raises(ValueError): ScreenSampler(ZeroGeometryScreen(), QRect(1, 1, 2, 2))
+
+
+def test_sampler_uses_shared_settings_for_timer_interval():
+    class Timer:
+        def setInterval(self, value): self.interval = value
+        class timeout:
+            @staticmethod
+            def connect(_callback): pass
+    settings = AutoWatchSettings(poll_interval_ms=73)
+    sampler = ScreenSampler(FakeScreen(), QRect(1, 1, 2, 2), timer_factory=Timer, settings=settings)
+    timer = sampler.create_timer(lambda: None)
+    assert timer.interval == 73

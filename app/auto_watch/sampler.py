@@ -6,14 +6,22 @@ from typing import Callable
 from PySide6.QtCore import QRect, QTimer
 from PySide6.QtGui import QImage, QPixmap, QScreen
 
+from .models import AutoWatchSettings
+
 
 @dataclass(frozen=True)
 class ScreenSampler:
     screen: QScreen
     logical_roi: QRect
     timer_factory: Callable[[], QTimer] = QTimer
+    settings: AutoWatchSettings = AutoWatchSettings()
 
     def __post_init__(self) -> None:
+        # Keep the Phase 1 third positional ``timer_factory`` slot usable while
+        # allowing the natural ``ScreenSampler(screen, roi, settings)`` form.
+        if isinstance(self.timer_factory, AutoWatchSettings):
+            object.__setattr__(self, "settings", self.timer_factory)
+            object.__setattr__(self, "timer_factory", QTimer)
         if self.logical_roi.isEmpty():
             raise ValueError("logical ROI must be non-empty")
         geometry = self.screen.geometry()
@@ -55,8 +63,8 @@ class ScreenSampler:
             raise RuntimeError("screen capture returned an empty image")
         return image
 
-    def create_timer(self, callback: Callable[[], None], interval_ms: int = 250) -> QTimer:
+    def create_timer(self, callback: Callable[[], None], interval_ms: int | None = None) -> QTimer:
         timer = self.timer_factory()
-        timer.setInterval(interval_ms)
+        timer.setInterval(self.settings.poll_interval_ms if interval_ms is None else interval_ms)
         timer.timeout.connect(callback)
         return timer
