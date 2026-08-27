@@ -11,13 +11,14 @@ import pytest
 from app.config import AppConfig
 from app.ocr.factory import create_local_ocr_provider
 from app.ocr import local_runtime
+from app.ocr.local_session import LocalOCRSession
 from app.ocr.providers.local_worker import LocalOCRProvider
 from app.ocr.profiling import read_profile
 from app.ocr.types import OCRCancelled, OCRError, OCRLine, OCRResult
 from app.ocr.worker_protocol import error_payload, parse_result, result_payload
 from app.local_ocr import worker_main
 from app.local_ocr.version import current_local_ocr_version
-from app.local_ocr.platform import current_spec
+from app.local_ocr.platform import current_spec, spec_for_manifest
 
 
 def test_worker_success_serialization(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -469,6 +470,50 @@ def test_local_component_versioned_user_path_is_first(
     assert candidates[0] == (
         runtime / "components" / "local-ocr" / current_local_ocr_version() / current_spec().executable_name
     )
+
+
+def test_local_macos_arm64_development_component_is_discovered_before_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    executable = repo_root / "dist" / "local-ocr-macos-arm64" / "LocalOCR" / "TellMeSenseiOCR"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"worker")
+    monkeypatch.setattr(local_runtime, "worker_script_path", lambda: repo_root / "local_ocr_worker.py")
+    monkeypatch.setattr(local_runtime, "user_runtime_directory", lambda: tmp_path / "runtime")
+    monkeypatch.setattr(
+        local_runtime,
+        "current_spec",
+        lambda: spec_for_manifest("macos", "arm64"),
+    )
+
+    candidates = local_runtime.worker_executable_candidates()
+
+    assert candidates[1] == executable
+
+
+def test_component_model_root_finds_development_sibling_models(tmp_path: Path) -> None:
+    executable = tmp_path / "dist" / "local-ocr-macos-arm64" / "LocalOCR" / "TellMeSenseiOCR"
+    models = executable.parent / "models"
+    models.mkdir(parents=True)
+    executable.write_bytes(b"worker")
+
+    assert local_runtime.component_model_root(executable) == models
+
+
+def test_session_and_provider_pass_development_sibling_model_root(tmp_path: Path) -> None:
+    executable = tmp_path / "dist" / "local-ocr-macos-arm64" / "LocalOCR" / "TellMeSenseiOCR"
+    models = executable.parent / "models"
+    models.mkdir(parents=True)
+    executable.write_bytes(b"worker")
+    expected = str(models.resolve())
+
+    session_command = LocalOCRSession(executable=executable)._serve_command()
+    provider = LocalOCRProvider(executable=executable)
+    provider_command = provider._command(tmp_path / "input.png", tmp_path / "result.json")
+
+    assert session_command[session_command.index("--model-root") + 1] == expected
+    assert provider_command[provider_command.index("--model-root") + 1] == expected
 
 
 def test_local_provider_kills_worker_when_cancelled(tmp_path: Path) -> None:
