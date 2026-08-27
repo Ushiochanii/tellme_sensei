@@ -624,18 +624,40 @@ def test_settings_navigation_switches_pages_without_changing_provider(qt_app, tm
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
     assert window.page_stack.currentIndex() == 0
     assert window._navigation_buttons[0].isChecked()
+    assert window._navigation_buttons[2].property("navLevel") == "primary"
+    assert window._navigation_buttons[3].property("navLevel") == "child"
+    assert window._navigation_buttons[4].property("navLevel") == "child"
     assert window.local_mode_radio.isChecked()
+
+    window._navigation_buttons[2].click()
+    assert window.page_stack.currentIndex() == 2
+    assert window._current_provider_from_ui() == "local"
+    window.online_mode_radio.click()
+    assert window._current_provider_from_ui() == "google_vision"
 
     window._navigation_buttons[3].click()
     assert window.page_stack.currentIndex() == 3
     assert window._navigation_buttons[3].isChecked()
-    assert window.local_mode_radio.isChecked()
+    assert window.online_mode_radio.isChecked()
 
     window._navigation_buttons[4].click()
     assert window.page_stack.currentIndex() == 4
-    assert window.online_mode_radio.isChecked() is False
+    assert window.online_mode_radio.isChecked()
     window.close()
     qt_app.processEvents()
+
+
+def test_environment_warnings_stay_on_their_own_pages(qt_app, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "environment-key")
+    monkeypatch.setenv("GOOGLE_VISION_API_KEY", "environment-google")
+    monkeypatch.setenv("OCR_PROVIDER", "google_vision")
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("stored-key", "stored-google")))
+
+    assert not window.api_key_override_label.isHidden()
+    assert not window.google_vision_override_label.isHidden()
+    assert not window.ocr_provider_override_label.isHidden()
+    assert window.status_label.text() == ""
+    window.close()
 
 
 def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
@@ -667,12 +689,13 @@ def test_settings_warns_when_os_api_key_overrides_saved_key(qt_app, tmp_path, mo
     secret_store = FakeSecretStore("stored-key")
     window = SettingsWindow(make_manager(tmp_path, secret_store))
 
-    assert "DEEPSEEK_API_KEY" in window.status_label.text()
+    assert "DEEPSEEK_API_KEY" in window.api_key_override_label.text()
+    assert not window.api_key_override_label.isHidden()
     window.api_key_edit.setText("new-saved-key")
     window.save()
 
     assert secret_store.set_values == ["new-saved-key"]
-    assert "不会改变当前实际使用" in window.status_label.text()
+    assert "不会改变当前实际使用" in window.api_key_override_label.text()
     window.deleteLater()
     qt_app.processEvents()
 

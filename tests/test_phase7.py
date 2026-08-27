@@ -75,7 +75,14 @@ def test_tray_initialization_and_capture_action_routing(qt_app) -> None:
     fake_tray = FakeTrayIcon()
     tray = SystemTrayController(tray_icon=fake_tray)
     labels = [action.text() for action in tray.menu.actions() if not action.isSeparator()]
-    assert labels == ["学习助手", "截图识别（文字题）", "截图分析（图形题）", "设置", "退出"]
+    assert labels == [
+        "TellMeSensei",
+        "Text / OCR Capture",
+        "Vision Capture",
+        "Show Controller",
+        "Settings",
+        "Quit",
+    ]
     received: list[bool] = []
     tray.capture_requested.connect(lambda: received.append(True))
     tray.trigger_capture()
@@ -95,6 +102,16 @@ def test_tray_exposes_distinct_text_and_vision_actions(qt_app) -> None:
 
     assert text == [True]
     assert vision == [True]
+
+
+def test_tray_show_controller_action_emits_once(qt_app) -> None:
+    tray = SystemTrayController(tray_icon=FakeTrayIcon())
+    received: list[bool] = []
+    tray.show_controller_requested.connect(lambda: received.append(True))
+
+    tray.trigger_show_controller()
+
+    assert received == [True]
 
 
 def test_global_hotkey_register_event_route_and_unregister(qt_app) -> None:

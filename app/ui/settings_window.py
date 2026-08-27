@@ -202,7 +202,7 @@ class SettingsWindow(QWidget):
         surface_layout.addLayout(header)
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.api_key_edit.setPlaceholderText("输入 DeepSeek API Key")
+        self.api_key_edit.setPlaceholderText("Enter DeepSeek API Key")
         self.model_edit = QLineEdit()
         self.timeout_edit = QLineEdit()
         self.shortcut_edit = QKeySequenceEdit()
@@ -230,6 +230,7 @@ class SettingsWindow(QWidget):
         self.ocr_provider_override_label = QLabel(
             "OCR Provider is controlled by the OCR_PROVIDER environment variable."
         )
+        self.ocr_provider_override_label.setObjectName("settingsWarningLabel")
         self.ocr_provider_override_label.setWordWrap(True)
         self.ocr_provider_override_label.setVisible(False)
         self.local_ocr_unsupported_label = QLabel(
@@ -237,6 +238,10 @@ class SettingsWindow(QWidget):
         )
         self.local_ocr_unsupported_label.setWordWrap(True)
         self.local_ocr_unsupported_label.setVisible(False)
+        self.api_key_override_label = QLabel(API_KEY_ENV_OVERRIDE_MESSAGE)
+        self.api_key_override_label.setObjectName("settingsWarningLabel")
+        self.api_key_override_label.setWordWrap(True)
+        self.api_key_override_label.setVisible(False)
         self.local_ocr_group = QGroupBox()
         self.local_ocr_group.setObjectName("localOcrCard")
         ocr_layout = QVBoxLayout(self.local_ocr_group)
@@ -297,6 +302,7 @@ class SettingsWindow(QWidget):
         self.google_vision_override_label = QLabel(
             "Google Vision API Key is controlled by GOOGLE_VISION_API_KEY."
         )
+        self.google_vision_override_label.setObjectName("settingsWarningLabel")
         self.google_vision_override_label.setWordWrap(True)
         self.google_vision_override_label.setVisible(False)
         self.google_vision_test_button = QPushButton("Test Google Vision")
@@ -342,6 +348,7 @@ class SettingsWindow(QWidget):
         deepseek_form.addRow("Text Model", self.model_edit)
         deepseek_form.addRow("Request Timeout", self.timeout_edit)
         deepseek_card_layout.addLayout(deepseek_form)
+        deepseek_card_layout.addWidget(self.api_key_override_label)
         deepseek_card_layout.addWidget(self.test_button, 0, Qt.AlignmentFlag.AlignLeft)
         deepseek_layout.addWidget(deepseek_card)
         deepseek_layout.addStretch(1)
@@ -370,6 +377,36 @@ class SettingsWindow(QWidget):
         ocr_card_layout.addWidget(QLabel("OCR Provider"))
         ocr_card_layout.addWidget(mode_widget)
         ocr_card_layout.addWidget(self.ocr_provider_override_label)
+
+        def provider_summary(title: str, description: str, page_index: int) -> QFrame:
+            card = QFrame()
+            card.setObjectName("providerSummaryCard")
+            row = QHBoxLayout(card)
+            row.setContentsMargins(12, 8, 10, 8)
+            text = QVBoxLayout()
+            text.setSpacing(1)
+            name = QLabel(title)
+            name.setObjectName("providerSummaryTitle")
+            detail = QLabel(description)
+            detail.setObjectName("providerSummaryDetail")
+            detail.setWordWrap(True)
+            text.addWidget(name)
+            text.addWidget(detail)
+            row.addLayout(text, 1)
+            manage = QPushButton("Manage")
+            manage.setObjectName("manageButton")
+            manage.clicked.connect(lambda: self._select_page(page_index))
+            row.addWidget(manage)
+            return card
+
+        self.ocr_local_summary = provider_summary(
+            "Local OCR", "On-device text recognition component.", 3
+        )
+        self.ocr_google_summary = provider_summary(
+            "Google Cloud Vision", "Online OCR service configuration.", 4
+        )
+        ocr_card_layout.addWidget(self.ocr_local_summary)
+        ocr_card_layout.addWidget(self.ocr_google_summary)
         ocr_page_layout.addWidget(ocr_card)
         ocr_page_layout.addStretch(1)
 
@@ -409,6 +446,7 @@ class SettingsWindow(QWidget):
         for index, label in enumerate(("DeepSeek", "Shortcuts", "OCR", "Local OCR", "Google Vision")):
             nav_button = QPushButton(label)
             nav_button.setObjectName("navigationButton")
+            nav_button.setProperty("navLevel", "child" if index >= 3 else "primary")
             nav_button.setCheckable(True)
             nav_button.clicked.connect(
                 lambda _checked=False, page_index=index: self._select_page(page_index)
@@ -506,6 +544,8 @@ class SettingsWindow(QWidget):
         self.google_vision_api_key_edit.setReadOnly(google_env_override)
         self.google_vision_api_key_edit.setEnabled(not google_env_override)
         self.google_vision_override_label.setVisible(google_env_override)
+        api_env_override = self.config_manager.has_explicit_api_key()
+        self.api_key_override_label.setVisible(api_env_override)
         self.model_edit.setText(config.model)
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
@@ -548,13 +588,10 @@ class SettingsWindow(QWidget):
         return str(self.online_service_combo.currentData() or "google_vision")
 
     def _show_environment_override_warnings(self) -> None:
-        warnings: list[str] = []
-        if self.config_manager.has_explicit_api_key():
-            warnings.append(API_KEY_ENV_OVERRIDE_MESSAGE)
-        if self.config_manager.has_explicit_google_vision_api_key():
-            warnings.append(GOOGLE_VISION_ENV_OVERRIDE_MESSAGE)
-        if warnings:
-            self._set_status("\n".join(warnings))
+        self.api_key_override_label.setVisible(self.config_manager.has_explicit_api_key())
+        self.google_vision_override_label.setVisible(
+            self.config_manager.has_explicit_google_vision_api_key()
+        )
 
     def _refresh_local_ocr_state(self) -> None:
         if not self._local_ocr_supported:

@@ -174,8 +174,8 @@ def test_google_key_environment_override_is_visible(qt_app, tmp_path, monkeypatc
     assert window.google_vision_api_key_edit.isReadOnly()
     assert not window.google_vision_api_key_edit.isEnabled()
     assert not window.google_vision_override_label.isHidden()
-    assert "GOOGLE_VISION_API_KEY" in window.status_label.text()
-    assert "overridden" in window.status_label.text()
+    assert "GOOGLE_VISION_API_KEY" in window.google_vision_override_label.text()
+    assert "controlled" in window.google_vision_override_label.text()
     window.close()
 
 

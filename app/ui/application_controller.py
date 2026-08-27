@@ -41,6 +41,9 @@ class ApplicationController(QObject):
             self.tray.capture_requested.connect(text_capture)
         if vision_capture is not None and hasattr(self.tray, "vision_capture_requested"):
             self.tray.vision_capture_requested.connect(vision_capture)
+        show_controller = getattr(self.window, "show_launcher", None)
+        if callable(show_controller) and hasattr(self.tray, "show_controller_requested"):
+            self.tray.show_controller_requested.connect(show_controller)
         settings_handler = getattr(self.window, "show_settings", None)
         if not callable(settings_handler):
             settings_handler = self.window.show_launcher

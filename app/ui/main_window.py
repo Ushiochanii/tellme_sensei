@@ -143,7 +143,7 @@ class MainWindow(QWidget):
             button.setObjectName(button.objectName())
             button.setProperty("class", "modeButton")
             button.setMinimumHeight(108)
-            button.setToolTip("截图识别" if button is self.text_mode_button else "截图分析")
+            button.setToolTip("Text / OCR capture" if button is self.text_mode_button else "Vision capture")
             mode_layout.addWidget(button)
 
         self.status_label = QLabel()

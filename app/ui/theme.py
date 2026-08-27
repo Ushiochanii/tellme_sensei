@@ -175,6 +175,9 @@ def settings_window_stylesheet() -> str:
         color: {SECONDARY_TEXT}; background: transparent; border: 1px solid transparent;
         border-radius: {RADIUS_MD}px; padding: 10px 12px; text-align: left; font-size: 13px;
     }}
+    QPushButton#navigationButton[navLevel="child"] {{
+        padding-left: 26px; font-size: 12px; color: #7183a7;
+    }}
     QPushButton#navigationButton:hover {{ background: rgba(255, 255, 255, 160); color: {TEXT}; }}
     QPushButton#navigationButton:checked {{
         color: {TEXT_ACCENT}; background: rgba(221, 235, 255, 220); border-color: #b5cff6;
@@ -184,10 +187,25 @@ def settings_window_stylesheet() -> str:
         background: rgba(255, 255, 255, 195); border: 1px solid {CARD_BORDER};
         border-radius: {RADIUS_LG}px; padding: 8px;
     }}
+    QFrame#providerSummaryCard {{
+        background: rgba(246, 249, 255, 175); border: 1px solid {CARD_BORDER};
+        border-radius: {RADIUS_MD}px;
+    }}
+    QLabel#providerSummaryTitle {{ color: {TEXT}; font-size: 13px; font-weight: 700; }}
+    QLabel#providerSummaryDetail {{ color: {SECONDARY_TEXT}; font-size: 11px; }}
+    QPushButton#manageButton {{
+        color: {TEXT_ACCENT}; background: transparent; border: 1px solid transparent;
+        border-radius: {RADIUS_SM}px; padding: 5px 8px; font-size: 12px;
+    }}
+    QPushButton#manageButton:hover {{ background: #e7f0ff; border-color: #b9d1f5; }}
     QLabel#settingsStatusLabel {{
         color: {SECONDARY_TEXT}; background: rgba(255, 255, 255, 145);
         border: 1px solid rgba(201, 216, 247, 160); border-radius: {RADIUS_MD}px;
         padding: 7px 10px; font-size: 12px;
+    }}
+    QLabel#settingsWarningLabel {{
+        color: #876318; background: #fff7df; border: 1px solid #f0d58a;
+        border-radius: {RADIUS_SM}px; padding: 7px 9px; font-size: 12px;
     }}
     QLineEdit, QKeySequenceEdit, QComboBox {{
         background: {CARD}; color: {TEXT}; border: 1px solid {CARD_BORDER};
@@ -229,6 +247,21 @@ def settings_window_stylesheet() -> str:
     }}
     QPushButton#cancelButton:hover {{ background: rgba(255, 255, 255, 155); border-color: {CARD_BORDER}; }}
     QPushButton:disabled {{ color: #9aa8c2; background: rgba(242, 245, 252, 135); border-color: #dce4f2; }}
+    """
+
+
+def tray_menu_stylesheet() -> str:
+    """Return a conservative local style for the tray's QMenu."""
+
+    return f"""
+    QMenu#trayMenu {{
+        background: #f7faff; color: {TEXT}; border: 1px solid {BORDER};
+        border-radius: {RADIUS_MD}px; padding: 6px;
+    }}
+    QMenu#trayMenu::item {{ padding: 7px 24px 7px 12px; border-radius: {RADIUS_SM}px; }}
+    QMenu#trayMenu::item:selected {{ background: #e5efff; color: {TEXT_ACCENT}; }}
+    QMenu#trayMenu::separator {{ height: 1px; background: {CARD_BORDER}; margin: 5px 8px; }}
+    QMenu#trayMenu::item:disabled {{ color: {SECONDARY_TEXT}; }}
     """
 
 
