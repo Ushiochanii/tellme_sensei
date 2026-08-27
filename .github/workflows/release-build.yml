@@ -65,8 +65,8 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: TellMeSensei-Setup-0.7.0.exe
-          path: dist/installer/TellMeSensei-Setup-0.7.0.exe
+          name: TellMeSensei-Setup-0.7.1.exe
+          path: dist/installer/TellMeSensei-Setup-0.7.1.exe
           if-no-files-found: error
 
   build-macos-x64:
@@ -106,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           executable="dist/macos/TellMeSensei.app/Contents/MacOS/TellMeSensei"
-          dmg="dist/release/TellMeSensei-0.7.0-macos-x64.dmg"
+          dmg="dist/release/TellMeSensei-0.7.1-macos-x64.dmg"
           test -f "$dmg"
           test -s "$dmg"
           file "$executable"
@@ -118,8 +118,8 @@ jobs:
       - name: Upload macOS Intel DMG
         uses: actions/upload-artifact@v4
         with:
-          name: TellMeSensei-0.7.0-macos-x64.dmg
-          path: dist/release/TellMeSensei-0.7.0-macos-x64.dmg
+          name: TellMeSensei-0.7.1-macos-x64.dmg
+          path: dist/release/TellMeSensei-0.7.1-macos-x64.dmg
           if-no-files-found: error
 
   build-macos-arm64:
@@ -159,7 +159,7 @@ jobs:
         run: |
           set -euo pipefail
           executable="dist/macos/TellMeSensei.app/Contents/MacOS/TellMeSensei"
-          dmg="dist/release/TellMeSensei-0.7.0-macos-arm64.dmg"
+          dmg="dist/release/TellMeSensei-0.7.1-macos-arm64.dmg"
           test -f "$dmg"
           test -s "$dmg"
           file "$executable"
@@ -171,6 +171,6 @@ jobs:
       - name: Upload macOS ARM64 DMG
         uses: actions/upload-artifact@v4
         with:
-          name: TellMeSensei-0.7.0-macos-arm64.dmg
-          path: dist/release/TellMeSensei-0.7.0-macos-arm64.dmg
+          name: TellMeSensei-0.7.1-macos-arm64.dmg
+          path: dist/release/TellMeSensei-0.7.1-macos-arm64.dmg
           if-no-files-found: error
