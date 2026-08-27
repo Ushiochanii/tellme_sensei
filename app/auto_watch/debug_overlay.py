@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import sys
 
-from PySide6.QtCore import QRect, QTimer, Qt
+from PySide6.QtCore import QRect, QSize, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -49,6 +49,26 @@ def format_ratio(ratio: float | None) -> str:
     return "—" if ratio is None else f"{ratio:.1%}"
 
 
+def overlay_bounds(screen_geometry: QRect, roi: QRect, label_size: QSize) -> QRect:
+    """Return the smallest screen-global rect containing the ROI and label."""
+
+    if screen_geometry.isEmpty() or roi.isEmpty():
+        return QRect()
+    screen_local = QRect(0, 0, screen_geometry.width(), screen_geometry.height())
+    roi_local = roi.intersected(screen_local)
+    if roi_local.isEmpty():
+        return QRect()
+    margin = 8
+    label_width = max(0, label_size.width())
+    label_height = max(0, label_size.height())
+    label_x = max(0, min(roi_local.left(), screen_local.width() - label_width))
+    above_y = roi_local.top() - label_height - margin
+    label_y = above_y if above_y >= 0 else roi_local.bottom() + margin
+    label_rect = QRect(label_x, label_y, label_width, label_height)
+    content = roi_local.united(label_rect)
+    return content.translated(screen_geometry.left(), screen_geometry.top())
+
+
 @dataclass(frozen=True)
 class OverlayPresentation:
     """Pure presentation data, kept separate from Qt painting."""
@@ -79,6 +99,7 @@ class DebugOverlay(QWidget):
         self.screen = screen
         self.roi = QRect(roi)
         self._presentation = OverlayPresentation(MonitorState.STOPPED)
+        self._label_size = self._measure_label()
         self._feedback_timer = QTimer(self)
         self._feedback_timer.setSingleShot(True)
         self._feedback_timer.timeout.connect(self._clear_event)
@@ -88,11 +109,13 @@ class DebugOverlay(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
             | Qt.WindowType.WindowDoesNotAcceptFocus
+            | Qt.WindowType.WindowTransparentForInput
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setGeometry(geometry)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._set_content_geometry(geometry)
 
     @property
     def presentation(self) -> OverlayPresentation:
@@ -110,7 +133,7 @@ class DebugOverlay(QWidget):
             and configure_macos_overlay_window is not None
             and QGuiApplication.platformName() != "offscreen"
         ):
-            configure_macos_overlay_window(self)
+            configure_macos_overlay_window(self, ignores_mouse_events=True)
         self.show()
         self.raise_()
 
@@ -122,6 +145,8 @@ class DebugOverlay(QWidget):
         if event is None and self._feedback_timer.isActive() and self._presentation.event is not None:
             event = self._presentation.event
         self._presentation = OverlayPresentation(state, event)
+        self._label_size = self._measure_label()
+        self._set_content_geometry(self.screen.geometry())
         if event is not None:
             self._feedback_timer.start(self._FEEDBACK_MS)
         else:
@@ -133,7 +158,7 @@ class DebugOverlay(QWidget):
         super().closeEvent(event)
 
     def paintEvent(self, _event) -> None:  # noqa: N802 - Qt API name
-        roi = self.roi.intersected(self.rect())
+        roi = self._roi_local.intersected(self.rect())
         if roi.isEmpty():
             return
         painter = QPainter(self)
@@ -178,7 +203,26 @@ class DebugOverlay(QWidget):
 
     def _clear_event(self) -> None:
         self._presentation = OverlayPresentation(self._presentation.state)
+        self._label_size = self._measure_label()
+        self._set_content_geometry(self.screen.geometry())
         self.update()
+
+    def _measure_label(self) -> QSize:
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(11)
+        metrics = QFontMetrics(font)
+        return QSize(metrics.horizontalAdvance(self.status_text) + 20, metrics.height() + 10)
+
+    def _set_content_geometry(self, screen_geometry: QRect) -> None:
+        bounds = overlay_bounds(screen_geometry, self.roi, self._label_size)
+        if bounds.isEmpty():
+            raise ValueError("debug overlay ROI must intersect screen geometry")
+        self.setGeometry(bounds)
+        self._roi_local = self.roi.translated(
+            screen_geometry.left() - bounds.left(),
+            screen_geometry.top() - bounds.top(),
+        )
 
 
 __all__ = [
@@ -188,5 +232,6 @@ __all__ = [
     "STATE_LABELS",
     "event_label",
     "format_ratio",
+    "overlay_bounds",
     "state_label",
 ]

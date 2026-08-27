@@ -26,9 +26,11 @@ class _NullWidget:
 class _FakeBridge:
     def __init__(self) -> None:
         self.widgets = []
+        self.ignore_values = []
 
-    def configure_overlay(self, widget) -> bool:
+    def configure_overlay(self, widget, *, ignores_mouse_events=False) -> bool:
         self.widgets.append(widget)
+        self.ignore_values.append(ignores_mouse_events)
         return True
 
 class _FakeOverlay:
@@ -54,6 +56,33 @@ def test_macos_overlay_bridge_configures_native_window(monkeypatch) -> None:
 
     assert configure_macos_overlay_window(widget, bridge=bridge) is True
     assert bridge.widgets == [widget]
+    assert bridge.ignore_values == [False]
+
+
+def test_macos_overlay_forwards_native_input_ignore_only_when_requested(monkeypatch) -> None:
+    bridge = _FakeBridge()
+    monkeypatch.setattr(window_module.sys, "platform", "darwin")
+
+    assert configure_macos_overlay_window(
+        _FakeWidget(), ignores_mouse_events=True, bridge=bridge
+    ) is True
+    assert bridge.ignore_values == [True]
+
+
+def test_macos_overlay_default_supports_legacy_bridge_signature(monkeypatch) -> None:
+    class LegacyBridge:
+        def __init__(self) -> None:
+            self.widgets = []
+
+        def configure_overlay(self, widget) -> bool:
+            self.widgets.append(widget)
+            return True
+
+    bridge = LegacyBridge()
+    monkeypatch.setattr(window_module.sys, "platform", "darwin")
+
+    assert configure_macos_overlay_window(_FakeWidget(), bridge=bridge) is True
+    assert len(bridge.widgets) == 1
 
 
 def test_macos_overlay_non_darwin_is_noop(monkeypatch) -> None:
