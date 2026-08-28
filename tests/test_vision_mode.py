@@ -254,7 +254,7 @@ def test_main_window_controller_has_glass_mode_controls(qt_app) -> None:
     assert window.settings_button.toolTip() == "Settings"
     assert window.status_label.text() == "●  Ready"
     assert window.width() == 340
-    assert window.height() == 250
+    assert window.height() == 330
     window.close()
     qt_app.processEvents()
 

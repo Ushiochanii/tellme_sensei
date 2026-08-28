@@ -61,7 +61,7 @@ class LocalOCRProvider:
                     return self.session.recognize(input_path, cancel_event=cancel_event)
                 except PersistentWorkerUnsupported:
                     logger.warning(
-                        "Local OCR component does not support persistent mode; "
+                        "OCR diagnosis=component_unsupported phase=provider_fallback; "
                         "using one-shot compatibility mode."
                     )
             output_path = temp_path / "result.json"
@@ -72,6 +72,10 @@ class LocalOCRProvider:
                 self._wait_for_process(process, cancel_event)
             except subprocess.TimeoutExpired as exc:
                 self._stop_process(process)
+                logger.error(
+                    "OCR diagnosis=recognition_timeout phase=one_shot timeout_s=%s",
+                    self.timeout,
+                )
                 raise OCRError("本地 OCR 请求超时。") from exc
 
             if profile_timings is not None:
@@ -82,6 +86,10 @@ class LocalOCRProvider:
                 raise OCRCancelled("本地 OCR 已取消。")
 
             if process.returncode != 0:
+                logger.error(
+                    "OCR diagnosis=worker_execution_failed phase=one_shot exit_code=%s",
+                    process.returncode,
+                )
                 if output_path.is_file():
                     try:
                         # A non-zero exit is always failure. This parse only

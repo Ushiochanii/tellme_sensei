@@ -70,7 +70,43 @@ class SettingsRepository:
         geometry = self._normalize_geometry(raw.get("answer_window_geometry"))
         if geometry is not None:
             settings["answer_window_geometry"] = geometry
+        settings.update(self._load_auto_watch(raw))
         return settings
+
+    @staticmethod
+    def _load_auto_watch(raw: Mapping[str, Any]) -> dict[str, Any]:
+        """Load valid Auto Watch fields independently, falling back per field."""
+        from app.auto_watch.models import AutoWatchSettings
+
+        values: dict[str, Any] = {}
+        for key in (
+            "poll_interval_ms", "pixel_delta_threshold", "novelty_ratio",
+            "stability_ratio", "stable_samples_required", "analysis_delay_ms",
+        ):
+            if key not in raw:
+                continue
+            candidate = dict(values)
+            candidate[key] = raw[key]
+            try:
+                AutoWatchSettings(**candidate)
+            except (TypeError, ValueError):
+                continue
+            values[key] = raw[key]
+        return values
+
+    def auto_watch_settings(self) -> AutoWatchSettings:
+        """Return immutable Auto Watch settings assembled from persisted values."""
+        from app.auto_watch.models import AutoWatchSettings
+
+        saved = self.load()
+        values = {
+            key: saved[key]
+            for key in (
+                "poll_interval_ms", "pixel_delta_threshold", "novelty_ratio",
+                "stability_ratio", "stable_samples_required", "analysis_delay_ms",
+            ) if key in saved
+        }
+        return AutoWatchSettings(**values)
 
     def save(self, settings: Mapping[str, Any]) -> None:
         """Backward-compatible alias for an allow-listed partial update."""
@@ -122,6 +158,32 @@ class SettingsRepository:
             if geometry is None:
                 raise ValueError("answer_window_geometry 无效")
             payload["answer_window_geometry"] = geometry
+        auto_values = {
+            key: settings[key]
+            for key in (
+                "poll_interval_ms", "pixel_delta_threshold", "novelty_ratio",
+                "stability_ratio", "stable_samples_required", "analysis_delay_ms",
+            ) if key in settings
+        }
+        if auto_values:
+            from app.auto_watch.models import AutoWatchSettings
+
+            current = self.auto_watch_settings()
+            merged = {
+                "poll_interval_ms": current.poll_interval_ms,
+                "pixel_delta_threshold": current.pixel_delta_threshold,
+                "novelty_ratio": current.novelty_ratio,
+                "stability_ratio": current.stability_ratio,
+                "stable_samples_required": current.stable_samples_required,
+                "analysis_delay_ms": current.analysis_delay_ms,
+            }
+            merged.update(auto_values)
+            try:
+                validated = AutoWatchSettings(**merged)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("invalid Auto Watch setting") from exc
+            for key in auto_values:
+                payload[key] = getattr(validated, key)
 
         self._atomic_write(payload)
         logger.info("settings saved")

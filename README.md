@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-v0.7.1-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v0.8.0-blue">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%2B%20macOS-lightgrey">
 </p>
 
@@ -29,9 +29,9 @@ All releases are published in the [canonical repository Releases](https://github
 
 | Platform | TellMeSensei | Local OCR component |
 |---|---|---|
-| Windows x64 | [v0.7.1 — TellMeSensei-Setup-0.7.1.exe](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.7.1) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
-| macOS Intel x86_64 | [v0.7.1 — TellMeSensei-0.7.1-macos-x64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.7.1) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
-| macOS Apple Silicon arm64 | [v0.7.1 — TellMeSensei-0.7.1-macos-arm64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.7.1) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
+| Windows x64 | [v0.8.0 — TellMeSensei-Setup-0.8.0.exe](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.8.0) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
+| macOS Intel x86_64 | [v0.8.0 — TellMeSensei-0.8.0-macos-x64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.8.0) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
+| macOS Apple Silicon arm64 | [v0.8.0 — TellMeSensei-0.8.0-macos-arm64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.8.0) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
 
 macOS builds are ad-hoc signed and not notarized. macOS may require **Open Anyway** in **Privacy & Security**, and Screen Recording permission is required for capture.
 
@@ -97,8 +97,8 @@ The Core/GUI environment is intentionally separate from Local OCR worker depende
 
 ## Status
 
-- **Current application release:** v0.7.1
+- **Current application release:** v0.8.0
 - **Local OCR:** 1.4.0 on all supported platforms
 - **Auto updater:** not implemented
 
-See the [v0.7.1 release notes](./docs/releases/v0.7.1.md) for details.
+See the [v0.8.0 release notes](./docs/releases/v0.8.0.md) for details.

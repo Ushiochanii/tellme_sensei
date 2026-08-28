@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixma
 from PySide6.QtWidgets import QPushButton
 
 
-# Soft blue/lavender palette used only by the v0.7.1 controller in Phase 1.
+# Shared soft blue/lavender palette for the application UI.
 BACKGROUND = "#eef4ff"
 PANEL = "#f8fbff"
 TEXT = "#172b63"
@@ -339,6 +339,38 @@ def controller_stylesheet() -> str:
         background: rgba(255, 255, 255, 150);
         border-radius: {RADIUS_SM}px;
     }}
+    """
+
+
+def watch_mini_controller_stylesheet() -> str:
+    """Compact soft-glass surface used by the interactive Auto Watch mini controller."""
+
+    return f"""
+    QWidget#watchMiniController {{ background: transparent; color: {TEXT}; }}
+    QFrame#watchMiniSurface {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+            stop:0 rgba(237, 246, 255, 235), stop:1 rgba(242, 237, 255, 235));
+        border: 1px solid rgba(201, 216, 247, 230);
+        border-radius: {RADIUS_LG}px;
+    }}
+    QLabel#watchMiniStatusDot {{ color: {SUCCESS}; font-size: 14px; font-weight: 700; }}
+    QLabel#watchMiniStatusDot[monitorState="PAUSED"] {{ color: {SECONDARY_TEXT}; }}
+    QLabel#watchMiniStatusDot[monitorState="CHANGING"], QLabel#watchMiniStatusDot[monitorState="ARMING"] {{ color: #d69b2e; }}
+    QLabel#watchMiniStatus, QLabel#watchMiniMode, QLabel#watchMiniGeneration {{
+        color: {TEXT}; font-size: 11px; font-weight: 700;
+    }}
+    QLabel#watchMiniMode, QLabel#watchMiniGeneration {{ color: {SECONDARY_TEXT}; font-weight: 600; }}
+    QLabel#watchMiniAnalysis {{ color: {SECONDARY_TEXT}; font-size: 11px; padding: 1px 0; }}
+    QPushButton#watchMiniAnalyze, QPushButton#watchMiniPause, QPushButton#watchMiniStop {{
+        min-height: 28px; max-height: 28px; padding: 3px 11px;
+        border-radius: {RADIUS_MD}px; font-size: 11px; font-weight: 700;
+    }}
+    QPushButton#watchMiniAnalyze {{ color: {TEXT_ACCENT}; background: rgba(224, 237, 255, 235); border: 1px solid #a9caf7; }}
+    QPushButton#watchMiniAnalyze:hover {{ background: #d8e9ff; border-color: {TEXT_ACCENT}; }}
+    QPushButton#watchMiniPause {{ color: {VISION_ACCENT}; background: rgba(238, 230, 255, 225); border: 1px solid #c7b8f4; }}
+    QPushButton#watchMiniPause:hover {{ background: #e9e0ff; border-color: {VISION_ACCENT}; }}
+    QPushButton#watchMiniStop {{ color: {DANGER}; background: rgba(255, 238, 242, 225); border: 1px solid #efc5cc; }}
+    QPushButton#watchMiniStop:hover {{ background: #ffe3e8; border-color: {DANGER}; }}
     """
 
 

@@ -97,7 +97,7 @@ class _CocoaWindowBridge:
             return False
         return True
 
-    def configure_overlay(self, widget) -> bool:
+    def configure_overlay(self, widget, *, ignores_mouse_events=False) -> bool:
         if not self._assert_gui_thread():
             return False
 
@@ -121,16 +121,29 @@ class _CocoaWindowBridge:
             self._selector(b"setHidesOnDeactivate:"),
             False,
         )
+        if ignores_mouse_events:
+            self._send_set_bool(
+                window,
+                self._selector(b"setIgnoresMouseEvents:"),
+                True,
+            )
         return True
 
 
-def configure_macos_overlay_window(widget, *, bridge=None) -> bool:
+def configure_macos_overlay_window(
+    widget, *, ignores_mouse_events=False, bridge=None
+) -> bool:
     """Make a Qt overlay join the current Space and full-screen Space."""
 
     if sys.platform != "darwin":
         return False
     try:
-        return (bridge or _CocoaWindowBridge()).configure_overlay(widget)
+        active_bridge = bridge or _CocoaWindowBridge()
+        if ignores_mouse_events:
+            return active_bridge.configure_overlay(
+                widget, ignores_mouse_events=True
+            )
+        return active_bridge.configure_overlay(widget)
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError, OverflowError) as exc:
         logger.warning("unable to configure macOS overlay window: %s", exc)
         return False

@@ -154,6 +154,7 @@ class LocalOCRSession:
             raise OCRCancelled("Local OCR cancelled")
         with self._state_lock:
             if self._unsupported:
+                logger.error("OCR diagnosis=component_unsupported phase=worker_start")
                 raise PersistentWorkerUnsupported(
                     "Local OCR component does not support persistent mode"
                 )
@@ -170,6 +171,7 @@ class LocalOCRSession:
         try:
             command = self._serve_command()
         except Exception:
+            logger.exception("OCR diagnosis=component_missing phase=worker_start")
             with self._state_lock:
                 self._ready_directory = None
             ready_directory.cleanup()
@@ -185,11 +187,13 @@ class LocalOCRSession:
                 bufsize=1,
             )
         except FileNotFoundError as exc:
+            logger.error("OCR diagnosis=component_missing phase=worker_start")
             with self._state_lock:
                 self._ready_directory = None
             ready_directory.cleanup()
             raise OCRError("找不到本地 OCR 执行文件。") from exc
         except OSError as exc:
+            logger.error("OCR diagnosis=worker_start_failed phase=worker_start")
             with self._state_lock:
                 self._ready_directory = None
             ready_directory.cleanup()
@@ -223,13 +227,16 @@ class LocalOCRSession:
                 if exit_code == 2:
                     with self._state_lock:
                         self._unsupported = True
+                    logger.error("OCR diagnosis=component_unsupported phase=worker_start exit_code=2")
                     raise PersistentWorkerUnsupported(
                         "Local OCR component does not support persistent mode."
                     )
+                logger.error("OCR diagnosis=worker_start_failed phase=worker_start exit_code=%s", exit_code)
                 raise OCRError("Local OCR persistent worker failed to start.")
             if time.monotonic() >= deadline:
                 self._terminate_process(process)
                 self._clear_process(process)
+                logger.error("OCR diagnosis=model_load_timeout phase=worker_start timeout_s=%s", self.startup_timeout)
                 raise OCRError("Local OCR persistent worker startup timed out.")
             time.sleep(0.05)
 
@@ -278,6 +285,7 @@ class LocalOCRSession:
                 raise OCRError("Local OCR persistent worker exited unexpectedly.")
             if time.monotonic() >= deadline:
                 self.stop()
+                logger.error("OCR diagnosis=recognition_timeout phase=recognize timeout_s=%s", self.timeout)
                 raise OCRError("Local OCR persistent request timed out.")
             time.sleep(0.05)
 

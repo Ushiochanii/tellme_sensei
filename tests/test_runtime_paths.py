@@ -48,4 +48,4 @@ def test_logging_without_stderr_uses_file_handler(tmp_path: Path, monkeypatch) -
 
 
 def test_version_is_defined() -> None:
-    assert __version__ == "0.7.1"
+    assert __version__ == "0.8.0"

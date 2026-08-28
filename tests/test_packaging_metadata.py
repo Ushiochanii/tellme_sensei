@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_packaging_uses_single_release_version_source() -> None:
-    assert __version__ == "0.7.1"
+    assert __version__ == "0.8.0"
     assert LOCAL_OCR_VERSION == "1.4.0"
     spec = (ROOT / "packaging" / "tellme_sensei.spec").read_text(encoding="utf-8")
     assert "from app.version import __version__" in spec
@@ -45,6 +45,35 @@ def test_rc_versions_are_independent_and_installer_fallback_is_current() -> None
     assert 'VersionLabel "0.6.0"' in iss
     assert 'AppVersion "0.6.0"' in iss
     assert 'from app.version import __version__' in build_script
+
+
+def test_release_workflow_assets_follow_each_job_version_output() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "release-build.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert workflow.count("id: version") == 3
+    assert workflow.count("from app.version import __version__") == 3
+    assert 'Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"' in workflow
+    assert workflow.count('echo "version=$version" >> "$GITHUB_OUTPUT"') == 2
+    assert "0.7.1" not in workflow
+
+    job_contracts = {
+        "build-windows-x64": "TellMeSensei-Setup-${{ steps.version.outputs.version }}.exe",
+        "build-macos-x64": "TellMeSensei-${{ steps.version.outputs.version }}-macos-x64.dmg",
+        "build-macos-arm64": "TellMeSensei-${{ steps.version.outputs.version }}-macos-arm64.dmg",
+    }
+    job_positions = [workflow.index(f"  {job}:") for job in job_contracts]
+    job_positions.append(len(workflow))
+    for (job, asset), start, end in zip(
+        job_contracts.items(), job_positions, job_positions[1:]
+    ):
+        job_text = workflow[start:end]
+        assert "id: version" in job_text
+        assert "steps.version.outputs.version" in job_text
+        assert f"name: {asset}" in job_text
+        assert f"path: " in job_text and asset in job_text
+        assert "0.7.1" not in job_text
 
 
 def test_local_ocr_distribution_metadata_is_versioned_and_public() -> None:

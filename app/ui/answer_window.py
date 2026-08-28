@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 
 from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QGuiApplication
@@ -21,7 +22,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.analysis import AnalysisMode
+from app.pipeline import PipelineResult
 from app.settings.repository import SettingsRepository
+from app.ui.answer_window_placement import place_answer_window
 from app.ui.theme import (
     TEXT_ACCENT,
     VISION_ACCENT,
@@ -34,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 class _TitleBar(QWidget):
     """Small custom title bar that makes the frameless window draggable."""
+
+    moved = Signal()
+
+
 
     def __init__(
         self,
@@ -78,6 +85,7 @@ class _TitleBar(QWidget):
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt API name
         if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
             self.window().move(event.globalPosition().toPoint() - self._drag_offset)
+            self.moved.emit()
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -108,6 +116,8 @@ class AnswerWindow(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
         )
+        if sys.platform == "darwin":
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setMinimumSize(360, 420)
         self.resize(560, 640)
@@ -116,6 +126,14 @@ class AnswerWindow(QWidget):
         self._answer_text = ""
         self._vision_mode = False
         self._closed_emitted = False
+        self._auto_watch_active = False
+        self._auto_watch_generation: int | None = None
+        self._auto_watch_roi: QRect | None = None
+        self._auto_watch_screen = None
+        self._auto_watch_user_moved = False
+        self._skip_geometry_save = False
+        self._auto_watch_previous_geometry: QRect | None = None
+        self._auto_watch_previous_geometry_restored = False
 
         self.setObjectName("answerWindow")
         shadow = QGraphicsDropShadowEffect(self)
@@ -138,6 +156,7 @@ class AnswerWindow(QWidget):
         surface_layout.setSpacing(10)
 
         self.title_bar = _TitleBar("Text / OCR Analysis", self.close, parent=self)
+        self.title_bar.moved.connect(self._mark_auto_watch_user_moved)
         surface_layout.addWidget(self.title_bar)
 
         body = QWidget()
@@ -228,6 +247,7 @@ class AnswerWindow(QWidget):
         return label
 
     def show_processing(self) -> None:
+        self._skip_geometry_save = False
         self.set_mode(AnalysisMode.TEXT)
         self._answer_text = ""
         self.answer_edit.clear()
@@ -239,7 +259,111 @@ class AnswerWindow(QWidget):
         self.set_status("正在识别题目...")
         self.show_at_current_screen()
 
+    def begin_auto_watch(self, mode: AnalysisMode | str, generation: int, roi_hint: QRect | None = None, screen=None) -> None:
+        """Enter session-only Auto Watch presentation without changing saved geometry."""
+        self._auto_watch_previous_geometry = QRect(self.geometry())
+        self._auto_watch_previous_geometry_restored = self._geometry_restored
+        self._auto_watch_active = True
+        self._auto_watch_generation = generation
+        self._auto_watch_roi = QRect(roi_hint) if isinstance(roi_hint, QRect) else None
+        self._auto_watch_screen = screen
+        self._auto_watch_user_moved = False
+        self._skip_geometry_save = True
+        self.set_mode(mode)
+        self._ocr_text = ""
+        self._answer_text = ""
+        self.ocr_edit.clear(); self.answer_edit.clear()
+        self._disable_auto_watch_job_controls()
+        self.set_status("Auto Watch · Analyzing…")
+        self._place_auto_watch_window()
+
+    def show_auto_watch_analyzing(self, generation: int) -> None:
+        if not self._auto_watch_active or generation < self._auto_watch_generation:
+            return
+        self._auto_watch_generation = generation
+        self._disable_auto_watch_job_controls()
+        self.set_status("New question detected · Analyzing…" if self._answer_text or self._ocr_text else "Auto Watch · Analyzing…")
+        self._place_auto_watch_window()
+
+    def show_auto_watch_result(self, generation: int, result) -> None:
+        if not self._auto_watch_active or generation < self._auto_watch_generation:
+            return
+        self._auto_watch_generation = generation
+        if self._vision_mode:
+            self.answer_edit.setPlainText(str(result))
+            self._answer_text = str(result)
+        elif isinstance(result, PipelineResult):
+            self.set_ocr_text(result.ocr.text)
+            self._answer_text = result.answer
+            self.answer_edit.setPlainText(result.answer)
+        else:
+            ocr = getattr(result, "ocr", None)
+            if ocr is not None:
+                self.set_ocr_text(ocr.text)
+            self._answer_text = str(getattr(result, "answer", result))
+            self.answer_edit.setPlainText(self._answer_text)
+        self.set_status("完成")
+        self.copy_button.setEnabled(bool(self._answer_text))
+        self._disable_auto_watch_job_controls()
+
+    def show_auto_watch_error(self, generation: int, message: str) -> None:
+        if not self._auto_watch_active or generation < self._auto_watch_generation:
+            return
+        self._auto_watch_generation = generation
+        if not self._answer_text:
+            self.answer_edit.setPlainText(f"AI 解析失败。\n{message}")
+        self.set_status(f"失败：{message}")
+        self._disable_auto_watch_job_controls()
+
+    def show_auto_watch_cancelled(self, generation: int) -> None:
+        if not self._auto_watch_active or generation < self._auto_watch_generation:
+            return
+        self._auto_watch_generation = generation
+        self.set_status("Analysis cancelled")
+        self._disable_auto_watch_job_controls()
+
+    def end_auto_watch(self) -> None:
+        if self._auto_watch_previous_geometry is not None:
+            self.setGeometry(self._auto_watch_previous_geometry)
+            self._geometry_restored = self._auto_watch_previous_geometry_restored
+        self._auto_watch_previous_geometry = None
+        self._auto_watch_active = False
+        self._auto_watch_generation = None
+        self._auto_watch_roi = None
+        self._auto_watch_screen = None
+        self._auto_watch_user_moved = False
+        self._skip_geometry_save = False
+        self.stop_button.setVisible(False); self.stop_button.setEnabled(False)
+        self.retry_button.setVisible(True)
+        self.recapture_button.setVisible(False); self.recapture_button.setEnabled(False)
+        self.set_retry_enabled()
+
+    def _disable_auto_watch_job_controls(self) -> None:
+        self.stop_button.setVisible(False); self.stop_button.setEnabled(False)
+        self.retry_button.setVisible(False); self.retry_button.setEnabled(False)
+        self.recapture_button.setVisible(False); self.recapture_button.setEnabled(False)
+
+    def _mark_auto_watch_user_moved(self) -> None:
+        if self._auto_watch_active:
+            self._auto_watch_user_moved = True
+
+    def _place_auto_watch_window(self) -> None:
+        if self._auto_watch_roi is None:
+            self.show()
+            return
+        screen = self._auto_watch_screen or QGuiApplication.primaryScreen()
+        if screen is None:
+            self.show()
+            return
+        self.show()
+        self.adjustSize()
+        current = self.geometry()
+        available = screen.availableGeometry()
+        if not self._auto_watch_user_moved or not current.intersects(available):
+            self.setGeometry(place_answer_window(current, self._auto_watch_roi, available, 12))
+
     def show_vision_processing(self) -> None:
+        self._skip_geometry_save = False
         self.set_mode(AnalysisMode.VISION)
         self._answer_text = ""
         self.answer_edit.clear()
@@ -413,7 +537,8 @@ class AnswerWindow(QWidget):
         super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
-        self._save_geometry()
+        if not self._skip_geometry_save:
+            self._save_geometry()
         if not self._closed_emitted:
             self._closed_emitted = True
             self.closed.emit()

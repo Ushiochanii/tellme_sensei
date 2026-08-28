@@ -55,6 +55,16 @@ class CaptureOverlay(QWidget):
 
         return QRect(self._selection)
 
+    @property
+    def screen(self):
+        """The selected monitor, exposed read-only for auto-watch tooling."""
+        return self._screen
+
+    @property
+    def selection_metadata(self) -> tuple[object, QRect]:
+        """Return the monitor and logical ROI without exposing mutable internals."""
+        return self._screen, QRect(self._selection)
+
     def begin(self) -> None:
         """Show the overlay after the screen image has been captured."""
 
