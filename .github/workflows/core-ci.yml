@@ -155,14 +155,14 @@ jobs:
                 -RedirectStandardError $stderrLog `
                 -PassThru
               if (-not $process.WaitForExit(45000)) {
-                Write-Error "[vision-lite-diag] TIMEOUT after 45s case=$($case.Name) run=$run"
+                Write-Host "[vision-lite-diag] TIMEOUT after 45s case=$($case.Name) run=$run"
                 try {
                   $process.Kill()
                 } catch {
-                  Write-Error "[vision-lite-diag] Could not terminate timed-out process: $($_.Exception.Message)"
+                  Write-Host "[vision-lite-diag] Could not terminate timed-out process: $($_.Exception.Message)"
                 }
                 if (-not $process.WaitForExit(5000)) {
-                  Write-Error "[vision-lite-diag] Timed-out process did not exit after termination request"
+                  Write-Host "[vision-lite-diag] Timed-out process did not exit after termination request"
                 }
                 Write-Host "----- $stdoutLog -----"
                 if (Test-Path $stdoutLog) { Get-Content $stdoutLog }
