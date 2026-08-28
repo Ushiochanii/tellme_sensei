@@ -1,43 +1,43 @@
-# AGENTS.md — TellMeSensei Engineering Workflow
+# AGENTS.md — TellMeSensei 工程开发规范
 
-This file defines the default working agreement for AI coding agents and contributors in this repository.
+本文档定义本仓库中 AI coding agent 与贡献者默认遵循的工作约定。
 
-The project owner is learning professional software-development practice while building TellMeSensei. Therefore, agents must not only implement correctly; they should also make the engineering process visible and explain important decisions in concise, practical terms.
+项目负责人正在通过开发 TellMeSensei 学习专业的软件工程实践。因此，Agent 不仅要正确完成实现，也应尽量让工程过程可见，并用简洁、实用的方式解释重要决策。
 
-This is a repository-wide instruction file. More specific design documents under `docs/plans/` may add feature-specific requirements. When instructions conflict, follow the more specific accepted design for that feature, while preserving the safety and workflow rules below.
+这是仓库级的全局规范。`docs/plans/` 下更具体的 Design Doc 可以为某个功能增加额外要求。若两者发生冲突，应优先遵循该功能已经接受的更具体设计，同时继续遵守本文中的安全、流程和范围控制规则。
 
 ---
 
-## 1. Project baseline
+## 1. 项目基线
 
-TellMeSensei is a Python 3.12 desktop application.
+TellMeSensei 是一个基于 Python 3.12 的桌面应用。
 
-Supported Core targets:
+Core 当前支持：
 
 - Windows x64
 - macOS Intel x86_64
 - macOS Apple Silicon arm64
 
-Normal product features should be implemented once in shared application code. Platform-specific implementations are appropriate only at real OS/native/build boundaries such as:
+普通产品功能应尽量只在共享应用代码中实现一次。只有真正位于 OS / native runtime / build 边界的行为才应做平台特化，例如：
 
-- native global hotkeys
-- macOS Screen Recording / window / Spaces behavior
-- OS credential or filesystem APIs
-- Windows installer packaging
-- macOS DMG packaging
-- platform-specific Local OCR native runtimes
+- 原生全局快捷键
+- macOS Screen Recording / window / Spaces 行为
+- 操作系统凭据或文件系统 API
+- Windows installer 打包
+- macOS DMG 打包
+- 各平台独立的 Local OCR native runtime
 
-Do not create separate Windows/macOS copies of shared application behavior merely because multiple platforms are supported.
+不要仅仅因为项目支持多个平台，就为共享功能分别写一套 Windows/macOS 实现。
 
-Local OCR is a separate native component lifecycle. Do not pull Paddle/PaddleOCR dependencies into the Core development environment unless the task is specifically about Local OCR.
+Local OCR 拥有独立的 native component 生命周期。除非当前任务明确与 Local OCR 有关，否则不要把 Paddle/PaddleOCR 依赖引入 Core 开发环境。
 
-See `docs/development.md` for the established platform, build, CI, packaging, and release model.
+平台、构建、CI、打包和发布的既定模型见 `docs/development.md`。
 
 ---
 
-## 2. Standard development lifecycle
+## 2. 标准开发生命周期
 
-For non-trivial product work, use this sequence:
+对于非琐碎的产品功能，默认遵循以下流程：
 
 ```text
 Idea / Problem
@@ -69,61 +69,61 @@ RC / release validation
 Stable release
 ```
 
-Do not skip directly from a large idea to implementation when the architecture, user interaction, data model, lifecycle, or compatibility behavior is still undecided.
+如果架构、用户交互、数据模型、生命周期或兼容性行为仍未确定，不要从一个较大的想法直接跳到编码。
 
-Small, obvious bug fixes do not require a full Design Doc. Use judgment. A fix that changes architecture, public behavior, persisted data, cross-platform behavior, or several subsystems does require a written plan.
+小型、明确的 bug fix 不要求完整 Design Doc，应根据实际情况判断。若修复涉及架构、用户可见行为、持久化数据、跨平台行为或多个子系统，则应先形成书面计划。
 
 ---
 
-## 3. Design Docs
+## 3. Design Doc
 
-Non-trivial feature plans belong under:
+非琐碎功能的设计文档放在：
 
 ```text
 docs/plans/
 ```
 
-A useful Design Doc should normally contain:
+一份合格的 Design Doc 通常应包含：
 
-1. Background / current behavior
+1. Background / 当前行为
 2. Problem statement
 3. Goals
 4. Non-goals
-5. Existing architecture relevant to the change
+5. 与本次修改相关的现有架构
 6. Proposed architecture
-7. Data model / API / state-machine changes where relevant
-8. User interaction / lifecycle where relevant
-9. Important failure cases that are reachable in supported use
-10. Alternatives considered when there is a meaningful choice
+7. 必要时的数据模型 / API / 状态机变化
+8. 必要时的用户交互 / 生命周期
+9. 在项目支持范围内真实可达的重要失败场景
+10. 存在真实技术取舍时的 Alternatives considered
 11. Test plan
 12. Rollout / release plan
 13. Open questions
 14. Definition of Done
 
-The Design Doc is the technical source of truth. Do not duplicate the full design into Issues or PR descriptions.
+Design Doc 是技术层面的 source of truth。不要在 Issue 或 PR 描述中重复整份设计。
 
-Once a design has been reviewed and accepted, treat its major architectural decisions and scope as frozen for that implementation phase. Do not redesign opportunistically while coding unless implementation evidence reveals a real problem. If that happens, explain the problem and update the design before widening scope.
+一旦设计经过 review 并被接受，在当前实现 Phase 内，应把核心架构和 scope 视为已经冻结。不要在编码过程中顺手重新设计；只有当实现证据暴露了真实问题时，才说明原因并先更新设计，再扩大 scope。
 
 ---
 
-## 4. Issues, phases, branches, and PRs
+## 4. Issue、Phase、Branch 与 Pull Request
 
 ### 4.1 Umbrella Issue
 
-For a versioned feature spanning multiple phases, create one umbrella Issue after the Design Doc is accepted.
+如果一个版本化功能会跨多个 Phase，应在 Design Doc 被接受后创建一个 umbrella Issue。
 
-The Issue should track progress, not duplicate the design. Typical contents:
+Issue 用于追踪进度，而不是复制设计。通常包含：
 
-- link to the Design Doc
-- implementation phases as a checklist
-- concise Definition of Done
-- links to phase PRs
+- Design Doc 链接
+- 各 Phase checklist
+- 简洁的 Definition of Done
+- 各 Phase PR 链接
 
-### 4.2 Phase sizing
+### 4.2 Phase 划分
 
-Prefer independently reviewable phases with clear boundaries. Each phase should have one primary engineering question to answer.
+优先把工作拆成可以独立 review、边界清晰的 Phase。每个 Phase 应主要回答一个明确的工程问题。
 
-Example:
+例如：
 
 ```text
 Phase 1 — Core model / algorithm
@@ -132,208 +132,208 @@ Phase 3 — Product UI
 Phase 4 — Hardening / regression / release
 ```
 
-Do not start the next phase until the current phase has been reviewed and accepted when the user is following a phased plan.
+如果用户采用分阶段开发流程，在当前 Phase 尚未 review 并 ACCEPT 之前，不要开始下一个 Phase。
 
-### 4.3 Branches
+### 4.3 Branch
 
-Use short-lived feature/fix branches based on the latest accepted `main`, for example:
+基于最新已经接受的 `main` 创建短生命周期 feature/fix branch，例如：
 
 ```text
 feature/v0.8.1-phase1-dual-region-core
 fix/capture-scaling
 ```
 
-Do not create long-lived platform branches for normal shared product work.
+普通共享功能不要建立长期 platform branch。
 
-Before editing:
+开始修改前：
 
-- confirm the current branch
-- inspect `git status`
-- identify unrelated user changes
-- preserve those changes exactly
+- 确认当前 branch
+- 检查 `git status`
+- 识别与当前任务无关的用户修改
+- 原样保留这些用户修改
 
-Never reset, overwrite, discard, stage, or commit unrelated user modifications just to obtain a clean working tree.
+绝对不要为了获得“干净 working tree”而 reset、覆盖、丢弃、stage 或 commit 与当前任务无关的用户修改。
 
-If a file contains both task changes and unrelated user changes, stage only the task-specific hunks.
+如果同一个文件同时包含当前任务修改和用户自己的修改，只 stage 当前任务相关的 hunks。
 
-### 4.4 Pull Requests
+### 4.4 Pull Request
 
-A PR should explain the implementation delta, not restate the whole Design Doc.
+PR 应解释“本次实现实际改变了什么”，而不是重新讲一遍整个 Design Doc。
 
-Use a structure similar to:
+建议结构：
 
 ```text
 ## Summary
-What this PR changes.
+这次 PR 改了什么。
 
 ## Design
-Link to the relevant Design Doc section.
+链接到对应 Design Doc / section。
 
 ## Scope
-What is intentionally included and excluded in this PR/phase.
+本 PR / Phase 明确包含什么、排除什么。
 
 ## Key implementation notes
-Only the important technical decisions needed to review the patch.
+只写 review 当前 patch 所需的重要技术决策。
 
 ## Tests
-Commands and results.
+运行的命令和结果。
 
 ## Known limitations
-Only real, intentional limitations that remain after this phase.
+只列本 Phase 完成后仍然真实存在、且属于有意保留的限制。
 ```
 
 ---
 
-## 5. Before writing code
+## 5. 写代码之前
 
-Before implementation, answer these questions from the repository, not from assumptions:
+实现前，应根据仓库真实代码回答这些问题，而不是凭假设：
 
-- What existing module owns this behavior today?
-- What public or internal interface should be extended instead of duplicated?
-- What must remain unchanged?
-- What is the smallest coherent change that satisfies the accepted design?
-- Which tests prove the new behavior?
-- Which existing tests protect regressions?
+- 当前行为由哪个现有模块负责？
+- 应扩展哪个已有 public/internal interface，而不是另写一套？
+- 哪些行为必须保持不变？
+- 满足已接受设计的最小、完整修改是什么？
+- 哪些测试能证明新行为？
+- 哪些现有测试能防止 regression？
 
-Inspect the actual code first.
+先读实际代码。
 
-Do not introduce wrappers, compatibility layers, feature flags, migration frameworks, hashes, defensive scaffolding, or generalized abstractions for cases that do not occur in this project.
+不要为本项目不存在的场景添加 wrapper、兼容层、feature flag、migration framework、hash、defensive scaffolding 或过度泛化的 abstraction。
 
-Prefer extending an existing well-owned abstraction over introducing a parallel subsystem.
-
----
-
-## 6. Scope discipline
-
-Report real problems, including uncommon ones when they are reachable through supported project use.
-
-Do not manufacture findings.
-
-Keep fixes proportional to the actual project:
-
-- This is not a security paper unless a task explicitly makes security the subject.
-- Assume a cooperating local operator unless the feature explicitly defines an adversary.
-- Do not add hashes/checksums/fingerprints unless they replace a materially more expensive operation and the result changes behavior.
-- Do not add defensive scaffolding for hypothetical compatibility or migration cases that do not exist.
-- Do not optimize exotic encodings, symlink races, RTL text, millisecond races, or other corner cases unless they are reachable through supported inputs or real data.
-- Do not re-review the same settled point repeatedly while blocking implementation progress.
-
-Before running a check, be able to state:
-
-> What specific failure could this check detect, and what would we do differently if it failed?
-
-If there is no meaningful answer, do not run the check.
+如果现有抽象已经清楚拥有某个职责，应优先扩展它，而不是建立平行子系统。
 
 ---
 
-## 7. Code architecture principles
+## 6. Scope 控制
 
-Prefer clear ownership boundaries.
+真实存在的问题要报告；只要某个少见问题通过项目支持的正常用法可达，也应报告。
 
-A module should answer one recognizable engineering question. For example:
+不要制造问题。
+
+修复范围应与项目实际需求成比例：
+
+- 除非任务明确涉及安全，否则这不是一篇 security paper。
+- 除非功能明确存在 adversary，否则默认操作员是在自己的机器上正常使用。
+- 不要添加 hash/checksum/fingerprint，除非它确实替代了明显更昂贵的操作，并且 hash 结果会改变程序后续行为。
+- 不要为项目里不存在的兼容或迁移场景增加 defensive scaffolding。
+- 不要优化 exotic encoding、symlink race、RTL text、毫秒级 race 等角落问题，除非它们能通过项目支持的输入、接口或真实数据到达。
+- 已经 review 并解决的问题，不要反复重新审查到影响实现进度。
+
+运行任何检查前，都应该能够回答：
+
+> 这个检查具体能发现什么失败？如果失败，我们接下来会做出什么不同的决定？
+
+如果没有明确答案，就不要运行这个检查。
+
+---
+
+## 7. 代码架构原则
+
+优先保持清晰的职责边界。
+
+一个模块应回答一个容易识别的工程问题。例如：
 
 ```text
-capture/        # How screen content is acquired
-ocr/            # How image content becomes text
-services/       # How external services are called
-workers/        # How long-running work is executed/cancelled off the GUI thread
-ui/             # How users interact with the application
-auto_watch/     # How monitored screen changes become analysis generations
-platform/       # Real OS-specific behavior
+capture/        # 如何获取屏幕内容
+ocr/            # 如何把图像内容转换成文字
+services/       # 如何调用外部服务
+workers/        # 如何在 GUI 线程之外执行/取消长任务
+ui/             # 用户如何与应用交互
+auto_watch/     # 如何把屏幕变化转换成 analysis generation
+platform/       # 真正的 OS-specific 行为
 ```
 
-Do not put domain/state-machine logic into large UI classes merely because the UI triggers it.
+不要因为 UI 会触发某个功能，就把 domain/state-machine logic 塞进大型 QWidget/UI class。
 
-Do not duplicate cancellation, job lifecycle, OCR provider selection, DeepSeek access, AnswerWindow behavior, settings behavior, or Local OCR lifecycle across feature implementations when an existing shared path already owns it.
+如果已有共享路径已经负责 cancellation、job lifecycle、OCR provider selection、DeepSeek access、AnswerWindow、settings 或 Local OCR lifecycle，不要为新功能再复制一套。
 
-Keep platform-specific code at the actual platform boundary.
+平台特化代码应留在真实的平台边界。
 
 ---
 
-## 8. Comments and educational annotations
+## 8. 注释与教学说明
 
-The project owner is learning software-engineering practice. Make explanations part of the workflow without turning production code into a tutorial.
+项目负责人正在学习软件工程实践。开发流程应承担一定教学作用，但不要把生产代码变成教程。
 
-### 8.1 Annotated file trees in reports/docs
+### 8.1 报告 / 文档中的带注释文件树
 
-Whenever a task adds or substantially changes multiple files, show an annotated file tree in the report when useful.
+如果一个任务新增或大幅修改多个文件，在有帮助时，应在报告中给出带职责注释的文件树。
 
-Use comments after the paths, for example:
+例如：
 
 ```text
 app/auto_watch/
-├── pair_coordinator.py   # Combines Context and Question revisions into one pair generation
-├── sampler.py            # Captures the screen and crops monitored ROI(s)
-└── dispatcher.py         # Latest-Wins analysis dispatch and stale-result protection
+├── pair_coordinator.py   # 把 Context / Question revision 合并成一个 pair generation
+├── sampler.py            # 抓取屏幕并裁切一个或多个 monitored ROI
+└── dispatcher.py         # Latest-Wins 分发与 stale-result 保护
 
 tests/
-└── test_pair_coordinator.py  # Deterministic pair-transition tests
+└── test_pair_coordinator.py  # 确定性的 pair 状态转换测试
 ```
 
-These are explanatory comments in documentation/report output. Do **not** rename files or directories to include comments.
+这些 `# ...` 是文档/报告中的解释注释。不要真的把注释写进文件名或目录名。
 
-### 8.2 Code comments
+### 8.2 生产代码中的注释
 
-Add concise code comments for:
+以下情况适合加入简洁代码注释：
 
-- non-obvious invariants
+- 不明显的 invariant
 - lifecycle ownership
-- state-machine transitions that are easy to misunderstand
-- coordinate/DPI mapping assumptions
-- cancellation / generation / stale-result rules
-- intentionally unusual implementation choices
+- 容易误解的状态机转换
+- coordinate / DPI mapping 假设
+- cancellation / generation / stale-result 规则
+- 看起来不寻常但有明确理由的实现选择
 
-Do not comment obvious syntax or every line. Prefer good names and small functions over excessive commentary.
+不要给显而易见的语法或每一行代码写注释。优先使用好命名、小函数和清晰结构。
 
-Bad:
+不好的例子：
 
 ```python
-count += 1  # Add one to count
+count += 1  # count 加 1
 ```
 
-Useful:
+有价值的例子：
 
 ```python
-# Update the accepted baseline before dispatch so later ticks cannot
-# rediscover the same stable question while analysis is still running.
+# 在 dispatch 之前更新 accepted baseline，避免分析仍在运行时，
+# 后续 tick 再次把同一个稳定题目识别为新题。
 baseline = current
 ```
 
-### 8.3 Learning notes in reports
+### 8.3 报告中的学习说明
 
-At the end of meaningful implementation work, include a short `What this demonstrates` section explaining 1–3 relevant engineering concepts, such as:
+有意义的实现工作结束后，应加入简短的 `What this demonstrates` 部分，解释 1–3 个与刚完成任务直接相关的软件工程概念，例如：
 
-- why this logic belongs in a coordinator instead of a QWidget
-- why a phase is separated before UI integration
-- why a test is unit vs integration vs regression
-- why one screen capture is shared across multiple ROI crops
-- why generation guards are needed even when cancellation exists
+- 为什么某段逻辑应该放在 coordinator，而不是 QWidget
+- 为什么先拆 Core Phase，再做 UI integration
+- 为什么某个测试属于 unit / integration / regression
+- 为什么多个 ROI 应共享一次 screen capture
+- 为什么已经有 cancellation 仍然需要 generation guard
 
-Keep it practical and tied to the work just completed.
+只解释和本次工作直接相关的概念，不要泛泛写教程。
 
 ---
 
-## 9. Testing strategy
+## 9. 测试策略
 
-Use the smallest test set that can detect the failures introduced by the change, then widen coverage where shared behavior could regress.
+先运行能发现当前修改可能引入故障的最小测试集；当修改会影响共享行为时，再逐步扩大覆盖范围。
 
-Typical order:
+典型顺序：
 
-1. new/changed unit tests
+1. 新增/修改的 unit tests
 2. focused subsystem tests
-3. relevant integration/UI tests
-4. full Core test suite when the change touches shared behavior
-5. compile/import/static sanity checks as appropriate
-6. platform-native/manual validation when the behavior depends on real OS APIs
+3. 相关 integration/UI tests
+4. 修改共享行为时运行完整 Core test suite
+5. 视情况运行 compile/import/static sanity checks
+6. 行为依赖真实 OS API 时进行 platform-native/manual validation
 
-Core development baseline:
+Core 开发基线：
 
 ```sh
 python -m pip install -r requirements-dev.txt
 pytest
 ```
 
-Common repository checks when relevant:
+常用仓库检查（在确实相关时）：
 
 ```sh
 python -m compileall app gui.py
@@ -341,46 +341,46 @@ git diff --check
 python gui.py --smoke-core
 ```
 
-Do not run every expensive check automatically after every small edit. Run it when its result could change the next engineering action.
+不要每次小修改后无条件跑所有昂贵检查。只有当检查结果会改变下一步工程动作时才运行。
 
-Tests must be deterministic where practical. Avoid real-time sleeps in unit tests when state can be driven directly.
+测试在可行时应是 deterministic 的。如果状态可以直接驱动，就不要在 unit test 中加入真实时间 sleep。
 
-Do not make the suite green by skipping or weakening an unrelated existing failure. Clearly distinguish known environment failures from regressions introduced by the current change.
+不要为了让 suite 变绿而 skip、弱化或修改一个无关的既有失败。必须明确区分已知 environment failure 与当前修改引入的 regression。
 
-For release-critical validation, prefer a clean checkout/worktree so uncommitted local files cannot accidentally satisfy imports, dependencies, or runtime behavior.
-
----
-
-## 10. Review standard
-
-Before declaring a phase complete:
-
-- compare the branch against its intended base
-- verify only expected files changed
-- inspect the actual implementation, not only the agent's own report
-- confirm the implementation matches the accepted design
-- confirm tests exercise the important state transitions and failure modes
-- confirm unrelated user changes were not included
-- confirm no later-phase work leaked into the current phase
-
-If the implementation is correct, say plainly that it is correct.
-
-Do not invent blockers to make a review look rigorous.
-
-When there is a real blocker, identify:
-
-1. the concrete failure
-2. why it matters in supported use
-3. the smallest in-scope fix
-4. whether it blocks the phase or can wait
+Release-critical validation 优先使用 clean checkout / clean worktree，避免未提交的本地文件意外满足 import、dependency 或 runtime 行为。
 
 ---
 
-## 11. Git and commit hygiene
+## 10. Review 标准
 
-Prefer small, coherent commits whose message describes the engineering change.
+在宣布一个 Phase 完成之前：
 
-Examples:
+- 对比 branch 与预期 base
+- 确认只有预期文件发生修改
+- 看实际 implementation，而不是只看 Agent 自己的报告
+- 确认实现符合已经接受的 Design Doc
+- 确认测试覆盖重要状态转换和真实失败模式
+- 确认没有提交无关用户修改
+- 确认没有把后续 Phase 工作提前塞进当前 Phase
+
+如果实现正确，要明确说“正确”。
+
+不要为了显得严格而制造 blocker。
+
+如果确实存在 blocker，应明确说明：
+
+1. 具体 failure 是什么
+2. 为什么它会影响项目支持范围内的真实使用
+3. 最小的 in-scope 修复是什么
+4. 它是否真的阻塞当前 Phase，还是可以以后再做
+
+---
+
+## 11. Git 与 commit 规范
+
+优先保持 commit 小而完整，每个 commit 应代表一个清晰的工程修改。
+
+例如：
 
 ```text
 feat: add dual-region auto-watch core
@@ -390,17 +390,17 @@ test: cover context-question pair transitions
 docs: add v0.8.1 implementation plan
 ```
 
-Do not mix unrelated cleanup, formatting, refactoring, feature work, and user changes into one commit.
+不要把无关 cleanup、formatting、refactoring、feature work 和用户自己的修改混在同一个 commit。
 
-Do not rewrite published history or force-push unless the user explicitly asks and the repository state makes it appropriate.
+除非用户明确要求，并且仓库状态确实适合，否则不要 rewrite published history 或 force-push。
 
-Do not merge to `main`, tag a release, publish a release, or delete branches unless that action is explicitly part of the current approved step.
+不要擅自 merge 到 `main`、创建 tag、发布 release 或删除 branch，除非这些动作明确属于当前已经批准的步骤。
 
 ---
 
-## 12. Release workflow
+## 12. Release 流程
 
-For a significant versioned feature:
+对于较大的版本化功能：
 
 ```text
 feature phases
@@ -418,89 +418,93 @@ fix only release blockers
 stable tag/release
 ```
 
-TellMeSensei's established application release model is:
+TellMeSensei 当前既定 application release model：
 
-- one application version
-- one Git tag
-- one GitHub Release
-- one shared product feature set
-- one asset for each supported application target
+- 一个 application version
+- 一个 Git tag
+- 一个 GitHub Release
+- 一套共享 product feature set
+- 每个支持的 application target 一个发布 asset
 
-Local OCR remains an independently versioned component with platform-specific native packages.
+Local OCR 继续作为独立版本的 component，使用各平台 native package。
 
-Do not claim platform/manual acceptance that was not actually performed.
+没有实际完成 platform/manual acceptance，就不要声称已经通过。
 
 ---
 
-## 13. Required implementation report format
+## 13. 实现报告格式
 
-For meaningful coding work, report in this order unless a feature-specific prompt requires a stricter format:
+对于有意义的 coding work，除非某个 feature-specific prompt 要求更严格格式，否则按以下顺序汇报：
 
 ```text
 ## Result
-One-sentence verdict/status.
+一句话说明结论/状态。
 
 ## What changed
-Concise behavior-level summary.
+从行为层面简洁说明发生了什么变化。
 
 ## File map
-Annotated paths with short comments.
+带简短职责注释的文件路径。
 
 ## Design notes
-Only important implementation decisions and why they were made.
+只写真正重要的实现决策，以及为什么这样做。
 
 ## Tests
-What was run, what failure each check was meant to detect, and the result.
+运行了什么；每个检查打算发现什么失败；结果是什么。
 
 ## Git
-Branch, commits, push/PR status, and whether unrelated local changes remain untouched.
+Branch、commit、push/PR 状态，以及无关本地修改是否原样保留。
 
 ## What this demonstrates
-1–3 short software-engineering lessons tied to this change.
+1–3 个与本次修改直接相关的软件工程知识点。
 
 ## Next step
-The next approved workflow step. Do not silently start it.
+下一步已批准的流程动作。不要未经允许自动开始。
 ```
 
-For review-only tasks, replace `What changed` with `Findings` and give a clear `ACCEPT`, `ACCEPT WITH FOLLOW-UP`, or `NOT ACCEPT` verdict when appropriate.
+如果是 review-only 任务，把 `What changed` 替换成 `Findings`；在适用时明确给出：
+
+- `ACCEPT`
+- `ACCEPT WITH FOLLOW-UP`
+- `NOT ACCEPT`
 
 ---
 
-## 14. Explain process as well as code
+## 14. 不只解释代码，也解释开发流程
 
-When beginning a meaningful task, briefly state which development stage the project is currently in and why the next action belongs there.
+开始一个有意义的任务时，应简短说明当前项目处于软件开发生命周期的哪个阶段，以及为什么下一步属于这个阶段。
 
-Examples:
+例如：
 
-- “We are still in design, so I am not editing production code yet.”
-- “The Design Doc is accepted; the next professional step is to create the umbrella Issue and Phase 1 branch.”
-- “Phase 1 is implementation-complete; this review checks whether it is safe to merge before Phase 2.”
-- “The code is merged; now we are in release validation rather than feature development.”
+- “我们还处于 design 阶段，所以现在不修改 production code。”
+- “Design Doc 已接受；下一步正规流程是建立 umbrella Issue 和 Phase 1 branch。”
+- “Phase 1 implementation 已完成；当前 review 用来判断是否可以 merge 后再进入 Phase 2。”
+- “代码已经 merge；现在处于 release validation，而不是 feature development。”
 
-When explaining a Git or engineering operation, prefer practical terminology and relate it to the repository state. The goal is for the owner to learn how professional teams structure work, not merely to receive finished code.
-
----
-
-## 15. Avoid process theater
-
-Professional process exists to reduce ambiguity and catch meaningful failures, not to create paperwork.
-
-Do not create extra artifacts merely because large companies sometimes have them.
-
-Use judgment:
-
-- one good Design Doc is better than duplicate RFC + ADR + spec documents saying the same thing
-- one umbrella Issue is enough when sub-Issues would add no coordination value
-- one phase PR is enough when splitting it further would make review harder
-- a small bug fix can be a direct branch + PR without a Design Doc
-- do not create an ADR unless a durable architectural decision genuinely benefits from a standalone record
-
-The standard is: enough structure to make intent, ownership, review, and release state clear — no more.
+解释 Git 或工程操作时，优先使用实际术语，并结合仓库当前状态说明。目标是让项目负责人理解专业团队如何组织开发，而不仅仅是拿到最终代码。
 
 ---
 
-## 16. Final rule
+## 15. 避免 process theater
 
-Preserve working software first.
+专业流程存在的目的，是减少歧义并捕获真实故障，而不是制造文书工作。
 
-Make the smallest coherent change that satisfies the accepted requirement, explain the architecture and workflow clearly, test the behaviors that can actually fail, and stop at the approved phase boundary.
+不要仅仅因为大公司有某种流程，就额外创建没有实际价值的 artifact。
+
+应使用工程判断：
+
+- 一份好的 Design Doc，比内容重复的 RFC + ADR + spec 更有价值
+- 如果拆 sub-Issue 不会改善协调，一个 umbrella Issue 就够了
+- 如果进一步拆分会让 review 更困难，一个 Phase PR 就够了
+- 小型 bug fix 可以直接 branch + PR，不需要 Design Doc
+- 只有真正长期有价值的架构决策，才值得单独建立 ADR
+
+标准是：让 intent、ownership、review 状态和 release 状态足够清楚即可，不多做无价值流程。
+
+---
+
+## 16. 最终原则
+
+首先保护已经正常工作的软件。
+
+做满足已接受需求的最小、完整修改；清楚解释架构与开发流程；测试项目真实可能失败的行为；并在当前已经批准的 Phase 边界停止。
