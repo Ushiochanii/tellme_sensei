@@ -39,6 +39,19 @@ VISION_SYSTEM_PROMPT = """你是一个考试学习助手。
 
 【知识点】...
 """
+CONTEXT_QUESTION_SYSTEM_PROMPT = """你是一个考试学习助手。
+用户会提供分别从公共题干和当前问题区域 OCR 得到的文字。
+请使用公共题干作为当前问题的共享背景，并只回答当前问题；如果是选择题，请明确指出正确选项并解释理由。
+如果 OCR 内容明显有错误，请根据上下文合理推断并指出可能存在 OCR 错误。
+如果信息不足以判断答案，不要编造答案。
+请使用以下格式回答：
+
+【答案】...
+
+【解析】...
+
+【知识点】...
+"""
 
 
 class DeepSeekError(RuntimeError):
@@ -76,6 +89,38 @@ class DeepSeekService:
             ],
             cancel_event=cancel_event,
             log_context=f"text_length={len(text)}",
+        )
+
+    def analyze_context_question(
+        self,
+        context_text: str,
+        question_text: str,
+        cancel_event: threading.Event | None = None,
+    ) -> str:
+        """Analyze separately OCRed Context and Question text as one pair."""
+
+        context = context_text.strip()
+        question = question_text.strip()
+        if not question:
+            raise DeepSeekError("Question OCR 没有识别到有效文字，无法请求 DeepSeek。")
+        self._raise_if_cancelled(cancel_event)
+        return self._stream_completion(
+            model=self.config.model,
+            messages=[
+                {"role": "system", "content": CONTEXT_QUESTION_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        "以下内容由两个截图区域分别 OCR 得到。\n\n"
+                        f"【公共题干 / Context】\n{context or '（未识别到有效文字）'}\n\n"
+                        f"【当前问题 / Question】\n{question}"
+                    ),
+                },
+            ],
+            cancel_event=cancel_event,
+            log_context=(
+                f"context_text_length={len(context)} question_text_length={len(question)}"
+            ),
         )
 
     def analyze_image(

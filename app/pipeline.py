@@ -26,6 +26,17 @@ class PipelineResult:
     answer: str
 
 
+@dataclass(frozen=True)
+class ContextQuestionPipelineResult:
+    """OCR output and answer for one Context + Question pair."""
+
+    context_ocr: OCRResult
+    question_ocr: OCRResult
+    answer: str
+    context_revision: int
+    question_revision: int
+
+
 class StudyPipeline:
     """Coordinate OCR and DeepSeek without coupling either service to the CLI."""
 
