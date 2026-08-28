@@ -35,14 +35,6 @@ All releases are published in the [canonical repository Releases](https://github
 
 macOS builds are ad-hoc signed and not notarized. macOS may require **Open Anyway** in **Privacy & Security**, and Screen Recording permission is required for capture.
 
-### TellMeSensei Lite
-
-A lightweight Vision-only edition. No OCR component is required.
-
-| Platform | Download |
-|---|---|
-| macOS Apple Silicon (ARM64) | [TellMeSensei Lite v0.1.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/lite-v0.1.0) |
-
 ## Quick start
 
 1. Install TellMeSensei.

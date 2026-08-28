@@ -35,14 +35,6 @@
 
 macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安全性”中选择**仍要打开**，截图功能还需要授予屏幕录制权限。
 
-### TellMeSensei Lite
-
-仅包含 Vision 模式的轻量版，无需安装 OCR 组件。
-
-| 平台 | 下载 |
-|---|---|
-| macOS Apple Silicon（ARM64） | [TellMeSensei Lite v0.1.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/lite-v0.1.0) |
-
 ## 快速开始
 
 1. 安装 TellMeSensei。
