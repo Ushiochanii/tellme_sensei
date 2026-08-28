@@ -1,18 +1,16 @@
 """Session-owned Auto Watch lifecycle and screen ROI model."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-import uuid
 
-from PySide6.QtCore import QObject, QTimer, QRect, Signal
-from PySide6.QtGui import QGuiApplication, QImage, QScreen
+from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtGui import QImage
 
 from app.analysis import AnalysisMode
 from app.auto_watch.coordinator import AutoWatchCoordinator, CoordinatorEvent
 from app.auto_watch.detector import preprocess_qimage
 from app.auto_watch.dispatcher import AnalysisDispatcher, AutoWatchDispatcherBridge
-from app.auto_watch.models import AnalysisState, AutoWatchSettings, MonitorState
+from app.auto_watch.models import MonitorState, WatchRegion
 from app.auto_watch.sampler import ScreenSampler
 from app.config import ConfigManager
 from app.ocr.local_session import LocalOCRSession
@@ -20,39 +18,6 @@ from .watch_overlay import WatchOverlay
 from .watch_mini_controller import WatchMiniController
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class WatchRegion:
-    logical_roi: QRect
-    screen: QScreen
-    screen_geometry: QRect
-    device_pixel_ratio: float
-    session_id: str
-
-    @classmethod
-    def create(cls, screen: QScreen, roi: QRect, session_id: str | None = None):
-        if screen is None or not isinstance(roi, QRect) or roi.isEmpty():
-            raise ValueError("watch ROI must be non-empty")
-        geometry = QRect(screen.geometry())
-        local = QRect(0, 0, geometry.width(), geometry.height())
-        if geometry.isEmpty() or not local.contains(roi.topLeft()) or not local.contains(roi.bottomRight()):
-            raise ValueError("watch ROI must be fully contained in one screen")
-        dpr = float(screen.devicePixelRatio()) if hasattr(screen, "devicePixelRatio") else 1.0
-        return cls(QRect(roi), screen, geometry, dpr, session_id or uuid.uuid4().hex)
-
-    @property
-    def global_roi(self) -> QRect:
-        return self.logical_roi.translated(self.screen_geometry.topLeft())
-
-    def is_valid(self) -> bool:
-        screens = QGuiApplication.screens()
-        if self.screen not in screens:
-            return False
-        if QRect(self.screen.geometry()) != self.screen_geometry:
-            return False
-        current_dpr = float(self.screen.devicePixelRatio()) if hasattr(self.screen, "devicePixelRatio") else 1.0
-        return abs(current_dpr - self.device_pixel_ratio) <= 1e-6
 
 
 class AutoWatchSession(QObject):

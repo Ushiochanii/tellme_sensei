@@ -101,8 +101,17 @@ class AutoWatchCoordinator:
         self._stability.reset()
         self._latest_frame = None
 
-    def analyze_now(self, callback: Callable[[CoordinatorEvent], None] | None = None) -> CoordinatorEvent | None:
-        """Immediately accept the most recently sampled frame, if active."""
+    def analyze_now(self, callback: Callable[[CoordinatorEvent], None] | None = None, *,
+                   frame: DetectorFrame | np.ndarray | None = None) -> CoordinatorEvent | None:
+        """Immediately accept the most recently sampled frame, if active.
+
+        ``frame`` is keyword-only so existing callback callers remain compatible;
+        the pair coordinator uses it to pass the current dual-region sample.
+        """
+        if self.state in (MonitorState.STOPPED, MonitorState.PAUSED):
+            return None
+        if frame is not None:
+            self._latest_frame = frame if isinstance(frame, DetectorFrame) else DetectorFrame(frame)
         if self.state in (MonitorState.STOPPED, MonitorState.PAUSED) or self._latest_frame is None:
             return None
         kind = WatchEvent.INITIAL_STABLE_FRAME if self.generation == 0 else WatchEvent.NEW_STABLE_FRAME
