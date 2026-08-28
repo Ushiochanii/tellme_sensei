@@ -6,12 +6,11 @@ import inspect
 import logging
 import threading
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtGui import QImage
 
-from app.auto_watch.context_ocr_cache import ContextOCRCache
 from app.ocr.base import OCRProvider
 from app.ocr.types import OCRCancelled, OCRError, OCRResult
 from app.pipeline import ContextQuestionPipelineResult, PipelineError
@@ -20,6 +19,9 @@ from app.thread_info import current_thread_info
 from app.workers.processing_worker import ProcessingCancelled
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from app.auto_watch.context_ocr_cache import ContextOCRCache
 
 
 class ContextQuestionProcessingWorker(QObject):
@@ -67,7 +69,14 @@ class ContextQuestionProcessingWorker(QObject):
         self.context_revision = self._validate_revision(context_revision, "context_revision")
         self.question_revision = self._validate_revision(question_revision, "question_revision")
         self.job_id = job_id or uuid.uuid4().hex
-        self.context_ocr_cache = context_ocr_cache or ContextOCRCache()
+        if context_ocr_cache is None:
+            # Keep direct worker imports independent from auto_watch's eager
+            # public exports; dispatcher imports this worker while that package
+            # is still being initialized.
+            from app.auto_watch.context_ocr_cache import ContextOCRCache
+
+            context_ocr_cache = ContextOCRCache()
+        self.context_ocr_cache = context_ocr_cache
         self._cancel_event = cancel_event or threading.Event()
         self._cancelled_emitted = False
 
@@ -94,12 +103,17 @@ class ContextQuestionProcessingWorker(QObject):
 
             context_ocr = self.context_ocr_cache.get(self.context_revision)
             if context_ocr is None:
+                cache_clear_generation = self.context_ocr_cache.clear_generation
                 logger.info("Context OCR started job_id=%s revision=%s", self.job_id, self.context_revision)
                 self.context_ocr_started.emit()
                 self.job_context_ocr_started.emit(self.job_id)
                 context_ocr = self._recognize_with_cancellation(self.context_image)
                 self._raise_if_cancelled()
-                self.context_ocr_cache.put(self.context_revision, context_ocr)
+                self.context_ocr_cache.put(
+                    self.context_revision,
+                    context_ocr,
+                    clear_generation=cache_clear_generation,
+                )
             else:
                 logger.info("Context OCR cache hit job_id=%s revision=%s", self.job_id, self.context_revision)
             self.context_ocr_finished.emit(context_ocr.text)

@@ -16,6 +16,13 @@ class ContextOCRCache:
     def __init__(self) -> None:
         self._cached_context_revision: int | None = None
         self._cached_context_ocr_result: OCRResult | None = None
+        self._clear_generation = 0
+
+    @property
+    def clear_generation(self) -> int:
+        """Return the generation in which the current cache was created."""
+
+        return self._clear_generation
 
     @property
     def cached_context_revision(self) -> int | None:
@@ -33,18 +40,21 @@ class ContextOCRCache:
             return None
         return self._cached_context_ocr_result
 
-    def put(self, context_revision: int, result: OCRResult) -> None:
+    def put(self, context_revision: int, result: OCRResult, *, clear_generation: int | None = None) -> None:
         """Store one completed OCR result under its Context revision."""
 
         self._validate_revision(context_revision)
         if not isinstance(result, OCRResult):
             raise TypeError("Context OCR cache requires an OCRResult")
+        if clear_generation is not None and clear_generation != self._clear_generation:
+            return
         self._cached_context_revision = context_revision
         self._cached_context_ocr_result = result
 
     def clear(self) -> None:
         """Drop all cached data at the end of a session."""
 
+        self._clear_generation += 1
         self._cached_context_revision = None
         self._cached_context_ocr_result = None
 

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 from PySide6.QtCore import QObject, Signal
@@ -21,6 +25,23 @@ from app.pipeline import ContextQuestionPipelineResult
 from app.services.deepseek_service import DeepSeekService
 from app.workers.context_question_processing_worker import ContextQuestionProcessingWorker
 from app.workers.vision_processing_worker import VisionProcessingWorker
+
+
+def test_context_question_worker_direct_import_avoids_auto_watch_cycle() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from app.workers.context_question_processing_worker import ContextQuestionProcessingWorker",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env={**os.environ, "QT_QPA_PLATFORM": "offscreen"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def _image(color: str, width: int = 20, height: int = 12) -> QImage:
@@ -87,6 +108,38 @@ def test_dispatcher_stop_and_new_session_clear_context_cache() -> None:
     assert cache.cached_context_ocr_result is None
     cache.put(2, _ocr("session two"))
     dispatcher.reset_session("new-session")
+    assert cache.cached_context_ocr_result is None
+
+
+def test_context_ocr_cache_rejects_worker_write_after_stop_clear() -> None:
+    class _StopBeforeWriteCache(ContextOCRCache):
+        def __init__(self) -> None:
+            super().__init__()
+            self.dispatcher = AnalysisDispatcher(
+                worker_factory=lambda _request: None,
+                context_ocr_cache=self,
+            )
+
+        def put(self, context_revision, result, *, clear_generation=None):
+            self.dispatcher.stop()
+            return super().put(
+                context_revision,
+                result,
+                clear_generation=clear_generation,
+            )
+
+    cache = _StopBeforeWriteCache()
+    _run_context_question_worker(
+        cache,
+        _RecordingOCR(),
+        _RecordingContextQuestionAI(),
+        _image("red"),
+        _image("blue"),
+        1,
+        1,
+    )
+
+    assert cache.cached_context_revision is None
     assert cache.cached_context_ocr_result is None
 
 
