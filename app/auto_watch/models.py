@@ -156,6 +156,42 @@ class AnalysisRequest:
 
 
 @dataclass(frozen=True)
+class ContextQuestionAnalysisRequest:
+    """Detached input for one Context + Question analysis generation."""
+
+    generation: int
+    mode: AnalysisMode
+    context_image: QImage
+    question_image: QImage
+    context_revision: int
+    question_revision: int
+    source: str = "auto_watch_context_question"
+    session_id: str = "auto-watch"
+    request_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.generation, int) or isinstance(self.generation, bool) or self.generation <= 0:
+            raise ValueError("generation must be a positive integer")
+        if not isinstance(self.mode, AnalysisMode):
+            raise ValueError("mode must be AnalysisMode.TEXT or AnalysisMode.VISION")
+        if self.source != "auto_watch_context_question":
+            raise ValueError("source must be auto_watch_context_question")
+        for name in ("context_revision", "question_revision"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        for name in ("session_id", "request_id"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a non-empty string")
+        for name in ("context_image", "question_image"):
+            image = getattr(self, name)
+            if not isinstance(image, QImage) or image.isNull() or image.width() <= 0 or image.height() <= 0:
+                raise ValueError(f"{name} must be a non-empty QImage")
+            object.__setattr__(self, name, image.copy())
+
+
+@dataclass(frozen=True)
 class DetectorConfig:
     max_side: int = 96
     poll_interval_ms: int = 250

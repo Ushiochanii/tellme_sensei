@@ -13,9 +13,12 @@ from app.analysis import AnalysisMode
 from app.config import AppConfig
 from app.ocr.factory import create_ocr_provider
 from app.services.deepseek_service import DeepSeekService
+from app.workers.context_question_processing_worker import ContextQuestionProcessingWorker
 from app.workers.processing_worker import ProcessingWorker
 from app.workers.vision_processing_worker import VisionProcessingWorker
-from .models import AnalysisRequest, AnalysisState, AutoWatchSettings
+from .composite import compose_context_question_image
+from .context_ocr_cache import ContextOCRCache
+from .models import AnalysisRequest, AnalysisState, AutoWatchSettings, ContextQuestionAnalysisRequest
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +118,7 @@ class AnalysisDispatcher:
     def __init__(self, settings: AutoWatchSettings | None = None, *, worker_factory=None,
                  scheduler=None, config: AppConfig | None = None, ocr_provider=None,
                  local_ocr_session=None,
+                 context_ocr_cache: ContextOCRCache | None = None,
                  deepseek_service=None, on_result=None, on_error=None, on_cancelled=None,
                  on_finished=None, on_observe=None, session_id: str = "auto-watch") -> None:
         self.settings = settings or AutoWatchSettings()
@@ -126,6 +130,7 @@ class AnalysisDispatcher:
         # cached after first construction, avoiding a model/worker cold start
         # on every generation while retaining the old provider injection API.
         self.local_ocr_session = local_ocr_session
+        self.context_ocr_cache = context_ocr_cache or ContextOCRCache()
         self.on_result, self.on_error = on_result, on_error
         self.on_cancelled, self.on_finished = on_cancelled, on_finished
         self.on_observe = on_observe
@@ -180,11 +185,80 @@ class AnalysisDispatcher:
         self._replace_delay(request)
         return request
 
+    def submit_context_question(
+        self,
+        context_image,
+        question_image,
+        mode: AnalysisMode = AnalysisMode.TEXT,
+        *,
+        context_revision: int,
+        question_revision: int,
+        session_id=None,
+        request_id=None,
+        generation=None,
+    ) -> ContextQuestionAnalysisRequest | None:
+        """Submit one pair through the same Latest-Wins machinery as Single Region."""
+
+        self._stopped = False
+        if session_id is not None:
+            self.session_id = session_id
+        if generation is None:
+            self.generation += 1
+        else:
+            # Pair generation is externally assigned by PairCoordinator. A
+            # lower generation cannot be allowed to move the dispatcher's
+            # authority backwards after a newer pair was accepted.
+            if (
+                not isinstance(generation, int)
+                or isinstance(generation, bool)
+                or generation <= 0
+                or generation <= self.generation
+                or (self.session_id, generation) in self._accepted_external
+            ):
+                logger.info(
+                    "stale external Context/question generation discard generation=%s session=%s",
+                    generation,
+                    self.session_id,
+                )
+                return None
+            self.generation = generation
+            self._accepted_external.add((self.session_id, generation))
+        request = ContextQuestionAnalysisRequest(
+            self.generation,
+            AnalysisMode(mode),
+            context_image,
+            question_image,
+            context_revision,
+            question_revision,
+            session_id=session_id or self.session_id,
+            request_id=request_id or uuid.uuid4().hex,
+        )
+        logger.info(
+            "accepted Context/question generation=%s request=%s session=%s active=%s pending=%s",
+            request.generation,
+            request.request_id,
+            request.session_id,
+            bool(self.active_request),
+            bool(self.pending_request),
+        )
+        self._observe("accepted", request)
+        if self.active_request is not None and self._pending_ready:
+            self.pending_request = None
+            self._pending_ready = False
+        self._replace_delay(request)
+        return request
+
     def analyze_now(self, image, mode=AnalysisMode.TEXT, **kwargs):
         return self.submit(image, mode, **kwargs)
 
+    def clear_context_ocr_cache(self) -> None:
+        """Clear session-only Context OCR state at an explicit lifecycle boundary."""
+
+        self.context_ocr_cache.clear()
+
     def reset_session(self, session_id: str) -> None:
         self.stop()
+        self.clear_context_ocr_cache()
         self.session_id = session_id
         self.generation = 0
         self._accepted_external.clear()
@@ -192,6 +266,7 @@ class AnalysisDispatcher:
     def stop(self) -> None:
         self._stopped = True
         self.generation += 1
+        self.clear_context_ocr_cache()
         self._cancel_delay()
         self.pending_request = None
         self._pending_ready = False
@@ -360,7 +435,45 @@ class AnalysisDispatcher:
         if self.deepseek_service is None:
             if config is None: raise ValueError("config or worker_factory is required")
             self.deepseek_service = DeepSeekService(config)
-        if request.mode is AnalysisMode.VISION:
+        if isinstance(request, ContextQuestionAnalysisRequest):
+            if request.mode is AnalysisMode.VISION:
+                image = compose_context_question_image(
+                    request.context_image,
+                    request.question_image,
+                )
+                worker = VisionProcessingWorker(image, self.deepseek_service, request.request_id)
+                return _QtWorkerHandle(worker)
+            if self.ocr_provider is None:
+                try:
+                    factory_parameters = inspect.signature(create_ocr_provider).parameters
+                except (TypeError, ValueError):
+                    factory_parameters = {}
+                supports_session = (
+                    "local_ocr_session" in factory_parameters
+                    or any(p.kind is inspect.Parameter.VAR_KEYWORD
+                           for p in factory_parameters.values())
+                )
+                if supports_session:
+                    self.ocr_provider = create_ocr_provider(
+                        config, local_ocr_session=self.local_ocr_session
+                    )
+                else:
+                    self.ocr_provider = create_ocr_provider(config)
+                logger.info(
+                    "OCR provider initialized once for Context/question dispatcher session=%s provider=%s",
+                    self.session_id, type(self.ocr_provider).__name__,
+                )
+            worker = ContextQuestionProcessingWorker(
+                request.context_image,
+                request.question_image,
+                self.ocr_provider,
+                self.deepseek_service,
+                request.context_revision,
+                request.question_revision,
+                job_id=request.request_id,
+                context_ocr_cache=self.context_ocr_cache,
+            )
+        elif request.mode is AnalysisMode.VISION:
             worker = VisionProcessingWorker(request.image, self.deepseek_service, request.request_id)
         else:
             if self.ocr_provider is None:
@@ -411,6 +524,30 @@ class AutoWatchDispatcherBridge:
         if request is not None:
             self._submitted.add(key)
         return request
+
+    def submit_pair_event(self, event, *, mode=None, session_id=None, request_id=None):
+        """Submit one PairSnapshot while deduplicating its pair generation."""
+
+        session = session_id or self.dispatcher.session_id
+        key = (session, event.generation)
+        if key in self._submitted:
+            logger.info("duplicate stable pair discard generation=%s session=%s", event.generation, session)
+            return None
+        request = self.dispatcher.submit_context_question(
+            event.context_image,
+            event.question_image,
+            mode or self.mode,
+            context_revision=event.context_revision,
+            question_revision=event.question_revision,
+            session_id=session,
+            request_id=request_id,
+            generation=event.generation,
+        )
+        if request is not None:
+            self._submitted.add(key)
+        return request
+
+    submit_context_question_event = submit_pair_event
 
     def reset_session(self, session_id: str) -> None:
         self._submitted.clear()

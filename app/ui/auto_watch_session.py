@@ -8,6 +8,7 @@ from PySide6.QtGui import QImage
 
 from app.analysis import AnalysisMode
 from app.auto_watch.coordinator import AutoWatchCoordinator, CoordinatorEvent
+from app.auto_watch.context_ocr_cache import ContextOCRCache
 from app.auto_watch.detector import preprocess_qimage
 from app.auto_watch.dispatcher import AnalysisDispatcher, AutoWatchDispatcherBridge
 from app.auto_watch.models import MonitorState, WatchRegion
@@ -33,6 +34,7 @@ class AutoWatchSession(QObject):
 
     def __init__(self, region: WatchRegion, mode: AnalysisMode, *, config_manager=None,
                  settings_repository=None, local_ocr_session=None, dispatcher=None,
+                 context_ocr_cache=None,
                  overlay=None, mini=None, sampler_factory=None, timer_factory=None,
                  coordinator_factory=None, worker_factory=None, parent=None):
         super().__init__(parent)
@@ -43,10 +45,14 @@ class AutoWatchSession(QObject):
         repository = settings_repository or self.config_manager.settings_repository
         self.settings = repository.auto_watch_settings()
         self.local_ocr_session = local_ocr_session or LocalOCRSession()
+        if context_ocr_cache is None and dispatcher is not None:
+            context_ocr_cache = getattr(dispatcher, "context_ocr_cache", None)
+        self.context_ocr_cache = context_ocr_cache or ContextOCRCache()
         config = self.config_manager.load(require_api_key=False)
         self._dispatcher_injected = dispatcher is not None
         self.dispatcher = dispatcher or AnalysisDispatcher(
             settings=self.settings, config=config, local_ocr_session=self.local_ocr_session,
+            context_ocr_cache=self.context_ocr_cache,
             worker_factory=worker_factory, session_id=region.session_id,
             on_result=self._on_result, on_error=self._on_error,
             on_cancelled=self._on_cancelled, on_finished=self._on_finished,
@@ -140,7 +146,7 @@ class AutoWatchSession(QObject):
             if hasattr(self.mini, "close_from_session"): self.mini.close_from_session()
             else: self.mini.close()
             self.mini = None
-        self.dispatcher.stop(); self.latest_image = None
+        self.dispatcher.stop(); self.context_ocr_cache.clear(); self.latest_image = None
         if self.dispatcher.active_request is None:
             self.region = None; self._finish_stop()
         else:
