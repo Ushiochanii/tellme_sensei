@@ -72,6 +72,117 @@ jobs:
       - name: Install Core development dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
 
+      - name: Diagnose Vision Lite close cleanup on Windows
+        shell: pwsh
+        run: |
+          $diagnosticScript = Join-Path $env:RUNNER_TEMP 'vision_lite_diagnostic.py'
+          @'
+          import faulthandler
+          import sys
+          import threading
+
+          import pytest
+
+
+          def log_stage(stage, item):
+              threads = ', '.join(
+                  f'{thread.name}:{thread.ident}:{thread.is_alive()}'
+                  for thread in threading.enumerate()
+              )
+              print(f'[vision-lite-diag] {stage} nodeid={item.nodeid} threads={threads}', flush=True)
+
+
+          class DiagnosticPlugin:
+              @pytest.hookimpl(hookwrapper=True)
+              def pytest_runtest_setup(self, item):
+                  log_stage('SETUP_START', item)
+                  yield
+                  log_stage('SETUP_END', item)
+
+              @pytest.hookimpl(hookwrapper=True)
+              def pytest_runtest_call(self, item):
+                  log_stage('CALL_START', item)
+                  yield
+                  log_stage('CALL_END', item)
+
+              @pytest.hookimpl(hookwrapper=True)
+              def pytest_runtest_teardown(self, item):
+                  log_stage('TEARDOWN_START', item)
+                  yield
+                  log_stage('TEARDOWN_END', item)
+
+
+          faulthandler.dump_traceback_later(10.0, repeat=True)
+          try:
+              raise SystemExit(pytest.main(sys.argv[1:], plugins=[DiagnosticPlugin()]))
+          finally:
+              faulthandler.cancel_dump_traceback_later()
+          '@ | Set-Content -Path $diagnosticScript -Encoding utf8
+
+          $diagnosticCases = @(
+            [pscustomobject]@{
+              Name = 'target-alone'
+              Tests = @(
+                'tests/test_vision_lite.py::test_lite_settings_close_cancels_connection_thread'
+              )
+            }
+            [pscustomobject]@{
+              Name = 'failure-then-target'
+              Tests = @(
+                'tests/test_vision_lite.py::test_lite_settings_connection_failure_is_user_visible'
+                'tests/test_vision_lite.py::test_lite_settings_close_cancels_connection_thread'
+              )
+            }
+          )
+
+          foreach ($case in $diagnosticCases) {
+            for ($run = 1; $run -le 3; $run++) {
+              $logStem = "vision-lite-$($case.Name)-run-$run"
+              $stdoutLog = Join-Path $env:RUNNER_TEMP "$logStem.stdout.log"
+              $stderrLog = Join-Path $env:RUNNER_TEMP "$logStem.stderr.log"
+              $arguments = @(
+                '-u'
+                $diagnosticScript
+                '--capture=no'
+                '-vv'
+                '--setup-show'
+              ) + $case.Tests
+
+              Write-Host "[vision-lite-diag] START case=$($case.Name) run=$run"
+              $process = Start-Process -FilePath 'python' -ArgumentList $arguments `
+                -WorkingDirectory $env:GITHUB_WORKSPACE `
+                -RedirectStandardOutput $stdoutLog `
+                -RedirectStandardError $stderrLog `
+                -PassThru
+              if (-not $process.WaitForExit(45000)) {
+                Write-Error "[vision-lite-diag] TIMEOUT after 45s case=$($case.Name) run=$run"
+                try {
+                  $process.Kill()
+                } catch {
+                  Write-Error "[vision-lite-diag] Could not terminate timed-out process: $($_.Exception.Message)"
+                }
+                if (-not $process.WaitForExit(5000)) {
+                  Write-Error "[vision-lite-diag] Timed-out process did not exit after termination request"
+                }
+                Write-Host "----- $stdoutLog -----"
+                if (Test-Path $stdoutLog) { Get-Content $stdoutLog }
+                Write-Host "----- $stderrLog -----"
+                if (Test-Path $stderrLog) { Get-Content $stderrLog }
+                exit 124
+              }
+              $process.WaitForExit()
+              Write-Host "----- $stdoutLog -----"
+              if (Test-Path $stdoutLog) { Get-Content $stdoutLog }
+              Write-Host "----- $stderrLog -----"
+              if (Test-Path $stderrLog) { Get-Content $stderrLog }
+              if ($process.ExitCode -ne 0) {
+                Write-Error "[vision-lite-diag] FAIL exit=$($process.ExitCode) case=$($case.Name) run=$run"
+                exit $process.ExitCode
+              }
+              Write-Host "[vision-lite-diag] PASS case=$($case.Name) run=$run"
+            }
+          }
+
       - name: Run Windows tests file by file
         shell: pwsh
         run: |
