@@ -1,6 +1,6 @@
 from PySide6.QtCore import QObject, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QImage
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QApplication
 
 from app.analysis import AnalysisMode
@@ -280,15 +280,14 @@ def test_session_pause_resume_analyze_now_and_mini_actions(qt_app):
 
 def test_session_stop_waits_for_active_dispatcher_and_is_idempotent(qt_app):
     session, repo, config, timer, sampler, coordinator, dispatcher, overlay, mini, image = _session(qt_app, active=True)
-    session.start(); stopped = []
-    session.session_stopped.connect(lambda: stopped.append(True))
+    session.start(); stopped = QSignalSpy(session.session_stopped)
     session.stop(); session.shutdown()
-    assert stopped == [] and session.region is not None
+    assert stopped.count() == 0 and session.region is not None
     dispatcher.active_request = None
-    QTest.qWait(30)
-    assert stopped == [True] and session.region is None
+    assert stopped.wait(1000)
+    assert stopped.count() == 1 and session.region is None
     session.stop(); session.shutdown()
-    assert stopped == [True] and dispatcher.stop_count == 1
+    assert stopped.count() == 1 and dispatcher.stop_count == 1
 
 
 def test_session_fault_pauses_once_and_late_callbacks_are_ignored(qt_app):
