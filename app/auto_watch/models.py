@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 import math
+import uuid
 import numpy as np
-from PySide6.QtGui import QImage
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QGuiApplication, QImage, QScreen
 
 from app.analysis import AnalysisMode
 
@@ -15,6 +17,104 @@ class MonitorState(Enum):
     WATCHING = auto()
     CHANGING = auto()
     PAUSED = auto()
+
+
+# Pair monitoring deliberately projects onto the existing compact vocabulary.
+PairMonitorState = MonitorState
+
+
+class WatchRegionRole(Enum):
+    CONTEXT = "context"
+    QUESTION = "question"
+
+
+@dataclass(frozen=True)
+class WatchRegion:
+    """A screen-local ROI plus the display snapshot it was selected against."""
+
+    logical_roi: QRect
+    screen: QScreen
+    screen_geometry: QRect
+    device_pixel_ratio: float
+    session_id: str
+
+    @classmethod
+    def create(cls, screen: QScreen, roi: QRect, session_id: str | None = None) -> "WatchRegion":
+        if screen is None or not isinstance(roi, QRect) or roi.isEmpty():
+            raise ValueError("watch ROI must be non-empty")
+        geometry = QRect(screen.geometry())
+        local = QRect(0, 0, geometry.width(), geometry.height())
+        if geometry.isEmpty() or not local.contains(roi.topLeft()) or not local.contains(roi.bottomRight()):
+            raise ValueError("watch ROI must be fully contained in one screen")
+        dpr = float(screen.devicePixelRatio()) if hasattr(screen, "devicePixelRatio") else 1.0
+        return cls(QRect(roi), screen, geometry, dpr, session_id or uuid.uuid4().hex)
+
+    @property
+    def global_roi(self) -> QRect:
+        return self.logical_roi.translated(self.screen_geometry.topLeft())
+
+    def is_valid(self) -> bool:
+        screens = QGuiApplication.screens()
+        if self.screen not in screens:
+            return False
+        if QRect(self.screen.geometry()) != self.screen_geometry:
+            return False
+        current_dpr = float(self.screen.devicePixelRatio()) if hasattr(self.screen, "devicePixelRatio") else 1.0
+        return abs(current_dpr - self.device_pixel_ratio) <= 1e-6
+
+
+@dataclass(frozen=True)
+class ContextQuestionRegions:
+    """Exactly one Context and one Question ROI from the same display/session."""
+
+    context: WatchRegion
+    question: WatchRegion
+    session_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.context, WatchRegion) or not isinstance(self.question, WatchRegion):
+            raise ValueError("Context and Question must both be WatchRegion instances")
+        if not isinstance(self.session_id, str) or not self.session_id.strip():
+            raise ValueError("session_id must be a non-empty string")
+        if self.context.screen is None or self.question.screen is None:
+            raise ValueError("Context and Question must belong to a screen")
+        if self.context.logical_roi.isEmpty() or self.question.logical_roi.isEmpty():
+            raise ValueError("Context and Question ROIs must be non-empty")
+        if self.context.session_id != self.question.session_id or self.context.session_id != self.session_id:
+            raise ValueError("Context and Question must use the same session ID")
+        same_screen = self.context.screen is self.question.screen
+        if not same_screen:
+            try:
+                same_screen = bool(self.context.screen == self.question.screen)
+            except Exception:
+                same_screen = False
+        if not same_screen:
+            raise ValueError("Context and Question must be on the same screen")
+        if self.context.screen_geometry != self.question.screen_geometry:
+            raise ValueError("Context and Question must use the same screen geometry")
+        if abs(self.context.device_pixel_ratio - self.question.device_pixel_ratio) > 1e-6:
+            raise ValueError("Context and Question must use the same device pixel ratio")
+
+    @classmethod
+    def create(cls, context: WatchRegion, question: WatchRegion, session_id: str | None = None) -> "ContextQuestionRegions":
+        return cls(context, question, session_id or context.session_id)
+
+    @property
+    def screen(self) -> QScreen:
+        return self.context.screen
+
+    @property
+    def screen_geometry(self) -> QRect:
+        return QRect(self.context.screen_geometry)
+
+    @property
+    def device_pixel_ratio(self) -> float:
+        return self.context.device_pixel_ratio
+
+    def is_valid(self) -> bool:
+        """Return whether both selected regions still describe the same display snapshot."""
+
+        return self.context.is_valid() and self.question.is_valid()
 
 
 class WatchEvent(Enum):
@@ -178,3 +278,29 @@ class DetectorFrame:
 class DetectorMetrics:
     change_ratio: float
     changed_bbox_ratio: float | None = None
+
+
+@dataclass(frozen=True)
+class PairSnapshot:
+    """Detached full-resolution images for one accepted Context + Question pair."""
+
+    generation: int
+    context_revision: int
+    question_revision: int
+    context_image: QImage
+    question_image: QImage
+
+    def __post_init__(self) -> None:
+        for name in ("generation", "context_revision", "question_revision"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        for name in ("context_image", "question_image"):
+            image = getattr(self, name)
+            if not isinstance(image, QImage) or image.isNull() or image.width() <= 0 or image.height() <= 0:
+                raise ValueError(f"{name} must be a non-empty QImage")
+            object.__setattr__(self, name, image.copy())
+
+
+# Keep the descriptive design-doc name available alongside the concise test/API name.
+ContextQuestionSnapshot = PairSnapshot
