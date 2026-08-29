@@ -216,6 +216,18 @@ class LocalOCRSession:
                         and payload.get("mode") == "persistent"
                     ):
                         return
+                    if payload.get("schema_version") == 1 and payload.get("ok") is False:
+                        startup_error = payload.get("error")
+                        if isinstance(startup_error, str) and startup_error.strip():
+                            self._terminate_process(process)
+                            self._clear_process(process)
+                            logger.error(
+                                "OCR diagnosis=worker_start_failed phase=worker_start error=%s",
+                                startup_error,
+                            )
+                            raise OCRError(startup_error)
+                except OCRError:
+                    raise
                 except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
                     pass
                 self._terminate_process(process)
