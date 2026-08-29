@@ -349,6 +349,8 @@ python gui.py --smoke-core
 
 Release-critical validation 优先使用 clean checkout / clean worktree，避免未提交的本地文件意外满足 import、dependency 或 runtime 行为。
 
+在已确认禁止 Qt local IPC 的受限 sandbox 中，不重复运行 tests/test_single_instance.py；使用其余 Core tests 作为本地验证，并以 GitHub Core CI 作为该文件的 authoritative validation。不得把 sandbox IPC 限制报告为产品 regression。
+
 ---
 
 ## 10. Review 标准
