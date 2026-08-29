@@ -31,6 +31,11 @@ class CaptureOverlay(QWidget):
         if self._screen is None:
             raise RuntimeError("没有可用的显示器。")
         self._screen_geometry = self._screen.geometry()
+        # The launcher hides immediately before creating this overlay. On Windows,
+        # flush that visibility change to the window system before grabWindow(0)
+        # so the floating Text/Vision controller is not baked into the screenshot.
+        if sys.platform == "win32":
+            QGuiApplication.sync()
         self._screen_image = self._screen.grabWindow(0).toImage()
         self._drag_start: QPoint | None = None
         self._selection = QRect()
