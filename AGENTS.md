@@ -156,6 +156,15 @@ fix/capture-scaling
 
 如果同一个文件同时包含当前任务修改和用户自己的修改，只 stage 当前任务相关的 hunks。
 
+短生命周期 branch 在任务完成后也应及时收尾：
+
+- 有 open PR、仍在 review、或明确计划继续开发的 branch 必须保留。
+- PR merge 后，如果该 branch 不再承担明确的后续工作，应把删除对应远端 branch 作为 merge 的常规收尾动作；PR、commit、diff 和 Issue 历史不会因此丢失。
+- 被关闭但未 merge 的 branch，如果对应工作已经明确放弃、被其他实现替代或 Issue 已通过其他路径解决，在确认没有仍计划保留的独有工作后删除。
+- Phase、临时 fix、RC 和实验 branch 不作为历史归档长期保留；历史应由 Git commit、PR、tag 和 Release 承担。
+- 只有确有长期职责并在仓库流程中明确说明的 branch 才长期保留。默认长期 branch 是 `main`。
+- 不得删除 `main`，也不得删除仍有 open PR 或仍计划合入的未合并工作。
+
 ### 4.4 Pull Request
 
 PR 应解释“本次实现实际改变了什么”，而不是重新讲一遍整个 Design Doc。
@@ -396,7 +405,7 @@ docs: add v0.8.1 implementation plan
 
 除非用户明确要求，并且仓库状态确实适合，否则不要 rewrite published history 或 force-push。
 
-不要擅自 merge 到 `main`、创建 tag、发布 release 或删除 branch，除非这些动作明确属于当前已经批准的步骤。
+不要擅自 merge 到 `main`、创建 tag 或发布 release，除非这些动作明确属于当前已经批准的步骤。Branch 删除遵循 Section 4.3：当一个已批准的 PR 被 merge 后，完成该 PR 的短生命周期 branch 清理属于正常收尾；对于与当前任务无关、状态不明确或仍可能继续使用的 branch，不得自行删除。
 
 ---
 
