@@ -14,6 +14,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtGui import QIcon, QImage
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QButtonGroup,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from app.analysis import AnalysisMode
 from app.ocr.types import OCRLine, OCRResult
-from app.pipeline import PipelineResult
+from app.pipeline import ContextQuestionPipelineResult, PipelineResult
 from app.capture.overlay import CaptureOverlay
 from app.config import ConfigError, ConfigManager
 from app.local_ocr.component_manager import LocalOCRComponentManager
@@ -50,8 +51,11 @@ from app.ui.theme import (
 from app.workers.processing_worker import ProcessingWorker
 from app.workers.local_ocr_prewarm_worker import LocalOCRPrewarmWorker
 from app.workers.vision_processing_worker import VisionProcessingWorker
-from app.ui.auto_watch_session import AutoWatchSession, WatchRegion
+from app.auto_watch.models import ContextQuestionRegions, WatchRegion
+from app.ui.auto_watch_session import AutoWatchSession
+from app.ui.context_question_auto_watch_session import ContextQuestionAutoWatchSession
 from app.ui.watch_mini_controller import WatchMiniController
+from app.ui.watch_overlay import ContextQuestionWatchOverlay
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +87,14 @@ class _AutoWatchFakeHandle(QObject):
         mode = getattr(self.request, "mode", None)
         if mode is AnalysisMode.VISION:
             result = "Fake Vision answer"
+        elif hasattr(self.request, "context_image"):
+            result = ContextQuestionPipelineResult(
+                context_ocr=OCRResult("Fake OCR context", (OCRLine("Fake OCR context"),)),
+                question_ocr=OCRResult("Fake OCR question", (OCRLine("Fake OCR question"),)),
+                answer="Fake OCR answer",
+                context_revision=getattr(self.request, "context_revision", 1),
+                question_revision=getattr(self.request, "question_revision", 1),
+            )
         else:
             result = PipelineResult(
                 ocr=OCRResult("Fake OCR question", (OCRLine("Fake OCR question"),)),
@@ -154,10 +166,18 @@ class MainWindow(QWidget):
         self._auto_watch_session_id = None
         self._auto_watch_generation = 0
         self._auto_watch_region = None
+        self._auto_watch_regions = None
+        self._auto_watch_context_region = None
+        self._auto_watch_question_region = None
+        self._auto_watch_region_mode = "single"
+        self._auto_watch_selection_preview = None
+        self._auto_watch_selection_role = None
         self.setWindowTitle("TellMeSensei")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setObjectName("mainController")
+        # Keep the launcher's established size; setup rows are compact so the
+        # new Region Mode controls fit without changing Single Region layout.
         self.setFixedSize(340, 330)
         self.setStyleSheet(controller_stylesheet())
         layout = QVBoxLayout(self)
@@ -225,19 +245,79 @@ class MainWindow(QWidget):
         layout.addWidget(self.auto_watch_main_view)
         self.auto_watch_setup = QWidget(self)
         setup_layout = QVBoxLayout(self.auto_watch_setup)
-        self.auto_watch_text_radio = QRadioButton("Text / OCR")
-        self.auto_watch_vision_radio = QRadioButton("Vision")
+        setup_layout.setContentsMargins(0, 0, 0, 0)
+        setup_layout.setSpacing(6)
+        self.auto_watch_text_radio = QRadioButton("Text / OCR", self.auto_watch_setup)
+        self.auto_watch_vision_radio = QRadioButton("Vision", self.auto_watch_setup)
         self.auto_watch_text_radio.setChecked(True)
+        self.auto_watch_analysis_mode_group = QButtonGroup(self)
+        self.auto_watch_analysis_mode_group.setExclusive(True)
+        self.auto_watch_analysis_mode_group.addButton(self.auto_watch_text_radio)
+        self.auto_watch_analysis_mode_group.addButton(self.auto_watch_vision_radio)
+        analysis_row = QHBoxLayout()
+        analysis_row.addWidget(QLabel("Analysis Mode"))
+        analysis_row.addWidget(self.auto_watch_text_radio)
+        analysis_row.addWidget(self.auto_watch_vision_radio)
+        analysis_row.addStretch(1)
+        setup_layout.addLayout(analysis_row)
+
+        self.auto_watch_single_region_radio = QRadioButton("Single Region", self.auto_watch_setup)
+        self.auto_watch_context_question_radio = QRadioButton("Context + Question", self.auto_watch_setup)
+        self.auto_watch_single_region_radio.setChecked(True)
+        self.auto_watch_region_mode_group = QButtonGroup(self)
+        self.auto_watch_region_mode_group.setExclusive(True)
+        self.auto_watch_region_mode_group.addButton(self.auto_watch_single_region_radio)
+        self.auto_watch_region_mode_group.addButton(self.auto_watch_context_question_radio)
+        self.auto_watch_single_region_radio.toggled.connect(self._on_auto_watch_region_mode_changed)
+        self.auto_watch_context_question_radio.toggled.connect(self._on_auto_watch_region_mode_changed)
+        region_mode_row = QHBoxLayout()
+        region_mode_row.addWidget(QLabel("Region Mode"))
+        region_mode_row.addWidget(self.auto_watch_single_region_radio)
+        region_mode_row.addWidget(self.auto_watch_context_question_radio)
+        region_mode_row.addStretch(1)
+        setup_layout.addLayout(region_mode_row)
+
+        self.auto_watch_context_selection_status = QLabel("Context: Not selected", self.auto_watch_setup)
+        self.auto_watch_question_selection_status = QLabel("Question: Not selected", self.auto_watch_setup)
+        self.auto_watch_context_status = self.auto_watch_context_selection_status
+        self.auto_watch_question_status = self.auto_watch_question_selection_status
+        selection_status_row = QHBoxLayout()
+        context_status_group = QHBoxLayout()
+        context_status_group.setContentsMargins(0, 0, 0, 0)
+        context_status_group.addWidget(self.auto_watch_context_selection_status)
+        self.auto_watch_reselect_context_button = QPushButton("Reselect", self.auto_watch_setup)
+        self.auto_watch_reselect_context_button.setToolTip("Reselect the Context region")
+        self.auto_watch_reselect_context_button.setAccessibleName("Reselect Context")
+        self.auto_watch_reselect_context_button.clicked.connect(self._reselect_context)
+        context_status_group.addWidget(self.auto_watch_reselect_context_button)
+        question_status_group = QHBoxLayout()
+        question_status_group.setContentsMargins(0, 0, 0, 0)
+        question_status_group.addWidget(self.auto_watch_question_selection_status)
+        self.auto_watch_reselect_question_button = QPushButton("Reselect", self.auto_watch_setup)
+        self.auto_watch_reselect_question_button.setToolTip("Reselect the Question region")
+        self.auto_watch_reselect_question_button.setAccessibleName("Reselect Question")
+        self.auto_watch_reselect_question_button.clicked.connect(self._reselect_question)
+        question_status_group.addWidget(self.auto_watch_reselect_question_button)
+        selection_status_row.addLayout(context_status_group)
+        selection_status_row.addLayout(question_status_group)
+        selection_status_row.addStretch(1)
+        setup_layout.addLayout(selection_status_row)
         self.auto_watch_select_button = QPushButton("Select Region")
+        self.auto_watch_start_button = QPushButton("Start Auto Watch")
         self.auto_watch_back_button = QPushButton("Back")
         self.auto_watch_setup_status = QLabel("Region is kept for this session only.")
-        setup_layout.addWidget(self.auto_watch_text_radio); setup_layout.addWidget(self.auto_watch_vision_radio)
-        setup_layout.addWidget(self.auto_watch_select_button); setup_layout.addWidget(self.auto_watch_back_button); setup_layout.addWidget(self.auto_watch_setup_status)
+        self.auto_watch_setup_status.setWordWrap(True)
+        setup_layout.addWidget(self.auto_watch_select_button)
+        setup_layout.addWidget(self.auto_watch_start_button)
+        setup_layout.addWidget(self.auto_watch_back_button)
+        setup_layout.addWidget(self.auto_watch_setup_status)
         self.auto_watch_select_button.clicked.connect(self.start_auto_watch_selection)
+        self.auto_watch_start_button.clicked.connect(self.start_context_question_auto_watch)
         self.auto_watch_back_button.clicked.connect(self.exit_auto_watch_setup)
         layout.addWidget(self.auto_watch_setup)
         self.auto_watch_setup.hide()
         layout.addWidget(self.status_label)
+        self._update_auto_watch_setup()
 
     def _set_capture_controls_enabled(self, enabled: bool) -> None:
         """Enable or disable both direct mode capture controls together."""
@@ -246,10 +326,123 @@ class MainWindow(QWidget):
         self.vision_mode_button.setEnabled(enabled)
         if hasattr(self, "auto_watch_button"): self.auto_watch_button.setEnabled(enabled and not self._auto_watch_active)
 
+    def _is_context_question_mode(self) -> bool:
+        return self.auto_watch_context_question_radio.isChecked()
+
+    def _on_auto_watch_region_mode_changed(self, checked: bool) -> None:
+        if not checked:
+            return
+        self._auto_watch_region_mode = "context_question" if self._is_context_question_mode() else "single"
+        if self._auto_watch_region_mode == "single":
+            if self._auto_watch_selection_overlay is not None:
+                self._auto_watch_selection_overlay.close()
+                self._auto_watch_selection_overlay = None
+            self._auto_watch_selection_role = None
+            self._clear_context_question_selection()
+        self._update_auto_watch_setup()
+
+    def _close_context_question_preview(self) -> None:
+        preview = self._auto_watch_selection_preview
+        self._auto_watch_selection_preview = None
+        if preview is not None:
+            preview.close()
+
+    def _clear_context_question_selection(self) -> None:
+        self._close_context_question_preview()
+        self._auto_watch_context_region = None
+        self._auto_watch_question_region = None
+        self._auto_watch_regions = None
+
+    def _show_context_question_preview(self) -> None:
+        """Show one persistent, click-through preview for the selected pair."""
+
+        context = self._auto_watch_context_region
+        if (
+            not self._is_context_question_mode()
+            or not self._auto_watch_in_setup
+            or self._auto_watch_active
+            or context is None
+        ):
+            self._close_context_question_preview()
+            return
+        question = self._auto_watch_question_region
+        try:
+            if self._auto_watch_selection_preview is None:
+                if question is None:
+                    preview = ContextQuestionWatchOverlay(
+                        context.screen,
+                        context.logical_roi,
+                    )
+                else:
+                    preview = ContextQuestionWatchOverlay(
+                        context.screen,
+                        context.logical_roi,
+                        question.logical_roi,
+                    )
+                self._auto_watch_selection_preview = preview
+            else:
+                rois = (context.logical_roi,) if question is None else (
+                    context.logical_roi,
+                    question.logical_roi,
+                )
+                self._auto_watch_selection_preview.set_regions(context.screen, rois)
+            self._auto_watch_selection_preview.begin()
+        except Exception as exc:
+            logger.exception("failed to show Context/question selection preview")
+            self._close_context_question_preview()
+            self.auto_watch_setup_status.setText(f"无法显示选区预览：{exc}")
+
+    def _update_auto_watch_setup(self) -> None:
+        dual = self._is_context_question_mode()
+        context_selected = self._auto_watch_context_region is not None
+        question_selected = self._auto_watch_question_region is not None
+        pair_selected = context_selected and question_selected
+        self.auto_watch_context_selection_status.setVisible(dual)
+        self.auto_watch_question_selection_status.setVisible(dual)
+        self.auto_watch_reselect_context_button.setVisible(dual and pair_selected)
+        self.auto_watch_reselect_question_button.setVisible(dual and pair_selected)
+        if dual:
+            self.auto_watch_context_selection_status.setText(
+                "Context: ✓" if context_selected else "Context: Not selected"
+            )
+            self.auto_watch_question_selection_status.setText(
+                "Question: ✓" if question_selected else "Question: Not selected"
+            )
+            self.auto_watch_select_button.setText(
+                "Select Context" if not context_selected else "Select Question"
+            )
+            self.auto_watch_select_button.setVisible(not question_selected)
+            self.auto_watch_start_button.setVisible(True)
+            self.auto_watch_start_button.setEnabled(context_selected and question_selected)
+        else:
+            self.auto_watch_select_button.setText("Select Region")
+            self.auto_watch_select_button.setVisible(True)
+            self.auto_watch_start_button.setVisible(False)
+            self.auto_watch_start_button.setEnabled(False)
+        self.auto_watch_select_button.setEnabled(
+            not self._auto_watch_active
+            and self._auto_watch_selection_overlay is None
+            and (not dual or not question_selected)
+        )
+        reselect_enabled = (
+            dual
+            and pair_selected
+            and not self._auto_watch_active
+            and self._auto_watch_selection_overlay is None
+        )
+        self.auto_watch_reselect_context_button.setEnabled(reselect_enabled)
+        self.auto_watch_reselect_question_button.setEnabled(reselect_enabled)
+
     def enter_auto_watch_setup(self):
         if self._auto_watch_active or self._auto_watch_selection_overlay is not None:
             return False
+        self._clear_context_question_selection()
+        self._auto_watch_selection_role = None
+        self._auto_watch_region_mode = "single"
+        self.auto_watch_single_region_radio.setChecked(True)
         self._auto_watch_in_setup = True
+        self.auto_watch_setup_status.setText("Region is kept for this session only.")
+        self._update_auto_watch_setup()
         self.auto_watch_main_view.hide(); self.auto_watch_setup.show()
         self._set_capture_controls_enabled(False)
         return True
@@ -258,25 +451,58 @@ class MainWindow(QWidget):
         if self._auto_watch_selection_overlay is not None:
             self._auto_watch_selection_overlay.close()
             self._auto_watch_selection_overlay = None
+        self._auto_watch_selection_role = None
+        self._clear_context_question_selection()
+        self._auto_watch_region_mode = "single"
+        self.auto_watch_single_region_radio.setChecked(True)
         self._auto_watch_in_setup = False
         self.auto_watch_setup.hide(); self.auto_watch_main_view.show(); self._restore_idle()
 
-    def start_auto_watch_selection(self):
+    def start_auto_watch_selection(self, role: str | None = None):
+        dual = self._is_context_question_mode()
+        # QPushButton.clicked carries a checked boolean; treat that payload
+        # as the default sequential-selection request, not as a role.
+        if isinstance(role, bool):
+            role = None
+        if not dual:
+            role = "single"
+        elif role is None:
+            role = "context" if self._auto_watch_context_region is None else "question"
+        if dual and role not in {"context", "question"}:
+            return False
+        if dual and role == "question" and self._auto_watch_context_region is None:
+            return False
         if (self._shutting_down or self._auto_watch_active or self._overlay is not None
                 or self._auto_watch_selection_overlay is not None or self._busy
                 or not self._auto_watch_in_setup
-                or not self._ensure_screen_recording_permission()): return False
+                or not self._ensure_screen_recording_permission()):
+            return False
+        self._auto_watch_selection_role = role
+        if self._auto_watch_selection_preview is not None:
+            self._auto_watch_selection_preview.hide()
         try:
             self._auto_watch_selection_overlay = CaptureOverlay()
         except Exception as exc:
+            self._auto_watch_selection_role = None
+            self._show_context_question_preview()
             self.auto_watch_setup_status.setText(str(exc)); return False
         self._auto_watch_selection_overlay.captured.connect(self._on_auto_watch_capture)
         self._auto_watch_selection_overlay.cancelled.connect(self._on_auto_watch_selection_cancelled)
+        self._update_auto_watch_setup()
         self._auto_watch_selection_overlay.begin(); return True
+
+    def _reselect_context(self, _checked: bool = False):
+        return self.start_auto_watch_selection("context")
+
+    def _reselect_question(self, _checked: bool = False):
+        return self.start_auto_watch_selection("question")
 
     def _on_auto_watch_selection_cancelled(self):
         self._auto_watch_selection_overlay = None
+        self._auto_watch_selection_role = None
         self._auto_watch_in_setup = True
+        self._update_auto_watch_setup()
+        self._show_context_question_preview()
         self.auto_watch_setup.show(); self.auto_watch_main_view.hide()
 
     def _cleanup_failed_auto_watch_session(self, session) -> None:
@@ -289,52 +515,175 @@ class MainWindow(QWidget):
         finally:
             self._auto_watch_session = None
             self._auto_watch_in_setup = True
+            self._update_auto_watch_setup()
+            self._show_context_question_preview()
             self.auto_watch_setup.show(); self.auto_watch_main_view.hide()
 
-    def _on_auto_watch_capture(self, _image):
-        overlay = self._auto_watch_selection_overlay; self._auto_watch_selection_overlay = None
-        if overlay is None:
+    @staticmethod
+    def _same_auto_watch_screen(first, second) -> bool:
+        if first is second:
+            return True
+        try:
+            return bool(first == second)
+        except Exception:
             return False
+
+    def _on_context_question_capture(self, screen, roi, role: str | None = None) -> bool:
+        context = self._auto_watch_context_region
+        question = self._auto_watch_question_region
+        target = role or self._auto_watch_selection_role
+        if target not in {"context", "question"}:
+            target = "context" if context is None else "question"
+        try:
+            if target == "context":
+                session_id = question.session_id if question is not None else uuid.uuid4().hex
+                new_context = WatchRegion.create(screen, roi, session_id)
+                regions = (
+                    ContextQuestionRegions.create(new_context, question)
+                    if question is not None
+                    else None
+                )
+                self._auto_watch_context_region = new_context
+                self._auto_watch_regions = regions
+                status = (
+                    "Context reselected. Both regions are ready to start."
+                    if question is not None
+                    else "Context selected. Please select the Question region."
+                )
+            else:
+                if context is None:
+                    raise ValueError("Please select the Context region first.")
+                if not self._same_auto_watch_screen(context.screen, screen):
+                    raise ValueError(
+                        "Context and Question must be on the same display.\n"
+                        "Please select the Question region again."
+                    )
+                new_question = WatchRegion.create(screen, roi, context.session_id)
+                regions = ContextQuestionRegions.create(context, new_question)
+                self._auto_watch_question_region = new_question
+                self._auto_watch_regions = regions
+                status = (
+                    "Question reselected. Both regions are ready to start."
+                    if question is not None
+                    else "Context and Question selected. Start Auto Watch when ready."
+                )
+        except (TypeError, ValueError) as exc:
+            self._update_auto_watch_setup()
+            self.auto_watch_setup_status.setText(str(exc))
+            self._show_context_question_preview()
+            return False
+        self._auto_watch_selection_role = None
+        self._update_auto_watch_setup()
+        self._show_context_question_preview()
+        self.auto_watch_setup_status.setText(status)
+        return True
+
+    def _start_single_region_session(self, region: WatchRegion) -> bool:
+        mode = AnalysisMode.VISION if self.auto_watch_vision_radio.isChecked() else AnalysisMode.TEXT
+        worker_factory = (lambda request: _AutoWatchFakeHandle(request)) if self._auto_watch_fake else None
+        session = AutoWatchSession(
+            region,
+            mode,
+            config_manager=self.config_manager,
+            local_ocr_session=self._local_ocr_session,
+            worker_factory=worker_factory,
+        )
+        return self._activate_auto_watch_session(session, region, None)
+
+    def start_context_question_auto_watch(self) -> bool:
+        if (not self._auto_watch_in_setup or not self._is_context_question_mode()
+                or self._auto_watch_regions is None or self._auto_watch_active
+                or self._auto_watch_selection_overlay is not None or self._busy):
+            return False
+        mode = AnalysisMode.VISION if self.auto_watch_vision_radio.isChecked() else AnalysisMode.TEXT
+        preview = self._auto_watch_selection_preview
+        self._auto_watch_selection_preview = None
+        worker_factory = (lambda request: _AutoWatchFakeHandle(request)) if self._auto_watch_fake else None
         session = None
         try:
-            screen, roi = overlay.selection_metadata
-            region = WatchRegion.create(screen, roi)
-            mode = AnalysisMode.VISION if self.auto_watch_vision_radio.isChecked() else AnalysisMode.TEXT
-            worker_factory = (lambda request: _AutoWatchFakeHandle(request)) if self._auto_watch_fake else None
-            session = AutoWatchSession(region, mode, config_manager=self.config_manager, local_ocr_session=self._local_ocr_session, worker_factory=worker_factory)
-            self._auto_watch_session = session
-            self._auto_watch_session_id = region.session_id
-            self._auto_watch_region = region
-            self._connect_auto_watch_signals(session, region)
-            try:
-                started = session.start()
-            except Exception as exc:
-                self._cleanup_failed_auto_watch_session(session)
-                self.auto_watch_setup_status.setText(str(exc))
-                return False
-            if not started:
-                self._cleanup_failed_auto_watch_session(session)
-                self.auto_watch_setup_status.setText("Unable to start Auto Watch.")
-                return False
-            self._auto_watch_restore_visible = self.isVisible()
-            self._auto_watch_active = True; self._auto_watch_in_setup = False; self.auto_watch_main_view.hide(); self.auto_watch_setup.hide(); self._set_capture_controls_enabled(False)
-            if not self.tray_mode:
-                self.hide()
-            return True
+            session = ContextQuestionAutoWatchSession(
+                self._auto_watch_regions,
+                mode,
+                config_manager=self.config_manager,
+                local_ocr_session=self._local_ocr_session,
+                worker_factory=worker_factory,
+                overlay=preview,
+            )
+            return self._activate_auto_watch_session(session, self._auto_watch_regions, self._auto_watch_regions)
         except Exception as exc:
             if session is not None:
                 self._cleanup_failed_auto_watch_session(session)
-            self._auto_watch_session = None
-            self._auto_watch_in_setup = True
+                if preview is not None:
+                    preview.close()
+            else:
+                self._auto_watch_selection_preview = preview
             self.auto_watch_setup_status.setText(str(exc))
+            self._auto_watch_in_setup = True
+            self.auto_watch_setup.show(); self.auto_watch_main_view.hide()
+            return False
+
+    _start_context_question_watch = start_context_question_auto_watch
+
+    def _activate_auto_watch_session(self, session, region_identity, regions) -> bool:
+        self._auto_watch_session = session
+        self._auto_watch_session_id = region_identity.session_id
+        self._auto_watch_regions = regions
+        self._auto_watch_region = region_identity if isinstance(region_identity, WatchRegion) else None
+        self._connect_auto_watch_signals(session, region_identity)
+        try:
+            started = session.start()
+        except Exception as exc:
+            self._cleanup_failed_auto_watch_session(session)
+            self.auto_watch_setup_status.setText(str(exc))
+            return False
+        if not started:
+            self._cleanup_failed_auto_watch_session(session)
+            self.auto_watch_setup_status.setText("Unable to start Auto Watch.")
+            return False
+        self._auto_watch_restore_visible = self.isVisible()
+        self._auto_watch_active = True
+        self._auto_watch_in_setup = False
+        self.auto_watch_main_view.hide(); self.auto_watch_setup.hide(); self._set_capture_controls_enabled(False)
+        if not self.tray_mode:
+            self.hide()
+        return True
+
+    def _on_auto_watch_capture(self, _image):
+        overlay = self._auto_watch_selection_overlay
+        self._auto_watch_selection_overlay = None
+        role = self._auto_watch_selection_role
+        self._auto_watch_selection_role = None
+        if overlay is None:
+            return False
+        try:
+            screen, roi = overlay.selection_metadata
+            if self._is_context_question_mode():
+                return self._on_context_question_capture(screen, roi, role)
+            region = WatchRegion.create(screen, roi)
+            return self._start_single_region_session(region)
+        except Exception as exc:
+            logger.exception("Auto Watch selection failed")
+            self.auto_watch_setup_status.setText(str(exc))
+            self._auto_watch_in_setup = True
+            self._update_auto_watch_setup()
+            self._show_context_question_preview()
             self.auto_watch_setup.show(); self.auto_watch_main_view.hide()
             return False
 
     def _on_auto_watch_stopped(self):
+        session = self._auto_watch_session
+        session_overlay = getattr(session, "overlay", None) if session is not None else None
+        if session_overlay is not None:
+            # Real sessions close and release this overlay themselves.  The
+            # extra idempotent close also covers injected session doubles.
+            session_overlay.close()
         if self._answer_window is not None and self._auto_watch_session is not None:
             self._answer_window.end_auto_watch()
         self._auto_watch_session = None; self._auto_watch_active = False
-        self._auto_watch_session_id = None; self._auto_watch_generation = 0; self._auto_watch_region = None
+        self._auto_watch_session_id = None; self._auto_watch_generation = 0
+        self._auto_watch_region = None; self._auto_watch_regions = None
+        self._auto_watch_selection_role = None
+        self._clear_context_question_selection()
         if not self._shutting_down:
             self.auto_watch_main_view.show(); self.auto_watch_setup.hide(); self._restore_idle()
             if self._auto_watch_restore_visible and not self.tray_mode:
@@ -344,13 +693,20 @@ class MainWindow(QWidget):
     def _connect_auto_watch_signals(self, session, region) -> None:
         """Connect one session's callbacks with immutable session identity guards."""
         expected_id = region.session_id
-        session.analysis_requested.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_requested(s, sid, payload))
-        session.analysis_started.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_started(s, sid, payload))
-        session.analysis_result.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_result(s, sid, payload))
-        session.analysis_error.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_error(s, sid, payload))
-        session.analysis_cancelled.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_cancelled(s, sid, payload))
-        session.analysis_finished.connect(lambda payload, s=session, sid=expected_id: self._on_auto_watch_finished(s, sid, payload))
-        session.session_stopped.connect(lambda s=session, sid=expected_id: self._on_auto_watch_session_stopped(s, sid))
+        callbacks = {
+            "analysis_requested": lambda payload, s=session, sid=expected_id: self._on_auto_watch_requested(s, sid, payload),
+            "analysis_started": lambda payload, s=session, sid=expected_id: self._on_auto_watch_started(s, sid, payload),
+            "analysis_result": lambda payload, s=session, sid=expected_id: self._on_auto_watch_result(s, sid, payload),
+            "analysis_ocr_ready": lambda payload, s=session, sid=expected_id: self._on_auto_watch_ocr(s, sid, payload),
+            "analysis_error": lambda payload, s=session, sid=expected_id: self._on_auto_watch_error(s, sid, payload),
+            "analysis_cancelled": lambda payload, s=session, sid=expected_id: self._on_auto_watch_cancelled(s, sid, payload),
+            "analysis_finished": lambda payload, s=session, sid=expected_id: self._on_auto_watch_finished(s, sid, payload),
+            "session_stopped": lambda s=session, sid=expected_id: self._on_auto_watch_session_stopped(s, sid),
+        }
+        for name, callback in callbacks.items():
+            signal = getattr(session, name, None)
+            if signal is not None and hasattr(signal, "connect"):
+                signal.connect(callback)
 
     def _auto_watch_payload(self, session, expected_id, payload):
         if self._auto_watch_session is not session or self._auto_watch_session_id != expected_id:
@@ -367,15 +723,27 @@ class MainWindow(QWidget):
         return request, generation
 
     def _auto_watch_answer(self, mode, generation):
-        if self._answer_window is None:
-            self._show_or_create_answer()
-            region = self._auto_watch_region
+        region = self._auto_watch_region
+        regions = self._auto_watch_regions
+        if regions is not None:
+            avoid_rois = [regions.context.global_roi, regions.question.global_roi]
+            screen = regions.screen
+            begin_pair = lambda answer: answer.begin_auto_watch(
+                mode,
+                generation,
+                screen=screen,
+                avoid_rois=avoid_rois,
+                region_mode="Context + Question",
+            )
+        else:
             roi = region.global_roi if region is not None else None
             screen = region.screen if region is not None else None
-            self._answer_window.begin_auto_watch(mode, generation, roi, screen)
+            begin_pair = lambda answer: answer.begin_auto_watch(mode, generation, roi, screen)
+        if self._answer_window is None:
+            self._show_or_create_answer()
+            begin_pair(self._answer_window)
         elif not getattr(self._answer_window, "_auto_watch_active", False):
-            region = self._auto_watch_region
-            self._answer_window.begin_auto_watch(mode, generation, region.global_roi if region else None, region.screen if region else None)
+            begin_pair(self._answer_window)
         return self._answer_window
 
     def _on_auto_watch_requested(self, session, expected_id, payload):
@@ -404,6 +772,16 @@ class MainWindow(QWidget):
         request, generation = checked
         answer = self._auto_watch_answer(payload.get("mode", request.mode), generation)
         answer.show_auto_watch_result(generation, payload.get("result"))
+
+    def _on_auto_watch_ocr(self, session, expected_id, payload):
+        checked = self._auto_watch_payload(session, expected_id, payload)
+        if checked is None or checked[1] != self._auto_watch_generation:
+            return
+        request, generation = checked
+        if not isinstance(payload, dict) or payload.get("stage") not in {"context", "question"}:
+            return
+        answer = self._auto_watch_answer(payload.get("mode", request.mode), generation)
+        answer.show_auto_watch_ocr(generation, payload["stage"], payload.get("text", ""))
 
     def _on_auto_watch_error(self, session, expected_id, payload):
         checked = self._auto_watch_payload(session, expected_id, payload)
@@ -588,6 +966,8 @@ class MainWindow(QWidget):
         if self._auto_watch_selection_overlay is not None:
             self._auto_watch_selection_overlay.close()
             self._auto_watch_selection_overlay = None
+        self._auto_watch_selection_role = None
+        self._close_context_question_preview()
 
         if self._auto_watch_session is not None:
             self._auto_watch_session.session_stopped.connect(self._continue_shutdown_after_watch)

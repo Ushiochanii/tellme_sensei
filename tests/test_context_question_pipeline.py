@@ -233,6 +233,28 @@ def test_context_question_worker_emits_structured_result_and_uses_one_ai_call() 
     assert len(ai.calls) == 1
 
 
+def test_context_question_worker_emits_each_ocr_before_ai_result() -> None:
+    worker = ContextQuestionProcessingWorker(
+        _image("red"),
+        _image("blue"),
+        _RecordingOCR(),
+        _RecordingContextQuestionAI(),
+        1,
+        1,
+        context_ocr_cache=ContextOCRCache(),
+        job_id="ordered-pair",
+    )
+    events: list[str] = []
+    worker.context_ocr_finished.connect(lambda _text: events.append("context_ocr"))
+    worker.question_ocr_finished.connect(lambda _text: events.append("question_ocr"))
+    worker.ai_started.connect(lambda: events.append("ai_started"))
+    worker.result_ready.connect(lambda _result: events.append("answer"))
+
+    worker.run()
+
+    assert events == ["context_ocr", "question_ocr", "ai_started", "answer"]
+
+
 def test_compose_context_question_image_keeps_two_sources_in_one_memory_image() -> None:
     context = _image("red", width=20, height=10)
     question = _image("blue", width=30, height=12)
@@ -363,6 +385,13 @@ class _ManualWorker(QObject):
         self.finished.emit()
 
 
+class _ManualPairWorker(_ManualWorker):
+    ocr_ready = Signal(str, str)
+
+    def publish_ocr(self, stage: str, text: str) -> None:
+        self.ocr_ready.emit(stage, text)
+
+
 def test_context_ocr_cache_survives_pause_and_latest_wins_cancellation() -> None:
     cache = ContextOCRCache()
     cached = _ocr("cached context")
@@ -432,6 +461,44 @@ def test_pair_10_11_12_latest_wins_and_old_result_cannot_replace_pair_12() -> No
     assert dispatcher.pending_request is None
     workers[1].done()
     assert dispatcher.active_request is None
+
+
+def test_pair_ocr_is_forwarded_incrementally_and_stale_ocr_is_discarded() -> None:
+    workers: list[_ManualPairWorker] = []
+    ocr_events: list[tuple[int, str, str]] = []
+
+    def factory(request):
+        worker = _ManualPairWorker(request)
+        workers.append(worker)
+        return worker
+
+    dispatcher = AnalysisDispatcher(
+        worker_factory=factory,
+        on_ocr=lambda request, stage, text: ocr_events.append((request.generation, stage, text)),
+    )
+    pair_args = dict(
+        mode=AnalysisMode.TEXT,
+        context_revision=1,
+        question_revision=1,
+        session_id="ocr-session",
+    )
+    dispatcher.submit_context_question(_image("red"), _image("blue"), generation=1, **pair_args)
+    workers[0].publish_ocr("context", "old context")
+
+    dispatcher.submit_context_question(_image("red"), _image("green"), generation=2, **pair_args)
+    workers[0].publish_ocr("question", "stale question")
+    assert ocr_events == [(1, "context", "old context")]
+
+    workers[0].done()
+    workers[1].publish_ocr("context", "new context")
+    workers[1].publish_ocr("context", "duplicate context")
+    workers[1].publish_ocr("question", "new question")
+    assert ocr_events == [
+        (1, "context", "old context"),
+        (2, "context", "new context"),
+        (2, "question", "new question"),
+    ]
+    workers[1].done()
 
 
 def test_pair_bridge_deduplicates_snapshot_generation() -> None:

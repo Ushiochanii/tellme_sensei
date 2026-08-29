@@ -81,7 +81,7 @@ def answer_window_stylesheet() -> str:
     }}
     QLabel#statusLabel[state="ready"], QLabel#statusLabel[state="complete"] {{ color: {SUCCESS}; }}
     QLabel#statusLabel[state="error"] {{ color: {DANGER}; }}
-    QFrame#ocrCard, QFrame#answerCard {{
+    QFrame#ocrCard, QFrame#contextOcrCard, QFrame#questionOcrCard, QFrame#answerCard {{
         background: rgba(255, 255, 255, 190);
         border: 1px solid {CARD_BORDER};
         border-radius: {RADIUS_LG}px;
@@ -96,7 +96,8 @@ def answer_window_stylesheet() -> str:
         font-weight: 700;
     }}
     QLabel#answerSectionTitle {{ color: {TEXT}; }}
-    QPlainTextEdit#ocrEdit, QPlainTextEdit#answerEdit {{
+    QPlainTextEdit#ocrEdit, QPlainTextEdit#contextOcrEdit, QPlainTextEdit#questionOcrEdit,
+    QPlainTextEdit#answerEdit {{
         background: {CARD};
         color: {TEXT};
         border: 1px solid {CARD_BORDER};
@@ -107,7 +108,8 @@ def answer_window_stylesheet() -> str:
         font-size: 12px;
     }}
     QPlainTextEdit#answerEdit {{ border-color: #c7d8f8; font-size: 13px; }}
-    QPlainTextEdit#ocrEdit:focus, QPlainTextEdit#answerEdit:focus {{ border-color: {FOCUS_BORDER}; }}
+    QPlainTextEdit#ocrEdit:focus, QPlainTextEdit#contextOcrEdit:focus,
+    QPlainTextEdit#questionOcrEdit:focus, QPlainTextEdit#answerEdit:focus {{ border-color: {FOCUS_BORDER}; }}
     QScrollBar:vertical {{
         background: transparent;
         width: 9px;

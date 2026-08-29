@@ -1,13 +1,14 @@
 """Small interactive controller positioned outside a watched ROI."""
 from __future__ import annotations
 import sys
+from collections.abc import Iterable
 from PySide6.QtCore import QRect, Signal, Qt
 from PySide6.QtWidgets import QFrame, QWidget, QLabel, QPushButton, QHBoxLayout, QVBoxLayout
 from app.analysis import AnalysisMode
 from app.auto_watch.models import MonitorState
 from app.ui.theme import watch_mini_controller_stylesheet
 
-def place_mini_controller(global_roi: QRect, available: QRect, size, margin=8) -> QRect:
+def _place_mini_controller_single(global_roi: QRect, available: QRect, size, margin=8) -> QRect:
     w, h = size.width(), size.height()
     raw = [QRect(global_roi.left(), global_roi.bottom()+margin, w,h), QRect(global_roi.left(), global_roi.top()-margin-h,w,h),
             QRect(global_roi.right()+margin, global_roi.top(),w,h), QRect(global_roi.left()-margin-w,global_roi.top(),w,h)]
@@ -28,6 +29,57 @@ def place_mini_controller(global_roi: QRect, available: QRect, size, margin=8) -
              for candidate in candidates]
     return candidates[areas.index(min(areas))]
 
+
+def place_mini_controller_avoiding(avoid_rois: Iterable[QRect], available: QRect, size, margin=8) -> QRect:
+    """Place the mini controller outside actual watched ROIs where possible."""
+    rois = tuple(roi for roi in avoid_rois if isinstance(roi, QRect) and not roi.isEmpty())
+    if not rois:
+        return _place_mini_controller_single(QRect(), available, size, margin)
+    if len(rois) == 1:
+        return _place_mini_controller_single(rois[0], available, size, margin)
+
+    width, height = size.width(), size.height()
+    screen = available.normalized()
+    max_x = screen.right() - width + 1
+    max_y = screen.bottom() - height + 1
+
+    def clamp(x, y):
+        if screen.width() <= 0 or screen.height() <= 0:
+            return QRect()
+        return QRect(
+            max(screen.left(), min(x, max_x)),
+            max(screen.top(), min(y, max_y)),
+            min(width, screen.width()),
+            min(height, screen.height()),
+        )
+
+    candidates = []
+    for roi in rois:
+        candidates.extend(
+            (
+                clamp(roi.right() + 1 + margin, roi.top()),
+                clamp(roi.left() - margin - width, roi.top()),
+                clamp(roi.left(), roi.bottom() + 1 + margin),
+                clamp(roi.left(), roi.top() - margin - height),
+            )
+        )
+
+    def overlap(candidate):
+        return sum(candidate.intersected(roi).width() * candidate.intersected(roi).height() for roi in rois)
+
+    for candidate in candidates:
+        if overlap(candidate) == 0:
+            return candidate
+    return min(candidates, key=overlap)
+
+
+def place_mini_controller(global_roi: QRect, available: QRect, size, margin=8) -> QRect:
+    """Backward-compatible single-ROI placement entry point."""
+
+    if not isinstance(global_roi, QRect):
+        return place_mini_controller_avoiding(global_roi, available, size, margin)
+    return _place_mini_controller_single(global_roi, available, size, margin)
+
 class WatchMiniController(QWidget):
     analyze_now_requested = Signal(); pause_requested = Signal(); resume_requested = Signal(); stop_requested = Signal()
     def __init__(self, parent=None):
@@ -37,12 +89,18 @@ class WatchMiniController(QWidget):
             self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
         self.setStyleSheet(watch_mini_controller_stylesheet())
         self.setAttribute(Qt.WA_TranslucentBackground); self._closing_from_session = False; self._paused = False
+        self._analysis_mode_label = "Text / OCR"
+        self._region_mode = "Single Region"
+        self._generation = 0
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
         self.surface = QFrame(self); self.surface.setObjectName("watchMiniSurface")
         surface_layout = QVBoxLayout(self.surface); surface_layout.setContentsMargins(12, 9, 12, 9); surface_layout.setSpacing(6)
         self.status_dot = QLabel("●"); self.status_dot.setObjectName("watchMiniStatusDot")
         self.status_label = QLabel("Arming"); self.status_label.setObjectName("watchMiniStatus")
         self.mode_label = QLabel("Text / OCR"); self.mode_label.setObjectName("watchMiniMode")
+        # Expose the existing compact mode label under a region-aware name so
+        # pair mode can be inspected without adding another controller row.
+        self.region_mode_label = self.mode_label
         self.generation_label = QLabel("G0"); self.generation_label.setObjectName("watchMiniGeneration")
         self.analysis_label = QLabel("Ready for changes"); self.analysis_label.setObjectName("watchMiniAnalysis")
         status_row = QHBoxLayout(); status_row.setSpacing(6)
@@ -75,11 +133,52 @@ class WatchMiniController(QWidget):
     def set_analysis_state(self, state):
         name = getattr(state, "name", str(state)).lower()
         labels = {"idle": "Ready for changes", "accepted": "Waiting to analyze", "delay_schedule": "Waiting to analyze",
-                  "started": "Analyzing…", "running": "Analyzing…", "finished": "Last analysis completed",
+                  "started": "Analyzing…", "running": "Analyzing…", "context_ocr": "Recognizing Context…",
+                  "question_ocr": "Recognizing Question…", "finished": "Last analysis completed",
                   "result": "Last analysis completed", "cancelled": "Analysis cancelled", "error": "Analysis failed"}
         self.analysis_label.setText(labels.get(name, str(state)))
-    def set_generation(self, generation): self.generation_label.setText(f"G{generation}")
-    def set_mode(self, mode): self.mode_label.setText("Vision" if AnalysisMode(mode) is AnalysisMode.VISION else "Text / OCR")
+    def set_generation(self, generation):
+        self._generation = generation
+        if self._region_mode == "Context + Question":
+            self.generation_label.setText(f"Pair {generation}")
+        else:
+            self.generation_label.setText(f"G{generation}")
+    def set_mode(self, mode, region_mode=None):
+        self._analysis_mode_label = "Vision" if AnalysisMode(mode) is AnalysisMode.VISION else "Text / OCR"
+        if region_mode is not None:
+            self.set_region_mode(region_mode)
+        else:
+            self._refresh_mode_label()
+
+    def set_region_mode(self, region_mode):
+        name = str(region_mode or "Single Region")
+        if name.lower() in {"context_question", "context + question", "pair", "dual"}:
+            self._region_mode = "Context + Question"
+        else:
+            self._region_mode = "Single Region"
+        self.set_generation(self._generation)
+        self._refresh_mode_label()
+
+    def _refresh_mode_label(self):
+        analysis = getattr(self, "_analysis_mode_label", self.mode_label.text())
+        region = getattr(self, "_region_mode", "Single Region")
+        self.mode_label.setText(
+            analysis if region == "Single Region" else f"{analysis} · {region}"
+        )
+
+    def show_for_regions(self, screen, global_rois):
+        self.adjustSize()
+        available = screen.availableGeometry()
+        self.setGeometry(place_mini_controller_avoiding(global_rois, available, self.size()))
+        self.show()
+
+    def set_pair_mode(self, enabled=True):
+        self.set_region_mode("Context + Question" if enabled else "Single Region")
+
+    @property
+    def region_mode(self):
+        return self._region_mode
+
     def request_stop(self): self.stop_requested.emit()
     def _toggle_pause(self):
         (self.resume_requested if self._paused else self.pause_requested).emit()
