@@ -22,9 +22,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.analysis import AnalysisMode
-from app.pipeline import PipelineResult
+from app.pipeline import ContextQuestionPipelineResult, PipelineResult
 from app.settings.repository import SettingsRepository
-from app.ui.answer_window_placement import place_answer_window
+from app.ui.answer_window_placement import place_answer_window_avoiding
 from app.ui.theme import (
     TEXT_ACCENT,
     VISION_ACCENT,
@@ -129,7 +129,9 @@ class AnswerWindow(QWidget):
         self._auto_watch_active = False
         self._auto_watch_generation: int | None = None
         self._auto_watch_roi: QRect | None = None
+        self._auto_watch_rois: tuple[QRect, ...] = ()
         self._auto_watch_screen = None
+        self._auto_watch_region_mode = "Single Region"
         self._auto_watch_user_moved = False
         self._skip_geometry_save = False
         self._auto_watch_previous_geometry: QRect | None = None
@@ -259,14 +261,48 @@ class AnswerWindow(QWidget):
         self.set_status("正在识别题目...")
         self.show_at_current_screen()
 
-    def begin_auto_watch(self, mode: AnalysisMode | str, generation: int, roi_hint: QRect | None = None, screen=None) -> None:
+    def begin_auto_watch(
+        self,
+        mode: AnalysisMode | str,
+        generation: int,
+        roi_hint: QRect | None = None,
+        screen=None,
+        *,
+        avoid_rois=None,
+        region_mode: str = "Single Region",
+    ) -> None:
         """Enter session-only Auto Watch presentation without changing saved geometry."""
+        if avoid_rois is None:
+            if isinstance(roi_hint, QRect):
+                rois = (roi_hint,) if not roi_hint.isEmpty() else ()
+            elif roi_hint is None:
+                rois = ()
+            else:
+                try:
+                    rois = tuple(roi_hint)
+                except TypeError as exc:
+                    raise TypeError("roi_hint must be a QRect or iterable of QRect") from exc
+                if any(not isinstance(roi, QRect) for roi in rois):
+                    raise TypeError("roi_hint must contain only QRect values")
+                rois = tuple(roi for roi in rois if not roi.isEmpty())
+        else:
+            try:
+                rois = tuple(avoid_rois)
+            except TypeError as exc:
+                raise TypeError("avoid_rois must be an iterable of QRect") from exc
+            if any(not isinstance(roi, QRect) for roi in rois):
+                raise TypeError("avoid_rois must contain only QRect values")
+            rois = tuple(roi for roi in rois if not roi.isEmpty())
+            if isinstance(roi_hint, QRect) and not roi_hint.isEmpty() and roi_hint not in rois:
+                rois = (roi_hint, *rois)
         self._auto_watch_previous_geometry = QRect(self.geometry())
         self._auto_watch_previous_geometry_restored = self._geometry_restored
         self._auto_watch_active = True
         self._auto_watch_generation = generation
-        self._auto_watch_roi = QRect(roi_hint) if isinstance(roi_hint, QRect) else None
+        self._auto_watch_rois = tuple(QRect(roi) for roi in rois)
+        self._auto_watch_roi = QRect(self._auto_watch_rois[0]) if self._auto_watch_rois else None
         self._auto_watch_screen = screen
+        self._auto_watch_region_mode = str(region_mode or "Single Region")
         self._auto_watch_user_moved = False
         self._skip_geometry_save = True
         self.set_mode(mode)
@@ -296,10 +332,25 @@ class AnswerWindow(QWidget):
             self.set_ocr_text(result.ocr.text)
             self._answer_text = result.answer
             self.answer_edit.setPlainText(result.answer)
+        elif isinstance(result, ContextQuestionPipelineResult):
+            self.set_ocr_text(
+                f"[Context]\n{result.context_ocr.text}\n\n"
+                f"[Question]\n{result.question_ocr.text}"
+            )
+            self._answer_text = result.answer
+            self.answer_edit.setPlainText(result.answer)
         else:
-            ocr = getattr(result, "ocr", None)
-            if ocr is not None:
-                self.set_ocr_text(ocr.text)
+            context_ocr = getattr(result, "context_ocr", None)
+            question_ocr = getattr(result, "question_ocr", None)
+            if context_ocr is not None and question_ocr is not None:
+                self.set_ocr_text(
+                    f"[Context]\n{context_ocr.text}\n\n"
+                    f"[Question]\n{question_ocr.text}"
+                )
+            else:
+                ocr = getattr(result, "ocr", None)
+                if ocr is not None:
+                    self.set_ocr_text(ocr.text)
             self._answer_text = str(getattr(result, "answer", result))
             self.answer_edit.setPlainText(self._answer_text)
         self.set_status("完成")
@@ -330,7 +381,9 @@ class AnswerWindow(QWidget):
         self._auto_watch_active = False
         self._auto_watch_generation = None
         self._auto_watch_roi = None
+        self._auto_watch_rois = ()
         self._auto_watch_screen = None
+        self._auto_watch_region_mode = "Single Region"
         self._auto_watch_user_moved = False
         self._skip_geometry_save = False
         self.stop_button.setVisible(False); self.stop_button.setEnabled(False)
@@ -348,7 +401,7 @@ class AnswerWindow(QWidget):
             self._auto_watch_user_moved = True
 
     def _place_auto_watch_window(self) -> None:
-        if self._auto_watch_roi is None:
+        if not self._auto_watch_rois:
             self.show()
             return
         screen = self._auto_watch_screen or QGuiApplication.primaryScreen()
@@ -360,7 +413,7 @@ class AnswerWindow(QWidget):
         current = self.geometry()
         available = screen.availableGeometry()
         if not self._auto_watch_user_moved or not current.intersects(available):
-            self.setGeometry(place_answer_window(current, self._auto_watch_roi, available, 12))
+            self.setGeometry(place_answer_window_avoiding(current, self._auto_watch_rois, available, 12))
 
     def show_vision_processing(self) -> None:
         self._skip_geometry_save = False
