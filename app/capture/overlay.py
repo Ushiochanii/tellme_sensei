@@ -33,7 +33,9 @@ class CaptureOverlay(QWidget):
         if self._screen is None:
             raise RuntimeError("没有可用的显示器。")
         self._screen_geometry = self._screen.geometry()
-        self._screen_image = QImage()
+        self._screen_image = (
+            QImage() if sys.platform == "win32" else self._screen.grabWindow(0).toImage()
+        )
         self._drag_start: QPoint | None = None
         self._selection = QRect()
         self._completed = False
@@ -72,7 +74,7 @@ class CaptureOverlay(QWidget):
         return self._screen, QRect(self._selection)
 
     def begin(self) -> None:
-        """Capture the screen and show the overlay after launcher visibility settles."""
+        """Show the overlay, delaying only the Windows screen grab."""
 
         # Direct capture hides the floating launcher before creating this overlay.
         # Remember that state so the synchronous capture callback cannot bring the
@@ -86,17 +88,20 @@ class CaptureOverlay(QWidget):
         if sys.platform == "win32":
             self._begin_timer.start(_WINDOWS_CAPTURE_SETTLE_MS)
             return
-        self._capture_screen_and_show()
-
-    def _capture_screen_and_show(self) -> None:
-        """Grab one settled desktop frame, then expose it through the selection UI."""
-
-        self._screen_image = self._screen.grabWindow(0).toImage()
         if sys.platform == "darwin":
             if configure_macos_overlay_window is not None:
                 configure_macos_overlay_window(self)
             self.show()
             return
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+
+    def _capture_screen_and_show(self) -> None:
+        """Grab one settled Windows desktop frame, then expose the selection UI."""
+
+        self._screen_image = self._screen.grabWindow(0).toImage()
         self.show()
         self.raise_()
         self.activateWindow()
