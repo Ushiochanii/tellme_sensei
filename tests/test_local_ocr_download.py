@@ -103,6 +103,29 @@ def test_download_worker_network_failure(tmp_path: Path, monkeypatch) -> None:
     assert not (tmp_path / "runtime" / "components").exists()
 
 
+def test_download_worker_preserves_manifest_http_status(tmp_path: Path, monkeypatch) -> None:
+    def urlopen(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            404,
+            "not found",
+            {},
+            io.BytesIO(b"not found"),
+        )
+
+    monkeypatch.setattr("app.local_ocr.download.urllib.request.urlopen", urlopen)
+    worker = LocalOCRDownloadWorker(
+        "https://example.test/manifest",
+        LocalOCRComponentManager(tmp_path / "runtime"),
+    )
+    errors: list[str] = []
+    worker.failed.connect(errors.append)
+
+    worker.run()
+
+    assert errors == ["Unable to download the Local OCR manifest (HTTP 404)."]
+
+
 def test_download_worker_cancellation_cleans_partial_archive(tmp_path: Path, monkeypatch) -> None:
     archive = _zip_bytes()
     manifest = _manifest(archive)

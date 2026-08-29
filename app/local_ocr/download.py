@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 import threading
 import tempfile
 import urllib.error
@@ -14,6 +15,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from app.local_ocr.component_manager import ComponentCancelled, ComponentError, LocalOCRComponentManager
 from app.local_ocr.manifest import ComponentManifest
+from app.network import urlopen_https
 from app.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -66,7 +68,11 @@ class LocalOCRDownloadWorker(QObject):
         except ComponentCancelled:
             self.cancelled.emit()
         except (ComponentError, OSError, urllib.error.URLError, ValueError) as exc:
-            logger.warning("local OCR component operation failed: %s", type(exc).__name__)
+            logger.warning(
+                "local OCR component operation failed category=%s exception=%s",
+                self._error_category(exc),
+                type(exc).__name__,
+            )
             self.failed.emit(str(exc))
         except Exception:
             logger.exception("local OCR component operation failed")
@@ -88,10 +94,20 @@ class LocalOCRDownloadWorker(QObject):
             raise ComponentCancelled("Local OCR download cancelled.")
         request = urllib.request.Request(self.manifest_url, headers={"User-Agent": USER_AGENT})
         try:
-            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as response:
+            with urlopen_https(request, timeout=DOWNLOAD_TIMEOUT) as response:
                 payload = response.read()
+        except urllib.error.HTTPError as exc:
+            raise ComponentError(
+                f"Unable to download the Local OCR manifest (HTTP {exc.code})."
+            ) from exc
         except (urllib.error.URLError, OSError) as exc:
-            raise ComponentError("Unable to download the Local OCR manifest.") from exc
+            if self._is_certificate_error(exc):
+                raise ComponentError(
+                    "Unable to download the Local OCR manifest because TLS certificate verification failed."
+                ) from exc
+            raise ComponentError(
+                "Unable to download the Local OCR manifest. Check your network connection."
+            ) from exc
         if self.cancel_event.is_set():
             raise ComponentCancelled("Local OCR download cancelled.")
         try:
@@ -107,7 +123,7 @@ class LocalOCRDownloadWorker(QObject):
             with open(fd, "wb", closefd=True) as output:
                 request = urllib.request.Request(manifest.url, headers={"User-Agent": USER_AGENT})
                 try:
-                    with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as response:
+                    with urlopen_https(request, timeout=DOWNLOAD_TIMEOUT) as response:
                         expected = response.headers.get("Content-Length")
                         expected_size = int(expected) if expected and expected.isdigit() else manifest.size
                         while True:
@@ -119,8 +135,18 @@ class LocalOCRDownloadWorker(QObject):
                             output.write(chunk)
                             total += len(chunk)
                             self.progress_changed.emit(min(89, int(total * 89 / max(expected_size, 1))))
+                except urllib.error.HTTPError as exc:
+                    raise ComponentError(
+                        f"Unable to download the Local OCR component (HTTP {exc.code})."
+                    ) from exc
                 except (urllib.error.URLError, OSError) as exc:
-                    raise ComponentError("Unable to download the Local OCR component.") from exc
+                    if self._is_certificate_error(exc):
+                        raise ComponentError(
+                            "Unable to download the Local OCR component because TLS certificate verification failed."
+                        ) from exc
+                    raise ComponentError(
+                        "Unable to download the Local OCR component. Check your network connection."
+                    ) from exc
             return path
         except Exception:
             try:
@@ -128,3 +154,29 @@ class LocalOCRDownloadWorker(QObject):
             except OSError:
                 pass
             raise
+
+    @staticmethod
+    def _is_certificate_error(exc: BaseException) -> bool:
+        """Return whether a urllib error wraps a certificate verification failure."""
+
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            return True
+        return isinstance(exc, ssl.SSLCertVerificationError)
+
+    @classmethod
+    def _error_category(cls, exc: BaseException) -> str:
+        cause = exc.__cause__
+        if cause is not None and cause is not exc:
+            nested = cls._error_category(cause)
+            if nested != "component":
+                return nested
+        if isinstance(exc, urllib.error.HTTPError):
+            return f"http_{exc.code}"
+        if cls._is_certificate_error(exc):
+            return "tls_certificate"
+        if isinstance(exc, (urllib.error.URLError, TimeoutError, OSError)):
+            return "network"
+        if isinstance(exc, ValueError):
+            return "validation"
+        return "component"

@@ -4,3 +4,7 @@ python-dotenv>=1.0.1,<2.0.0
 PySide6>=6.6.0,<7.0.0
 keyring>=25.0.0,<26.0.0
 numpy>=1.26.0,<3.0.0
+# Shared HTTPS trust for frozen Windows/macOS builds; certifi is the portable
+# fallback when the host native certificate store is unavailable.
+truststore>=0.10.0,<1.0.0
+certifi>=2024.0.0,<2027.0.0

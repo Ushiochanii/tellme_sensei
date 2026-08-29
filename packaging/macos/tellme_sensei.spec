@@ -4,6 +4,8 @@
 from pathlib import Path
 import sys
 
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
 
 ROOT = Path(SPECPATH).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -15,8 +17,8 @@ a = Analysis(
     [str(ROOT / "gui.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[],
-    hiddenimports=[],
+    datas=collect_data_files("certifi"),
+    hiddenimports=collect_submodules("truststore"),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

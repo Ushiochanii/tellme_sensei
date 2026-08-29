@@ -6,6 +6,7 @@ import re
 import sys
 
 from PyInstaller.utils.hooks import (
+    collect_data_files,
     collect_submodules,
 )
 
@@ -71,9 +72,11 @@ version_file = _version_info_file()
 
 
 keyring_hidden = collect_submodules("win32ctypes")
+truststore_hidden = collect_submodules("truststore")
 hiddenimports = sorted(
     set(
         keyring_hidden
+        + truststore_hidden
         + [
             "keyring",
             "keyring.backends.Windows",
@@ -85,12 +88,13 @@ hiddenimports = sorted(
         ]
     )
 )
+certifi_datas = collect_data_files("certifi")
 
 a = Analysis(
     [str(ROOT / "gui.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[],
+    datas=certifi_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
