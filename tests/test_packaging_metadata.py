@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_packaging_uses_single_release_version_source() -> None:
-    assert __version__ == "0.8.0"
+    assert __version__ == "0.8.1-rc.1"
     assert LOCAL_OCR_VERSION == "1.4.0"
     spec = (ROOT / "packaging" / "tellme_sensei.spec").read_text(encoding="utf-8")
     assert "from app.version import __version__" in spec
