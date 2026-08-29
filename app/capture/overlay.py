@@ -6,9 +6,9 @@ import logging
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QImage, QPainter, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 if sys.platform == "darwin":
     from app.platform.macos.window import configure_macos_overlay_window
@@ -16,6 +16,8 @@ else:
     configure_macos_overlay_window = None
 
 logger = logging.getLogger(__name__)
+
+_WINDOWS_CAPTURE_SETTLE_MS = 150
 
 
 class CaptureOverlay(QWidget):
@@ -31,10 +33,16 @@ class CaptureOverlay(QWidget):
         if self._screen is None:
             raise RuntimeError("没有可用的显示器。")
         self._screen_geometry = self._screen.geometry()
-        self._screen_image = self._screen.grabWindow(0).toImage()
+        self._screen_image = (
+            QImage() if sys.platform == "win32" else self._screen.grabWindow(0).toImage()
+        )
         self._drag_start: QPoint | None = None
         self._selection = QRect()
         self._completed = False
+        self._capture_hidden_launchers: tuple[QWidget, ...] = ()
+        self._begin_timer = QTimer(self)
+        self._begin_timer.setSingleShot(True)
+        self._begin_timer.timeout.connect(self._capture_screen_and_show)
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -66,13 +74,34 @@ class CaptureOverlay(QWidget):
         return self._screen, QRect(self._selection)
 
     def begin(self) -> None:
-        """Show the overlay after the screen image has been captured."""
+        """Show the overlay, delaying only the Windows screen grab."""
 
+        # Direct capture hides the floating launcher before creating this overlay.
+        # Remember that state so the synchronous capture callback cannot bring the
+        # launcher back while the AnswerWindow is still open. Auto Watch selection
+        # leaves the launcher visible, so it is intentionally not included here.
+        self._capture_hidden_launchers = tuple(
+            widget
+            for widget in QApplication.topLevelWidgets()
+            if widget.objectName() == "mainController" and not widget.isVisible()
+        )
+        if sys.platform == "win32":
+            self._begin_timer.start(_WINDOWS_CAPTURE_SETTLE_MS)
+            return
         if sys.platform == "darwin":
             if configure_macos_overlay_window is not None:
                 configure_macos_overlay_window(self)
             self.show()
             return
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+
+    def _capture_screen_and_show(self) -> None:
+        """Grab one settled Windows desktop frame, then expose the selection UI."""
+
+        self._screen_image = self._screen.grabWindow(0).toImage()
         self.show()
         self.raise_()
         self.activateWindow()
@@ -124,8 +153,16 @@ class CaptureOverlay(QWidget):
                 logger.warning("无法保存调试截图: %s", self.debug_path)
             else:
                 logger.info("调试截图已保存: %s", self.debug_path)
+        self._finish_capture(image)
+
+    def _finish_capture(self, image: QImage) -> None:
+        """Deliver the image while preserving direct-capture launcher visibility."""
+
         self.hide()
         self.captured.emit(image)
+        for launcher in self._capture_hidden_launchers:
+            if launcher.isVisible():
+                launcher.hide()
         self.close()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt API name
