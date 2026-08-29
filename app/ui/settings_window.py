@@ -52,6 +52,14 @@ from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, Deep
 from app.settings.secret_store import SecretStoreError
 from app.auto_watch.models import AutoWatchSettings
 from app.ui.theme import settings_window_stylesheet
+from app.update_service import (
+    ReleaseAsset,
+    UpdateCancelled,
+    UpdateCheckResult,
+    UpdateError,
+    UpdateService,
+)
+from app.version import __version__
 
 logger = logging.getLogger(__name__)
 CONNECTION_TEST_TIMEOUT = 10.0
@@ -144,6 +152,80 @@ class GoogleVisionTestWorker(QObject):
         self.cancel_event.set()
 
 
+class UpdateCheckWorker(QObject):
+    """Check GitHub Releases outside the Qt GUI thread."""
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+    cancelled = Signal()
+    finished = Signal()
+
+    def __init__(self, service: UpdateService, cancel_event: threading.Event) -> None:
+        super().__init__()
+        self.service = service
+        self.cancel_event = cancel_event
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = self.service.check_for_update(__version__, self.cancel_event)
+            if not self.cancel_event.is_set():
+                self.succeeded.emit(result)
+        except UpdateCancelled:
+            self.cancelled.emit()
+        except UpdateError as exc:
+            self.failed.emit(str(exc))
+        except Exception:
+            logger.exception("application update check failed")
+            self.failed.emit("Unable to check for application updates.")
+        finally:
+            self.finished.emit()
+
+    @Slot()
+    def request_cancel(self) -> None:
+        self.cancel_event.set()
+
+
+class UpdateDownloadWorker(QObject):
+    """Download and open one selected update package off the GUI thread."""
+
+    succeeded = Signal(str)
+    failed = Signal(str)
+    cancelled = Signal()
+    finished = Signal()
+
+    def __init__(
+        self,
+        service: UpdateService,
+        asset: ReleaseAsset,
+        cancel_event: threading.Event,
+    ) -> None:
+        super().__init__()
+        self.service = service
+        self.asset = asset
+        self.cancel_event = cancel_event
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            path = self.service.download_and_launch(self.asset, self.cancel_event)
+            if not self.cancel_event.is_set():
+                self.succeeded.emit(str(path))
+        except UpdateCancelled:
+            self.cancelled.emit()
+        except UpdateError as exc:
+            self.failed.emit(str(exc))
+        except Exception:
+            logger.exception("application update download failed")
+            self.failed.emit("Unable to download or open the application update.")
+        finally:
+            self.finished.emit()
+
+    @Slot()
+    def request_cancel(self) -> None:
+        self.cancel_event.set()
+
+
 class SettingsWindow(QWidget):
     """A single-instance settings window owned by MainWindow."""
 
@@ -158,6 +240,7 @@ class SettingsWindow(QWidget):
         vision_hotkey_manager: GlobalHotkeyManager | None = None,
         component_manager: LocalOCRComponentManager | None = None,
         local_ocr_session: LocalOCRSession | None = None,
+        update_service: UpdateService | None = None,
         parent: QWidget | None = None,
         local_ocr_supported: bool | None = None,
         log_path: Path | str | None = None,
@@ -168,6 +251,7 @@ class SettingsWindow(QWidget):
         self.vision_hotkey_manager = vision_hotkey_manager
         self.component_manager = component_manager or LocalOCRComponentManager()
         self.local_ocr_session = local_ocr_session
+        self.update_service = update_service or UpdateService()
         self._local_ocr_supported = (
             is_local_ocr_supported() if local_ocr_supported is None else local_ocr_supported
         )
@@ -184,6 +268,13 @@ class SettingsWindow(QWidget):
         self._google_thread: QThread | None = None
         self._google_worker: GoogleVisionTestWorker | None = None
         self._google_cancel_event: threading.Event | None = None
+        self._update_check_thread: QThread | None = None
+        self._update_check_worker: UpdateCheckWorker | None = None
+        self._update_check_cancel_event: threading.Event | None = None
+        self._update_download_thread: QThread | None = None
+        self._update_download_worker: UpdateDownloadWorker | None = None
+        self._update_download_cancel_event: threading.Event | None = None
+        self._pending_update: UpdateCheckResult | None = None
         self._loaded_api_key = ""
         self._loaded_google_vision_api_key = ""
         self._loaded_auto_watch_values: dict[str, int | float] = {}
@@ -488,6 +579,43 @@ class SettingsWindow(QWidget):
         auto_watch_layout.addWidget(auto_watch_card)
         auto_watch_layout.addStretch(1)
 
+        updates_page, updates_layout = make_page(
+            "Updates", "Check GitHub Releases and open the newest installer for this device."
+        )
+        updates_card = QFrame()
+        updates_card.setObjectName("settingsCard")
+        updates_card_layout = QVBoxLayout(updates_card)
+        updates_card_layout.setContentsMargins(16, 14, 16, 16)
+        updates_card_layout.setSpacing(10)
+        updates_form = QFormLayout()
+        self.current_version_label = QLabel(__version__)
+        self.current_version_label.setObjectName("currentVersionLabel")
+        self.latest_version_label = QLabel("Not checked")
+        self.latest_version_label.setObjectName("latestVersionLabel")
+        updates_form.addRow("Current version", self.current_version_label)
+        updates_form.addRow("Latest version", self.latest_version_label)
+        updates_card_layout.addLayout(updates_form)
+        self.update_status_label = QLabel(
+            "Check for the newest stable TellMeSensei application release."
+        )
+        self.update_status_label.setObjectName("updateStatusLabel")
+        self.update_status_label.setWordWrap(True)
+        updates_card_layout.addWidget(self.update_status_label)
+        update_buttons = QHBoxLayout()
+        self.check_update_button = QPushButton("Check for Updates")
+        self.check_update_button.setObjectName("checkUpdateButton")
+        self.check_update_button.clicked.connect(self.check_for_updates)
+        self.update_button = QPushButton("Update")
+        self.update_button.setObjectName("updateButton")
+        self.update_button.setEnabled(False)
+        self.update_button.clicked.connect(self.install_update)
+        update_buttons.addWidget(self.check_update_button)
+        update_buttons.addWidget(self.update_button)
+        update_buttons.addStretch(1)
+        updates_card_layout.addLayout(update_buttons)
+        updates_layout.addWidget(updates_card)
+        updates_layout.addStretch(1)
+
         debug_page, debug_layout = make_page(
             "Debug", "Inspect the latest TellMeSensei runtime log for troubleshooting."
         )
@@ -526,6 +654,7 @@ class SettingsWindow(QWidget):
             local_page,
             google_page,
             auto_watch_page,
+            updates_page,
             debug_page,
         ):
             self.page_stack.addWidget(page)
@@ -548,7 +677,7 @@ class SettingsWindow(QWidget):
         sidebar_layout.setSpacing(4)
         self._navigation_buttons: list[QPushButton] = []
         for index, label in enumerate(
-            ("DeepSeek", "Shortcuts", "OCR", "Local OCR", "Google Vision", "Auto Watch", "Debug")
+            ("DeepSeek", "Shortcuts", "OCR", "Local OCR", "Google Vision", "Auto Watch", "Updates", "Debug")
         ):
             nav_button = QPushButton(label)
             nav_button.setObjectName("navigationButton")
@@ -650,6 +779,151 @@ class SettingsWindow(QWidget):
         self.page_stack.setCurrentIndex(index)
         for page_index, button in enumerate(self._navigation_buttons):
             button.setChecked(page_index == index)
+
+    @Slot()
+    def check_for_updates(self) -> None:
+        if self.is_update_check_running() or self.is_update_download_running():
+            return
+        self._close_requested = False
+        self._pending_update = None
+        self._update_check_cancel_event = threading.Event()
+        worker = UpdateCheckWorker(self.update_service, self._update_check_cancel_event)
+        thread = QThread(self)
+        thread.setObjectName("SettingsUpdateCheckThread")
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._on_update_check_success)
+        worker.failed.connect(self._on_update_check_failed)
+        worker.cancelled.connect(self._on_update_check_cancelled)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_update_check_finished)
+        self._update_check_worker = worker
+        self._update_check_thread = thread
+        self.latest_version_label.setText("Checking...")
+        self.update_status_label.setText("Checking GitHub Releases...")
+        self._refresh_update_controls()
+        thread.start()
+
+    @Slot(object)
+    def _on_update_check_success(self, result: object) -> None:
+        if self._close_requested or self._shutdown_requested:
+            return
+        if not isinstance(result, UpdateCheckResult):
+            self._on_update_check_failed("GitHub Releases returned an unexpected result.")
+            return
+        self.latest_version_label.setText(result.latest_version)
+        if result.update_available:
+            self._pending_update = result
+            self.update_status_label.setText(
+                f"TellMeSensei {result.latest_version} is available."
+            )
+        else:
+            self._pending_update = None
+            self.update_status_label.setText("TellMeSensei is up to date.")
+        self._refresh_update_controls()
+
+    @Slot(str)
+    def _on_update_check_failed(self, message: str) -> None:
+        self._pending_update = None
+        if not self._close_requested and not self._shutdown_requested:
+            self.latest_version_label.setText("Unavailable")
+            self.update_status_label.setText(message)
+        self._refresh_update_controls()
+
+    @Slot()
+    def _on_update_check_cancelled(self) -> None:
+        if not self._close_requested and not self._shutdown_requested:
+            self.update_status_label.setText("Update check cancelled.")
+
+    @Slot()
+    def _on_update_check_finished(self) -> None:
+        self._update_check_thread = None
+        self._update_check_worker = None
+        self._update_check_cancel_event = None
+        if self._close_requested or self._shutdown_requested:
+            self.hide()
+        self._refresh_update_controls()
+        self._maybe_emit_shutdown_ready()
+
+    @Slot()
+    def install_update(self) -> None:
+        result = self._pending_update
+        if (
+            result is None
+            or not result.update_available
+            or self.is_update_check_running()
+            or self.is_update_download_running()
+        ):
+            return
+        self._close_requested = False
+        self._update_download_cancel_event = threading.Event()
+        worker = UpdateDownloadWorker(
+            self.update_service,
+            result.asset,
+            self._update_download_cancel_event,
+        )
+        thread = QThread(self)
+        thread.setObjectName("SettingsUpdateDownloadThread")
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._on_update_download_success)
+        worker.failed.connect(self._on_update_download_failed)
+        worker.cancelled.connect(self._on_update_download_cancelled)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_update_download_finished)
+        self._update_download_worker = worker
+        self._update_download_thread = thread
+        self.update_status_label.setText(
+            f"Downloading TellMeSensei {result.latest_version}..."
+        )
+        self._refresh_update_controls()
+        thread.start()
+
+    @Slot(str)
+    def _on_update_download_success(self, _path: str) -> None:
+        if not self._close_requested and not self._shutdown_requested:
+            self.update_status_label.setText(
+                "Update package opened. Complete the installer to finish updating."
+            )
+        self._pending_update = None
+
+    @Slot(str)
+    def _on_update_download_failed(self, message: str) -> None:
+        if not self._close_requested and not self._shutdown_requested:
+            self.update_status_label.setText(message)
+
+    @Slot()
+    def _on_update_download_cancelled(self) -> None:
+        if not self._close_requested and not self._shutdown_requested:
+            self.update_status_label.setText("Update download cancelled.")
+
+    @Slot()
+    def _on_update_download_finished(self) -> None:
+        self._update_download_thread = None
+        self._update_download_worker = None
+        self._update_download_cancel_event = None
+        if self._close_requested or self._shutdown_requested:
+            self.hide()
+        self._refresh_update_controls()
+        self._maybe_emit_shutdown_ready()
+
+    def _refresh_update_controls(self) -> None:
+        busy = self.is_update_check_running() or self.is_update_download_running()
+        self.check_update_button.setEnabled(not busy)
+        result = self._pending_update
+        self.update_button.setEnabled(
+            not busy and result is not None and result.update_available
+        )
+        if self.is_update_download_running():
+            self.update_button.setText("Downloading...")
+        elif result is not None and result.update_available:
+            self.update_button.setText(f"Update to {result.latest_version}")
+        else:
+            self.update_button.setText("Update")
 
     @Slot()
     def refresh_debug_log(self) -> None:
@@ -1325,11 +1599,19 @@ class SettingsWindow(QWidget):
     def is_google_test_running(self) -> bool:
         return self._google_thread is not None and self._google_thread.isRunning()
 
+    def is_update_check_running(self) -> bool:
+        return self._update_check_thread is not None and self._update_check_thread.isRunning()
+
+    def is_update_download_running(self) -> bool:
+        return self._update_download_thread is not None and self._update_download_thread.isRunning()
+
     def has_running_background_operations(self) -> bool:
         return (
             self.is_connection_running()
             or self.is_download_running()
             or self.is_google_test_running()
+            or self.is_update_check_running()
+            or self.is_update_download_running()
         )
 
     @Slot()
@@ -1343,6 +1625,10 @@ class SettingsWindow(QWidget):
                 self._connection_worker.request_cancel()
         if self.is_google_test_running():
             self.cancel_google_vision_test()
+        if self.is_update_check_running() and self._update_check_worker is not None:
+            self._update_check_worker.request_cancel()
+        if self.is_update_download_running() and self._update_download_worker is not None:
+            self._update_download_worker.request_cancel()
         self.hide()
         self._maybe_emit_shutdown_ready()
 
@@ -1365,6 +1651,10 @@ class SettingsWindow(QWidget):
                 self._connection_worker.request_cancel()
         if self.is_google_test_running():
             self.cancel_google_vision_test()
+        if self.is_update_check_running() and self._update_check_worker is not None:
+            self._update_check_worker.request_cancel()
+        if self.is_update_download_running() and self._update_download_worker is not None:
+            self._update_download_worker.request_cancel()
         if self.has_running_background_operations():
             self.hide()
             event.accept()
