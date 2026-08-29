@@ -15,6 +15,7 @@ from typing import Any, Callable
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QImage
 
+from app.network import urlopen_https
 from app.ocr.types import OCRCancelled, OCRError, OCRLine, OCRResult
 
 VISION_ANNOTATE_URL = "https://vision.googleapis.com/v1/images:annotate"
@@ -112,8 +113,11 @@ class GoogleVisionOCRProvider:
 
     def _request(self, request: urllib.request.Request) -> bytes:
         try:
-            opener = self._urlopen or urllib.request.urlopen
-            response = opener(request, timeout=self.timeout)
+            response = urlopen_https(
+                request,
+                timeout=self.timeout,
+                opener=self._urlopen,
+            )
             try:
                 return response.read()
             finally:

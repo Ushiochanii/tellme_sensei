@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from pathlib import Path
 from tempfile import gettempdir
 
 from app.runtime_paths import APPLICATION_DIRECTORY, default_log_path
+
+
+DEFAULT_LOG_TAIL_BYTES = 256 * 1024
+DEFAULT_LOG_TAIL_LINES = 1000
+_SENSITIVE_LOG_VALUE_RE = re.compile(
+    r"(?P<prefix>\b(?:api[_-]?key|authorization|token|password|secret)\b\s*[:=]\s*)"
+    r"(?:"
+    r"(?P<quote>['\"])(?P<quoted>.*?)(?P=quote)"
+    r"|(?P<scheme>(?:Bearer|Basic|Token|Digest)\s+)?(?P<unquoted>[^\s,;]+)"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def configure_logging(project_root: Path | None = None) -> None:
@@ -43,3 +56,58 @@ def configure_logging(project_root: Path | None = None) -> None:
         handlers=handlers,
         force=True,
     )
+
+
+def redact_log_secrets(text: str) -> str:
+    """Mask common key/value secret forms before displaying diagnostics."""
+
+    if not text:
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        prefix = match.group("prefix")
+        quote = match.group("quote")
+        if quote is not None:
+            return f"{prefix}{quote}[REDACTED]{quote}"
+        scheme = match.group("scheme") or ""
+        return f"{prefix}{scheme}[REDACTED]"
+
+    return _SENSITIVE_LOG_VALUE_RE.sub(replace, text)
+
+
+def read_log_tail(
+    path: Path | str | None = None,
+    *,
+    max_bytes: int = DEFAULT_LOG_TAIL_BYTES,
+    max_lines: int = DEFAULT_LOG_TAIL_LINES,
+    redact: bool = True,
+) -> str:
+    """Read a bounded UTF-8 tail of the operational log.
+
+    Reading from the end avoids loading an accidentally large log into the GUI
+    thread.  ``FileNotFoundError`` and other ``OSError`` instances deliberately
+    propagate so callers can show an explicit missing/read-failure state.
+    """
+
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be positive")
+    if max_lines <= 0:
+        raise ValueError("max_lines must be positive")
+    target = Path(path) if path is not None else default_log_path()
+    with target.open("rb") as stream:
+        stream.seek(0, 2)
+        file_size = stream.tell()
+        offset = max(0, file_size - max_bytes)
+        stream.seek(offset)
+        data = stream.read(max_bytes)
+    text = data.decode("utf-8", errors="replace")
+    if offset:
+        # The first bytes may be the middle of a line; omit that fragment.
+        _, separator, text = text.partition("\n")
+        if not separator:
+            text = ""
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        lines = lines[-max_lines:]
+    result = "\n".join(lines)
+    return redact_log_secrets(result) if redact else result

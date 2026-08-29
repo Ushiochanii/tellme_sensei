@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import replace
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtGui import QKeySequence
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QProgressBar,
+    QPlainTextEdit,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -34,6 +36,12 @@ from app.config import AppConfig, ConfigError, ConfigManager
 from app.local_ocr.component_manager import ComponentError, LocalOCRComponentManager
 from app.local_ocr.download import LocalOCRDownloadWorker
 from app.local_ocr.manifest import manifest_url_available, resolve_manifest_url
+from app.logging_config import (
+    DEFAULT_LOG_TAIL_BYTES,
+    DEFAULT_LOG_TAIL_LINES,
+    default_log_path,
+    read_log_tail,
+)
 from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
 from app.platform.hotkey import HotkeySpec, HotkeySpecError
@@ -152,6 +160,7 @@ class SettingsWindow(QWidget):
         local_ocr_session: LocalOCRSession | None = None,
         parent: QWidget | None = None,
         local_ocr_supported: bool | None = None,
+        log_path: Path | str | None = None,
     ) -> None:
         super().__init__(parent)
         self.config_manager = config_manager or ConfigManager()
@@ -162,6 +171,7 @@ class SettingsWindow(QWidget):
         self._local_ocr_supported = (
             is_local_ocr_supported() if local_ocr_supported is None else local_ocr_supported
         )
+        self._log_path = log_path
         self._connection_thread: QThread | None = None
         self._connection_worker: ConnectionTestWorker | None = None
         self._connection_cancel_event: threading.Event | None = None
@@ -177,6 +187,7 @@ class SettingsWindow(QWidget):
         self._loaded_api_key = ""
         self._loaded_google_vision_api_key = ""
         self._loaded_auto_watch_values: dict[str, int | float] = {}
+        self._local_ocr_download_terminal_status: str | None = None
 
         self.setWindowTitle("TellMeSensei Settings")
         self.setMinimumSize(760, 540)
@@ -477,7 +488,46 @@ class SettingsWindow(QWidget):
         auto_watch_layout.addWidget(auto_watch_card)
         auto_watch_layout.addStretch(1)
 
-        for page in (deepseek_page, shortcuts_page, ocr_page, local_page, google_page, auto_watch_page):
+        debug_page, debug_layout = make_page(
+            "Debug", "Inspect the latest TellMeSensei runtime log for troubleshooting."
+        )
+        debug_card = QFrame()
+        debug_card.setObjectName("settingsCard")
+        debug_card_layout = QVBoxLayout(debug_card)
+        debug_card_layout.setContentsMargins(16, 14, 16, 16)
+        debug_card_layout.setSpacing(10)
+        self.debug_log_view = QPlainTextEdit()
+        self.debug_log_view.setObjectName("debugLogView")
+        self.debug_log_view.setReadOnly(True)
+        self.debug_log_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.debug_log_view.setMaximumBlockCount(DEFAULT_LOG_TAIL_LINES)
+        # Compatibility aliases keep the widget discoverable for UI tests and
+        # callers that use the more conventional ``*_edit`` naming.
+        self.debug_log_edit = self.debug_log_view
+        self.debug_log_status_label = QLabel()
+        self.debug_log_status_label.setObjectName("debugLogStatusLabel")
+        self.debug_log_status_label.setWordWrap(True)
+        self.debug_log_status = self.debug_log_status_label
+        self.debug_log_refresh_button = QPushButton("Refresh")
+        self.debug_log_refresh_button.setObjectName("debugLogRefreshButton")
+        self.debug_log_refresh_button.clicked.connect(self.refresh_debug_log)
+        self.refresh_log_button = self.debug_log_refresh_button
+        debug_card_layout.addWidget(self.debug_log_view, 1)
+        debug_card_layout.addWidget(self.debug_log_status_label)
+        debug_card_layout.addWidget(
+            self.debug_log_refresh_button, 0, Qt.AlignmentFlag.AlignLeft
+        )
+        debug_layout.addWidget(debug_card, 1)
+
+        for page in (
+            deepseek_page,
+            shortcuts_page,
+            ocr_page,
+            local_page,
+            google_page,
+            auto_watch_page,
+            debug_page,
+        ):
             self.page_stack.addWidget(page)
 
         page_scroll = QScrollArea()
@@ -497,7 +547,9 @@ class SettingsWindow(QWidget):
         sidebar_layout.setContentsMargins(8, 10, 8, 10)
         sidebar_layout.setSpacing(4)
         self._navigation_buttons: list[QPushButton] = []
-        for index, label in enumerate(("DeepSeek", "Shortcuts", "OCR", "Local OCR", "Google Vision", "Auto Watch")):
+        for index, label in enumerate(
+            ("DeepSeek", "Shortcuts", "OCR", "Local OCR", "Google Vision", "Auto Watch", "Debug")
+        ):
             nav_button = QPushButton(label)
             nav_button.setObjectName("navigationButton")
             nav_button.setProperty("navLevel", "child" if index in (3, 4) else "primary")
@@ -534,6 +586,7 @@ class SettingsWindow(QWidget):
         self._load_current_values()
         self._refresh_local_ocr_state()
         self._apply_local_ocr_capability()
+        self.refresh_debug_log()
         self._select_page(0)
 
     def _refresh_expected_stability(self) -> None:
@@ -597,6 +650,41 @@ class SettingsWindow(QWidget):
         self.page_stack.setCurrentIndex(index)
         for page_index, button in enumerate(self._navigation_buttons):
             button.setChecked(page_index == index)
+
+    @Slot()
+    def refresh_debug_log(self) -> None:
+        """Refresh the bounded, read-only tail of the operational log."""
+
+        try:
+            path = Path(self._log_path) if self._log_path is not None else default_log_path()
+            text = read_log_tail(
+                path,
+                max_bytes=DEFAULT_LOG_TAIL_BYTES,
+                max_lines=DEFAULT_LOG_TAIL_LINES,
+            )
+        except FileNotFoundError:
+            self.debug_log_view.clear()
+            self.debug_log_status_label.setText(
+                "No runtime log has been written yet."
+            )
+            return
+        except (OSError, RuntimeError) as exc:
+            logger.warning("debug log read failed: %s", type(exc).__name__)
+            self.debug_log_view.clear()
+            self.debug_log_status_label.setText(
+                "Unable to read the runtime log."
+            )
+            return
+
+        self.debug_log_view.setPlainText(text)
+        line_count = len(text.splitlines())
+        if line_count:
+            self.debug_log_status_label.setText(
+                f"Showing the latest {line_count} log lines (bounded to "
+                f"{DEFAULT_LOG_TAIL_BYTES // 1024} KB)."
+            )
+        else:
+            self.debug_log_status_label.setText("Runtime log is empty.")
 
     def _apply_local_ocr_capability(self) -> None:
         """Apply separate platform-capability and distribution-availability states."""
@@ -809,6 +897,7 @@ class SettingsWindow(QWidget):
             return
         if self.local_ocr_session is not None:
             self.local_ocr_session.stop()
+        self._local_ocr_download_terminal_status = None
         self._download_cancel_event = threading.Event()
         worker = LocalOCRDownloadWorker(manifest_url, self.component_manager, self._download_cancel_event)
         thread = QThread(self)
@@ -839,6 +928,7 @@ class SettingsWindow(QWidget):
 
     @Slot(str)
     def _on_local_ocr_download_succeeded(self, installed_path: str) -> None:
+        self._local_ocr_download_terminal_status = None
         if self.local_ocr_session is not None:
             self.local_ocr_session.reset_capability()
         self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version}")
@@ -851,19 +941,27 @@ class SettingsWindow(QWidget):
 
     @Slot(str)
     def _on_local_ocr_download_failed(self, message: str) -> None:
-        self.local_ocr_status_label.setText(f"Error: {message}")
+        self._local_ocr_download_terminal_status = f"Error: {message}"
+        self.local_ocr_status_label.setText(self._local_ocr_download_terminal_status)
 
     @Slot()
     def _on_local_ocr_download_cancelled(self) -> None:
-        self.local_ocr_status_label.setText("Download cancelled")
+        self._local_ocr_download_terminal_status = "Download cancelled"
+        self.local_ocr_status_label.setText(self._local_ocr_download_terminal_status)
 
     @Slot()
     def _on_local_ocr_download_finished(self) -> None:
+        terminal_status = self._local_ocr_download_terminal_status
         self._download_thread = None
         self._download_worker = None
         self._download_cancel_event = None
         self._refresh_operation_controls()
         self._refresh_local_ocr_state()
+        if terminal_status and not self.component_manager.is_installed():
+            # ``_refresh_local_ocr_state`` reports the durable installation
+            # state, but must not erase the actionable error/cancel result that
+            # just arrived from the background worker.
+            self.local_ocr_status_label.setText(terminal_status)
         self._maybe_emit_shutdown_ready()
 
     @Slot()
