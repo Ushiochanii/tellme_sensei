@@ -61,7 +61,7 @@ def test_windows_capture_waits_150ms_before_screen_grab(qt_app, monkeypatch) -> 
     qt_app.processEvents()
 
 
-def test_direct_capture_keeps_hidden_launcher_hidden_until_answer_closes(qt_app, monkeypatch) -> None:
+def test_direct_capture_keeps_launcher_hidden_after_capture_callback(qt_app, monkeypatch) -> None:
     events: list[str] = []
     _install_fake_screen(monkeypatch, events)
     monkeypatch.setattr(overlay_module.sys, "platform", "win32")
@@ -108,4 +108,24 @@ def test_cancel_does_not_rehide_launcher(qt_app, monkeypatch) -> None:
 
     assert launcher.isVisible()
     launcher.close()
+    qt_app.processEvents()
+
+
+def test_normal_answer_close_restores_floating_launcher(qt_app) -> None:
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow(tray_mode=False)
+    window.hide()
+    window._show_or_create_answer()
+    answer = window._answer_window
+    assert answer is not None
+    answer.show()
+    qt_app.processEvents()
+
+    assert not window.isVisible()
+    answer.close()
+    qt_app.processEvents()
+
+    assert window.isVisible()
+    window.close()
     qt_app.processEvents()
