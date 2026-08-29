@@ -66,58 +66,87 @@ class WatchOverlay(QWidget):
 
 
 class ContextQuestionWatchOverlay(WatchOverlay):
-    """One transparent fullscreen overlay that marks two watched ROIs."""
+    """One transparent overlay for a Context/Question preview or watch pair."""
 
     CONTEXT_COLOR = QColor("#5da9e9")
     QUESTION_COLOR = QColor("#9b7bea")
 
     def __init__(self, screen_or_regions, context_roi: QRect | None = None,
                  question_roi: QRect | None = None, parent=None):
+        screen, rois = self._parse_regions(screen_or_regions, context_roi, question_roi)
+        super().__init__(screen, rois[0], parent)
+        self.set_regions(screen, rois)
+
+    @staticmethod
+    def _parse_regions(screen_or_regions, context_roi, question_roi):
         if isinstance(screen_or_regions, ContextQuestionRegions):
             regions = screen_or_regions
-            screen = regions.screen
-            context_roi = regions.context.logical_roi
-            question_roi = regions.question.logical_roi
+            return regions.screen, (
+                QRect(regions.context.logical_roi),
+                QRect(regions.question.logical_roi),
+            )
+
+        screen = screen_or_regions
+        if question_roi is None and not isinstance(context_roi, QRect):
+            try:
+                rois = tuple(context_roi)
+            except TypeError as exc:
+                raise TypeError("ContextQuestionWatchOverlay requires one or two QRect ROIs") from exc
+        elif question_roi is None:
+            rois = (context_roi,)
         else:
-            screen = screen_or_regions
-            if question_roi is None and not isinstance(context_roi, QRect):
-                try:
-                    pair = tuple(context_roi)
-                except TypeError as exc:
-                    raise TypeError("ContextQuestionWatchOverlay requires two QRect ROIs") from exc
-                if len(pair) != 2:
-                    raise ValueError("ContextQuestionWatchOverlay requires two QRect ROIs")
-                context_roi, question_roi = pair
-        if not isinstance(context_roi, QRect) or context_roi.isEmpty():
-            raise ValueError("Context ROI must be a non-empty QRect")
-        if not isinstance(question_roi, QRect) or question_roi.isEmpty():
-            raise ValueError("Question ROI must be a non-empty QRect")
-        super().__init__(screen, context_roi, parent)
-        self.context_roi = QRect(context_roi)
-        self.question_roi = QRect(question_roi)
-        self.rois = (self.context_roi, self.question_roi)
+            rois = (context_roi, question_roi)
+        if not 1 <= len(rois) <= 2:
+            raise ValueError("ContextQuestionWatchOverlay requires one or two QRect ROIs")
+        if any(not isinstance(roi, QRect) or roi.isEmpty() for roi in rois):
+            raise ValueError("Context and Question ROIs must be non-empty QRects")
+        return screen, tuple(QRect(roi) for roi in rois)
+
+    def set_regions(self, screen_or_regions, context_roi=None, question_roi=None) -> None:
+        """Replace preview/watch ROIs without creating another overlay window."""
+
+        screen, rois = self._parse_regions(screen_or_regions, context_roi, question_roi)
+        if screen is None:
+            raise ValueError("ContextQuestionWatchOverlay requires a screen")
+        self.screen = screen
+        self.rois = tuple(QRect(roi) for roi in rois)
+        self.roi = QRect(self.rois[0])  # Keep the base overlay compatibility field.
+        self.context_roi = self.rois[0]
+        self.question_roi = self.rois[1] if len(self.rois) == 2 else None
+        self.setGeometry(screen.geometry())
+        self.update()
 
     def paintEvent(self, _event):  # noqa: N802 - Qt API name
         painter = QPainter(self)
         bounds = QRect(0, 0, self.width(), self.height())
         colors = (self.CONTEXT_COLOR, self.QUESTION_COLOR)
-        for roi, color in zip(self.rois, colors):
+        labels = ("CONTEXT", "QUESTION")
+        for index, (roi, color, label) in enumerate(zip(self.rois, colors, labels)):
             draw_color = QColor("#e58d8d") if self.error else color
-            for segment in _outside_all_rois_segments(roi, self.rois, bounds):
+            for segment in _outside_all_rois_segments(
+                roi, self.rois, bounds, index=index
+            ):
                 painter.fillRect(segment, draw_color)
+
+        # Labels are also part of the one shared composition.  Avoiding the
+        # other label rectangles prevents a close pair from hiding one label.
+        occupied_labels: list[QRect] = []
+        for index, (roi, color, label) in enumerate(zip(self.rois, colors, labels)):
+            draw_color = QColor("#e58d8d") if self.error else color
             self._draw_label(
                 painter,
                 roi,
-                "CONTEXT" if roi is self.context_roi else "QUESTION",
+                label,
                 draw_color,
                 bounds,
                 self.rois,
+                occupied_labels,
             )
 
     @staticmethod
     def _draw_label(painter: QPainter, roi: QRect, label: str, color: QColor, bounds: QRect,
-                    rois: Iterable[QRect]) -> None:
-        """Draw a label only in a strip that is outside both monitored ROIs."""
+                    rois: Iterable[QRect], occupied: list[QRect] | None = None) -> None:
+        """Draw a role label in a free strip outside all monitored pixels."""
         label_height = 18
         label_width = max(70, len(label) * 9 + 14)
         candidates = (
@@ -126,24 +155,73 @@ class ContextQuestionWatchOverlay(WatchOverlay):
             QRect(roi.left() - label_width - 5, roi.top(), label_width, label_height),
             QRect(roi.right() + 5, roi.top(), label_width, label_height),
         )
+        if occupied is None:
+            occupied = []
         for candidate in candidates:
             candidate = candidate.intersected(bounds)
             if candidate.isEmpty() or candidate.width() < label_width or candidate.height() < label_height:
                 continue
             if any(candidate.intersects(other) for other in rois):
                 continue
+            if any(candidate.intersects(other) for other in occupied):
+                continue
             painter.setPen(color)
             painter.drawText(candidate, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
+            occupied.append(candidate)
             return
 
 
-def _outside_all_rois_segments(roi: QRect, rois: Iterable[QRect], bounds: QRect) -> tuple[QRect, ...]:
-    """Keep a border strip out of every monitored pixel in pair mode."""
-    segments = []
-    other_rois = tuple(other for other in rois if other != roi)
+def _subtract_rect(rect: QRect, occluder: QRect) -> tuple[QRect, ...]:
+    """Subtract one monitored rectangle while retaining safe border fragments."""
+
+    intersection = rect.intersected(occluder)
+    if intersection.isEmpty():
+        return (rect,)
+
+    pieces: list[QRect] = []
+    if intersection.top() > rect.top():
+        pieces.append(QRect(rect.left(), rect.top(), rect.width(), intersection.top() - rect.top()))
+    if intersection.bottom() < rect.bottom():
+        pieces.append(
+            QRect(rect.left(), intersection.bottom() + 1, rect.width(), rect.bottom() - intersection.bottom())
+        )
+    if intersection.left() > rect.left():
+        pieces.append(QRect(rect.left(), intersection.top(), intersection.left() - rect.left(), intersection.height()))
+    if intersection.right() < rect.right():
+        pieces.append(
+            QRect(intersection.right() + 1, intersection.top(), rect.right() - intersection.right(), intersection.height())
+        )
+    return tuple(piece for piece in pieces if not piece.isEmpty())
+
+
+def _outside_all_rois_segments(
+    roi: QRect,
+    rois: Iterable[QRect],
+    bounds: QRect,
+    *,
+    index: int | None = None,
+) -> tuple[QRect, ...]:
+    """Keep border strips outside every monitored ROI, without dropping fragments."""
+
+    all_rois = tuple(rois)
+    if index is None:
+        index = next((i for i, other in enumerate(all_rois) if other == roi), None)
+    other_rois = tuple(other for i, other in enumerate(all_rois) if i != index)
+    segments: list[QRect] = []
     for segment in outside_roi_segments(roi, bounds):
-        if not any(segment.intersects(other) for other in other_rois):
-            segments.append(segment)
+        fragments = (segment,)
+        for other in other_rois:
+            fragments = tuple(
+                fragment
+                for piece in fragments
+                for fragment in _subtract_rect(piece, other)
+            )
+        segments.extend(
+            fragment
+            for fragment in fragments
+            if not fragment.isEmpty()
+            and not any(fragment.intersects(other) for other in other_rois)
+        )
     return tuple(segments)
 
 

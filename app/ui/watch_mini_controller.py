@@ -133,7 +133,8 @@ class WatchMiniController(QWidget):
     def set_analysis_state(self, state):
         name = getattr(state, "name", str(state)).lower()
         labels = {"idle": "Ready for changes", "accepted": "Waiting to analyze", "delay_schedule": "Waiting to analyze",
-                  "started": "Analyzing…", "running": "Analyzing…", "finished": "Last analysis completed",
+                  "started": "Analyzing…", "running": "Analyzing…", "context_ocr": "Recognizing Context…",
+                  "question_ocr": "Recognizing Question…", "finished": "Last analysis completed",
                   "result": "Last analysis completed", "cancelled": "Analysis cancelled", "error": "Analysis failed"}
         self.analysis_label.setText(labels.get(name, str(state)))
     def set_generation(self, generation):

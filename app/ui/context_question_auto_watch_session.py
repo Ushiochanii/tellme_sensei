@@ -28,6 +28,10 @@ class ContextQuestionAutoWatchSession(QObject):
     analysis_requested = Signal(object)
     analysis_started = Signal(object)
     analysis_result = Signal(object)
+    analysis_ocr_ready = Signal(object)
+    # Short alias for integrations that use the event name rather than the
+    # more explicit ``analysis_ocr_ready`` name.
+    analysis_ocr = analysis_ocr_ready
     analysis_error = Signal(object)
     analysis_cancelled = Signal(object)
     analysis_finished = Signal(object)
@@ -77,6 +81,7 @@ class ContextQuestionAutoWatchSession(QObject):
             on_error=self._on_error,
             on_cancelled=self._on_cancelled,
             on_finished=self._on_finished,
+            on_ocr=self._on_ocr,
             on_observe=self._on_observe,
         )
         if dispatcher is not None:
@@ -85,6 +90,7 @@ class ContextQuestionAutoWatchSession(QObject):
                 ("on_error", self._on_error),
                 ("on_cancelled", self._on_cancelled),
                 ("on_finished", self._on_finished),
+                ("on_ocr", self._on_ocr),
                 ("on_observe", self._on_observe),
             ):
                 if hasattr(self.dispatcher, name):
@@ -135,11 +141,22 @@ class ContextQuestionAutoWatchSession(QObject):
             self.timer.setInterval(self.settings.poll_interval_ms)
             self.timer.timeout.connect(self.tick)
 
-        self.overlay = self.overlay or ContextQuestionWatchOverlay(
-            self.regions.screen,
-            self.regions.context.logical_roi,
-            self.regions.question.logical_roi,
-        )
+        if self.overlay is None:
+            self.overlay = ContextQuestionWatchOverlay(
+                self.regions.screen,
+                self.regions.context.logical_roi,
+                self.regions.question.logical_roi,
+            )
+        elif hasattr(self.overlay, "set_regions"):
+            # A pre-Start preview is handed to the session; make the
+            # ownership transfer also guarantee the formal pair composition.
+            self.overlay.set_regions(
+                self.regions.screen,
+                (
+                    self.regions.context.logical_roi,
+                    self.regions.question.logical_roi,
+                ),
+            )
         self.mini = self.mini or WatchMiniController()
         self.mini.set_mode(self.mode)
         if hasattr(self.mini, "set_region_mode"):
@@ -346,6 +363,19 @@ class ContextQuestionAutoWatchSession(QObject):
                 {
                     "request": request,
                     "error": message,
+                    "mode": self.mode,
+                    "region_mode": "Context + Question",
+                    "generation": request.generation,
+                }
+            )
+
+    def _on_ocr(self, request, stage, text) -> None:
+        if not self._stopped:
+            self.analysis_ocr_ready.emit(
+                {
+                    "request": request,
+                    "stage": stage,
+                    "text": text,
                     "mode": self.mode,
                     "region_mode": "Context + Question",
                     "generation": request.generation,

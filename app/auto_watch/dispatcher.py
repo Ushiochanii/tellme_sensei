@@ -42,6 +42,7 @@ class _QtWorkerHandle(QObject):
 
     result_ready = Signal(object)
     error_occurred = Signal(str)
+    ocr_ready = Signal(str, str)
     cancelled = Signal()
     finished = Signal()
 
@@ -54,6 +55,24 @@ class _QtWorkerHandle(QObject):
         self._connect_worker_signal("result_ready", lambda *args: self.result_ready.emit(args[-1]), only_if_missing="job_result_ready")
         self._connect_worker_signal("job_error_occurred", lambda *args: self.error_occurred.emit(args[-1]))
         self._connect_worker_signal("error_occurred", lambda *args: self.error_occurred.emit(args[-1]), only_if_missing="job_error_occurred")
+        self._connect_worker_signal(
+            "job_context_ocr_finished",
+            lambda *args: self.ocr_ready.emit("context", args[-1]),
+        )
+        self._connect_worker_signal(
+            "context_ocr_finished",
+            lambda *args: self.ocr_ready.emit("context", args[-1]),
+            only_if_missing="job_context_ocr_finished",
+        )
+        self._connect_worker_signal(
+            "job_question_ocr_finished",
+            lambda *args: self.ocr_ready.emit("question", args[-1]),
+        )
+        self._connect_worker_signal(
+            "question_ocr_finished",
+            lambda *args: self.ocr_ready.emit("question", args[-1]),
+            only_if_missing="job_question_ocr_finished",
+        )
         self._connect_worker_signal("cancelled", lambda *args: self.cancelled.emit())
         finished_signal = getattr(self.worker, "finished", None)
         if finished_signal is not None:
@@ -96,6 +115,8 @@ class _HandleRelay(QObject):
         self.dispatcher, self.request, self.handle = dispatcher, request, handle
         handle.result_ready.connect(self.result)
         handle.error_occurred.connect(self.error)
+        if hasattr(handle, "ocr_ready"):
+            handle.ocr_ready.connect(self.ocr_ready)
         handle.cancelled.connect(self.cancelled)
         handle.finished.connect(self.finished)
 
@@ -104,6 +125,10 @@ class _HandleRelay(QObject):
 
     @Slot(str)
     def error(self, value): self.dispatcher._error(self.request, self.handle, value)
+
+    @Slot(str, str)
+    def ocr_ready(self, stage, text):
+        self.dispatcher._ocr_ready(self.request, self.handle, stage, text)
 
     @Slot()
     def cancelled(self): self.dispatcher._cancelled(self.request, self.handle)
@@ -120,7 +145,7 @@ class AnalysisDispatcher:
                  local_ocr_session=None,
                  context_ocr_cache: ContextOCRCache | None = None,
                  deepseek_service=None, on_result=None, on_error=None, on_cancelled=None,
-                 on_finished=None, on_observe=None, session_id: str = "auto-watch") -> None:
+                 on_finished=None, on_ocr=None, on_observe=None, session_id: str = "auto-watch") -> None:
         self.settings = settings or AutoWatchSettings()
         self.worker_factory = worker_factory or self._default_worker_factory
         self.scheduler = scheduler or _TimerScheduler()
@@ -133,6 +158,7 @@ class AnalysisDispatcher:
         self.context_ocr_cache = context_ocr_cache or ContextOCRCache()
         self.on_result, self.on_error = on_result, on_error
         self.on_cancelled, self.on_finished = on_cancelled, on_finished
+        self.on_ocr = on_ocr
         self.on_observe = on_observe
         self.session_id = session_id
         self.state = AnalysisState.IDLE
@@ -388,6 +414,41 @@ class AnalysisDispatcher:
 
     def _result(self, request, handle, *args): self._deliver(request, handle, "result", self.on_result, args[-1])
     def _error(self, request, handle, *args): self._deliver(request, handle, "error", self.on_error, args[-1])
+
+    def _ocr_ready(self, request, handle, stage, text):
+        """Deliver per-region OCR only while its request handle is current."""
+
+        if stage not in {"context", "question"}:
+            logger.info("unknown OCR stage discard generation=%s session=%s", request.generation, request.session_id)
+            return
+        kind = f"{stage}_ocr"
+        if self.active_request is not request or self._active_handle is not handle:
+            logger.info(
+                "stale %s discard generation=%s request=%s session=%s",
+                kind,
+                request.generation,
+                request.request_id,
+                request.session_id,
+            )
+            self.stale_discard_count += 1
+            self._observe("stale_discard", request, event_kind=kind, count=self.stale_discard_count)
+            return
+        if not self._valid(request, kind) or (request.generation, request.session_id, kind) in self._delivered:
+            return
+        self._delivered.add((request.generation, request.session_id, kind))
+        self._observe(kind, request)
+        if self.on_ocr is None:
+            return
+        try:
+            self.on_ocr(request, stage, text)
+        except Exception:
+            logger.exception(
+                "external OCR callback failed generation=%s request=%s session=%s stage=%s",
+                request.generation,
+                request.request_id,
+                request.session_id,
+                stage,
+            )
 
     def _cancelled(self, request, handle, *args):
         self._deliver(request, handle, "cancelled", self.on_cancelled)

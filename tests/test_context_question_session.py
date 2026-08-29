@@ -119,7 +119,7 @@ class _Dispatcher:
         self.pause_count = 0
         self.resume_count = 0
         self.stop_count = 0
-        self.on_result = self.on_error = self.on_cancelled = self.on_finished = self.on_observe = None
+        self.on_result = self.on_error = self.on_cancelled = self.on_finished = self.on_ocr = self.on_observe = None
 
     def submit_context_question(self, context_image, question_image, mode, **kwargs):
         request = SimpleNamespace(
@@ -150,9 +150,13 @@ class _Overlay:
         self.begin_count = 0
         self.close_count = 0
         self.errors = []
+        self.regions = None
 
     def begin(self):
         self.begin_count += 1
+
+    def set_regions(self, screen, rois):
+        self.regions = (screen, tuple(rois))
 
     def close(self):
         self.close_count += 1
@@ -242,6 +246,14 @@ def test_context_question_session_routes_pair_lifecycle_and_controls(qt_app):
     assert dispatcher.submissions[0].generation == 1
     assert dispatcher.submissions[0].context_image.size() == images.context.size()
     assert dispatcher.submissions[0].question_image.size() == images.question.size()
+    assert overlay.regions == (screen, (context.logical_roi, question.logical_roi))
+
+    ocr_events = []
+    session.analysis_ocr_ready.connect(ocr_events.append)
+    dispatcher.on_ocr(dispatcher.submissions[0], "context", "context text")
+    assert ocr_events[0]["generation"] == 1
+    assert ocr_events[0]["stage"] == "context"
+    assert ocr_events[0]["text"] == "context text"
 
     mini.pause_requested.emit()
     assert not timer.active and dispatcher.pause_count == 1

@@ -123,6 +123,8 @@ class AnswerWindow(QWidget):
         self.resize(560, 640)
         self._restore_saved_geometry()
         self._ocr_text = ""
+        self._context_ocr_text = ""
+        self._question_ocr_text = ""
         self._answer_text = ""
         self._vision_mode = False
         self._closed_emitted = False
@@ -187,8 +189,47 @@ class AnswerWindow(QWidget):
         ocr_layout.addWidget(self.ocr_edit)
         body_layout.addWidget(ocr_card)
 
+        context_ocr_card = QFrame()
+        context_ocr_card.setObjectName("contextOcrCard")
+        self.context_ocr_card = context_ocr_card
+        self.context_card = context_ocr_card
+        context_ocr_layout = QVBoxLayout(context_ocr_card)
+        context_ocr_layout.setContentsMargins(14, 12, 14, 14)
+        context_ocr_layout.setSpacing(8)
+        self.context_ocr_section_label = self._section_label("Context")
+        self.context_section_label = self.context_ocr_section_label
+        context_ocr_layout.addWidget(self.context_ocr_section_label)
+        self.context_ocr_edit = QPlainTextEdit()
+        self.context_ocr_edit.setObjectName("contextOcrEdit")
+        self.context_edit = self.context_ocr_edit
+        self.context_ocr_edit.setReadOnly(True)
+        self.context_ocr_edit.setPlaceholderText("Recognized context will appear here.")
+        self.context_ocr_edit.setMaximumHeight(145)
+        context_ocr_layout.addWidget(self.context_ocr_edit)
+        body_layout.addWidget(context_ocr_card)
+
+        question_ocr_card = QFrame()
+        question_ocr_card.setObjectName("questionOcrCard")
+        self.question_ocr_card = question_ocr_card
+        self.question_card = question_ocr_card
+        question_ocr_layout = QVBoxLayout(question_ocr_card)
+        question_ocr_layout.setContentsMargins(14, 12, 14, 14)
+        question_ocr_layout.setSpacing(8)
+        self.question_ocr_section_label = self._section_label("Question")
+        self.question_section_label = self.question_ocr_section_label
+        question_ocr_layout.addWidget(self.question_ocr_section_label)
+        self.question_ocr_edit = QPlainTextEdit()
+        self.question_ocr_edit.setObjectName("questionOcrEdit")
+        self.question_edit = self.question_ocr_edit
+        self.question_ocr_edit.setReadOnly(True)
+        self.question_ocr_edit.setPlaceholderText("Recognized question will appear here.")
+        self.question_ocr_edit.setMaximumHeight(145)
+        question_ocr_layout.addWidget(self.question_ocr_edit)
+        body_layout.addWidget(question_ocr_card)
+
         answer_card = QFrame()
         answer_card.setObjectName("answerCard")
+        self.answer_card = answer_card
         answer_layout = QVBoxLayout(answer_card)
         answer_layout.setContentsMargins(14, 12, 14, 14)
         answer_layout.setSpacing(8)
@@ -307,8 +348,13 @@ class AnswerWindow(QWidget):
         self._skip_geometry_save = True
         self.set_mode(mode)
         self._ocr_text = ""
+        self._context_ocr_text = ""
+        self._question_ocr_text = ""
         self._answer_text = ""
-        self.ocr_edit.clear(); self.answer_edit.clear()
+        self.ocr_edit.clear()
+        self.context_ocr_edit.clear()
+        self.question_ocr_edit.clear()
+        self.answer_edit.clear()
         self._disable_auto_watch_job_controls()
         self.set_status("Auto Watch · Analyzing…")
         self._place_auto_watch_window()
@@ -316,10 +362,32 @@ class AnswerWindow(QWidget):
     def show_auto_watch_analyzing(self, generation: int) -> None:
         if not self._auto_watch_active or generation < self._auto_watch_generation:
             return
+        is_new_generation = generation > self._auto_watch_generation
         self._auto_watch_generation = generation
+        if is_new_generation and self._is_context_question_auto_watch() and not self._vision_mode:
+            self._context_ocr_text = ""
+            self._question_ocr_text = ""
+            self._refresh_context_question_ocr()
         self._disable_auto_watch_job_controls()
         self.set_status("New question detected · Analyzing…" if self._answer_text or self._ocr_text else "Auto Watch · Analyzing…")
         self._place_auto_watch_window()
+
+    def show_auto_watch_ocr(self, generation: int, stage: str, text: str) -> None:
+        """Publish one pair OCR result before the final AI result arrives."""
+
+        if (
+            not self._auto_watch_active
+            or generation != self._auto_watch_generation
+            or self._vision_mode
+            or not self._is_context_question_auto_watch()
+            or stage not in {"context", "question"}
+        ):
+            return
+        if stage == "context":
+            self._context_ocr_text = str(text)
+        else:
+            self._question_ocr_text = str(text)
+        self._refresh_context_question_ocr()
 
     def show_auto_watch_result(self, generation: int, result) -> None:
         if not self._auto_watch_active or generation < self._auto_watch_generation:
@@ -333,20 +401,14 @@ class AnswerWindow(QWidget):
             self._answer_text = result.answer
             self.answer_edit.setPlainText(result.answer)
         elif isinstance(result, ContextQuestionPipelineResult):
-            self.set_ocr_text(
-                f"[Context]\n{result.context_ocr.text}\n\n"
-                f"[Question]\n{result.question_ocr.text}"
-            )
+            self.set_context_question_ocr(result.context_ocr.text, result.question_ocr.text)
             self._answer_text = result.answer
             self.answer_edit.setPlainText(result.answer)
         else:
             context_ocr = getattr(result, "context_ocr", None)
             question_ocr = getattr(result, "question_ocr", None)
             if context_ocr is not None and question_ocr is not None:
-                self.set_ocr_text(
-                    f"[Context]\n{context_ocr.text}\n\n"
-                    f"[Question]\n{question_ocr.text}"
-                )
+                self.set_context_question_ocr(context_ocr.text, question_ocr.text)
             else:
                 ocr = getattr(result, "ocr", None)
                 if ocr is not None:
@@ -390,6 +452,7 @@ class AnswerWindow(QWidget):
         self.retry_button.setVisible(True)
         self.recapture_button.setVisible(False); self.recapture_button.setEnabled(False)
         self.set_retry_enabled()
+        self.set_mode(AnalysisMode.VISION if self._vision_mode else AnalysisMode.TEXT)
 
     def _disable_auto_watch_job_controls(self) -> None:
         self.stop_button.setVisible(False); self.stop_button.setEnabled(False)
@@ -435,13 +498,25 @@ class AnswerWindow(QWidget):
             AnalysisMode.VISION.value,
             "AnalysisMode.VISION",
         }
-        self.ocr_section_label.setVisible(not self._vision_mode)
-        self.ocr_edit.setVisible(not self._vision_mode)
-        self.ocr_card.setVisible(not self._vision_mode)
+        pair_mode = self._is_context_question_auto_watch()
+        show_ocr = not self._vision_mode
+        self.ocr_section_label.setVisible(show_ocr and not pair_mode)
+        self.ocr_edit.setVisible(show_ocr and not pair_mode)
+        self.ocr_card.setVisible(show_ocr and not pair_mode)
+        self.context_ocr_section_label.setVisible(show_ocr and pair_mode)
+        self.context_ocr_edit.setVisible(show_ocr and pair_mode)
+        self.context_ocr_card.setVisible(show_ocr and pair_mode)
+        self.question_ocr_section_label.setVisible(show_ocr and pair_mode)
+        self.question_ocr_edit.setVisible(show_ocr and pair_mode)
+        self.question_ocr_card.setVisible(show_ocr and pair_mode)
         self.title_bar.set_mode(AnalysisMode.VISION if self._vision_mode else AnalysisMode.TEXT)
         if self._vision_mode:
             self._ocr_text = ""
             self.ocr_edit.clear()
+            self._context_ocr_text = ""
+            self._question_ocr_text = ""
+            self.context_ocr_edit.clear()
+            self.question_ocr_edit.clear()
 
     def set_ocr_processing(self) -> None:
         self.set_status("正在识别题目...")
@@ -514,6 +589,32 @@ class AnswerWindow(QWidget):
     def set_ocr_text(self, text: str) -> None:
         self._ocr_text = text
         self.ocr_edit.setPlainText(text)
+
+    def set_context_question_ocr(self, context_text: str, question_text: str) -> None:
+        """Update both pair sections and retain a compatibility summary."""
+
+        self._context_ocr_text = str(context_text)
+        self._question_ocr_text = str(question_text)
+        self._refresh_context_question_ocr()
+
+    def _refresh_context_question_ocr(self) -> None:
+        self.context_ocr_edit.setPlainText(self._context_ocr_text)
+        self.question_ocr_edit.setPlainText(self._question_ocr_text)
+        self._ocr_text = (
+            f"[Context]\n{self._context_ocr_text}\n\n"
+            f"[Question]\n{self._question_ocr_text}"
+        )
+        # Keep the established field populated for callers/tests that use the
+        # old combined OCR view; the visible pair UI uses the two cards above.
+        self.ocr_edit.setPlainText(self._ocr_text)
+
+    def _is_context_question_auto_watch(self) -> bool:
+        return str(self._auto_watch_region_mode or "").strip().lower() in {
+            "context_question",
+            "context + question",
+            "pair",
+            "dual",
+        }
 
     def set_ai_processing(self) -> None:
         self._answer_text = ""
