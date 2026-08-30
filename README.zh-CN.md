@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-v0.8.0-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v0.8.2-blue">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%2B%20macOS-lightgrey">
 </p>
 
@@ -33,9 +33,9 @@
 
 | 平台 | TellMeSensei | Local OCR 组件 |
 |---|---|---|
-| Windows x64 | [v0.8.0 — TellMeSensei-Setup-0.8.0.exe](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.8.0) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
-| macOS Intel x86_64 | [v0.8.0 — TellMeSensei-0.8.0-macos-x64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.8.0) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
-| macOS Apple Silicon arm64 | [v0.8.0 — TellMeSensei-0.8.0-macos-arm64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/tag/v0.8.0) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
+| Windows x64 | [v0.8.2 — TellMeSensei-Setup-0.8.2.exe](https://github.com/Ushiochanii/tellme_sensei/releases/download/v0.8.2/TellMeSensei-Setup-0.8.2.exe) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
+| macOS Intel x86_64 | [v0.8.2 — TellMeSensei-0.8.2-macos-x64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/download/v0.8.2/TellMeSensei-0.8.2-macos-x64.dmg) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
+| macOS Apple Silicon arm64 | [v0.8.2 — TellMeSensei-0.8.2-macos-arm64.dmg](https://github.com/Ushiochanii/tellme_sensei/releases/download/v0.8.2/TellMeSensei-0.8.2-macos-arm64.dmg) | [Local OCR 1.4.0](https://github.com/Ushiochanii/tellme_sensei/releases/tag/local-ocr-v1.4.0) |
 
 macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安全性”中选择**仍要打开**，截图功能还需要授予屏幕录制权限。
 
@@ -99,8 +99,8 @@ Core/GUI 环境与 Local OCR worker 依赖刻意分开。只有开发 worker 时
 
 ## 当前状态
 
-- **当前应用版本：** v0.8.0
+- **当前应用版本：** v0.8.2
 - **Local OCR：** 所有受支持平台均为 1.4.0
-- **自动更新：** 未实现
+- **应用更新：** Settings 支持手动检查和下载；尚未实现后台自动更新
 
-更多信息见 [v0.8.0 Release Notes](./docs/releases/v0.8.0.md)。
+更多信息见 [v0.8.2 Release Notes](./docs/releases/v0.8.2.md)。
