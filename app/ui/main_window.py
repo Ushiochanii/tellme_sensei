@@ -13,11 +13,13 @@ from PySide6.QtCore import QThread, Qt, QTimer, Signal, Slot
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QIcon, QImage
 from PySide6.QtWidgets import (
+    QGridLayout,
     QHBoxLayout,
     QButtonGroup,
     QLabel,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QRadioButton,
     QWidget,
@@ -43,6 +45,7 @@ from app.ui.theme import (
     SECONDARY_TEXT,
     TEXT_ACCENT,
     VISION_ACCENT,
+    WATCH_ACCENT,
     ModeButton,
     controller_stylesheet,
     mode_icon,
@@ -176,8 +179,8 @@ class MainWindow(QWidget):
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setObjectName("mainController")
-        # Keep the launcher's established size; setup rows are compact so the
-        # new Region Mode controls fit without changing Single Region layout.
+        # Keep the launcher's established size; the four-card entry grid and
+        # compact status strip deliberately reuse this footprint.
         self.setFixedSize(340, 330)
         self.setStyleSheet(controller_stylesheet())
         layout = QVBoxLayout(self)
@@ -199,8 +202,12 @@ class MainWindow(QWidget):
         header.addWidget(settings_button)
         self.settings_button = settings_button
 
-        mode_layout = QHBoxLayout()
-        mode_layout.setSpacing(10)
+        mode_layout = QGridLayout()
+        mode_layout.setContentsMargins(0, 0, 0, 0)
+        mode_layout.setHorizontalSpacing(10)
+        mode_layout.setVerticalSpacing(10)
+        mode_layout.setColumnStretch(0, 1)
+        mode_layout.setColumnStretch(1, 1)
         text_shortcut, vision_shortcut = self._configured_shortcuts()
         self.text_mode_button = ModeButton(
             "Text / OCR",
@@ -220,15 +227,59 @@ class MainWindow(QWidget):
         self.vision_mode_button.setObjectName("visionModeButton")
         self.vision_mode_button.setProperty("mode", AnalysisMode.VISION.value)
         self.vision_mode_button.clicked.connect(self.start_vision_capture)
-        for button in (self.text_mode_button, self.vision_mode_button):
+        self.watch_mode_button = ModeButton(
+            "Watch",
+            "Single region",
+            mode_icon("watch", WATCH_ACCENT),
+            WATCH_ACCENT,
+        )
+        self.watch_mode_button.setObjectName("watchModeButton")
+        self.watch_mode_button.setProperty("mode", "watch")
+        self.context_watch_mode_button = ModeButton(
+            "Context Watch",
+            "Context + question",
+            mode_icon("context_watch", WATCH_ACCENT),
+            WATCH_ACCENT,
+        )
+        self.context_watch_mode_button.setObjectName("contextWatchModeButton")
+        self.context_watch_mode_button.setProperty("mode", "context_watch")
+        self._entry_buttons = (
+            self.text_mode_button,
+            self.vision_mode_button,
+            self.watch_mode_button,
+            self.context_watch_mode_button,
+        )
+        for button in self._entry_buttons:
             button.setObjectName(button.objectName())
             button.setProperty("class", "modeButton")
-            button.setMinimumHeight(108)
-            button.setToolTip("Text / OCR capture" if button is self.text_mode_button else "Vision capture")
-            mode_layout.addWidget(button)
-
+            button.setMinimumHeight(88)
+            button.setMaximumHeight(92)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.text_mode_button.setToolTip("Capture a Text / OCR question")
+        self.vision_mode_button.setToolTip("Capture a Vision question")
+        self.watch_mode_button.setToolTip("Watch one screen region for new questions")
+        self.context_watch_mode_button.setToolTip(
+            "Watch a context region and a question region"
+        )
+        mode_layout.addWidget(self.text_mode_button, 0, 0)
+        mode_layout.addWidget(self.vision_mode_button, 0, 1)
+        mode_layout.addWidget(self.watch_mode_button, 1, 0)
+        mode_layout.addWidget(self.context_watch_mode_button, 1, 1)
+        self.watch_mode_button.clicked.connect(
+            lambda _checked=False: self.enter_auto_watch_setup("single")
+        )
+        self.context_watch_mode_button.clicked.connect(
+            lambda _checked=False: self.enter_auto_watch_setup("context_question")
+        )
         self.status_label = QLabel()
         self.status_label.setObjectName("statusLabel")
+        self.status_label.setProperty("fluentRole", "statusBar")
+        self.status_label.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.status_label.setMinimumHeight(36)
+        self.status_label.setMaximumHeight(40)
         self._set_status(AppState.IDLE)
 
         layout.addLayout(header)
@@ -236,13 +287,16 @@ class MainWindow(QWidget):
         main_view_layout = QVBoxLayout(self.auto_watch_main_view)
         main_view_layout.setContentsMargins(0, 0, 0, 0)
         mode_view = QWidget(self.auto_watch_main_view)
+        mode_view.setObjectName("modeCardGrid")
         mode_view.setLayout(mode_layout)
         main_view_layout.addWidget(mode_view)
-        self.auto_watch_button = QPushButton("Auto Watch")
-        self.auto_watch_button.setObjectName("autoWatchButton")
-        self.auto_watch_button.clicked.connect(self.enter_auto_watch_setup)
-        main_view_layout.addWidget(self.auto_watch_button)
-        layout.addWidget(self.auto_watch_main_view)
+        main_view_layout.addStretch(1)
+        # Keep the legacy attribute as an internal compatibility alias.  It
+        # now points at the unified Single Region card, so no second entry is
+        # rendered and existing lifecycle code keeps its identity.
+        self.auto_watch_button = self.watch_mode_button
+        self.context_watch_button = self.context_watch_mode_button
+        layout.addWidget(self.auto_watch_main_view, 1)
         self.auto_watch_setup = QWidget(self)
         setup_layout = QVBoxLayout(self.auto_watch_setup)
         setup_layout.setContentsMargins(0, 0, 0, 0)
@@ -263,6 +317,11 @@ class MainWindow(QWidget):
 
         self.auto_watch_single_region_radio = QRadioButton("Single Region", self.auto_watch_setup)
         self.auto_watch_context_question_radio = QRadioButton("Context + Question", self.auto_watch_setup)
+        # The main cards now choose the workflow before setup opens.  Keep
+        # these controls as non-visual state adapters for existing slots and
+        # tests, but remove the redundant choice from the user-facing setup.
+        self.auto_watch_single_region_radio.setVisible(False)
+        self.auto_watch_context_question_radio.setVisible(False)
         self.auto_watch_single_region_radio.setChecked(True)
         self.auto_watch_region_mode_group = QButtonGroup(self)
         self.auto_watch_region_mode_group.setExclusive(True)
@@ -270,13 +329,6 @@ class MainWindow(QWidget):
         self.auto_watch_region_mode_group.addButton(self.auto_watch_context_question_radio)
         self.auto_watch_single_region_radio.toggled.connect(self._on_auto_watch_region_mode_changed)
         self.auto_watch_context_question_radio.toggled.connect(self._on_auto_watch_region_mode_changed)
-        region_mode_row = QHBoxLayout()
-        region_mode_row.addWidget(QLabel("Region Mode"))
-        region_mode_row.addWidget(self.auto_watch_single_region_radio)
-        region_mode_row.addWidget(self.auto_watch_context_question_radio)
-        region_mode_row.addStretch(1)
-        setup_layout.addLayout(region_mode_row)
-
         self.auto_watch_context_selection_status = QLabel("Context: Not selected", self.auto_watch_setup)
         self.auto_watch_question_selection_status = QLabel("Question: Not selected", self.auto_watch_setup)
         self.auto_watch_context_status = self.auto_watch_context_selection_status
@@ -314,17 +366,20 @@ class MainWindow(QWidget):
         self.auto_watch_select_button.clicked.connect(self.start_auto_watch_selection)
         self.auto_watch_start_button.clicked.connect(self.start_context_question_auto_watch)
         self.auto_watch_back_button.clicked.connect(self.exit_auto_watch_setup)
-        layout.addWidget(self.auto_watch_setup)
+        layout.addWidget(self.auto_watch_setup, 1)
         self.auto_watch_setup.hide()
         layout.addWidget(self.status_label)
+        QWidget.setTabOrder(self.settings_button, self.text_mode_button)
+        QWidget.setTabOrder(self.text_mode_button, self.vision_mode_button)
+        QWidget.setTabOrder(self.vision_mode_button, self.watch_mode_button)
+        QWidget.setTabOrder(self.watch_mode_button, self.context_watch_mode_button)
         self._update_auto_watch_setup()
 
     def _set_capture_controls_enabled(self, enabled: bool) -> None:
         """Enable or disable both direct mode capture controls together."""
 
-        self.text_mode_button.setEnabled(enabled)
-        self.vision_mode_button.setEnabled(enabled)
-        if hasattr(self, "auto_watch_button"): self.auto_watch_button.setEnabled(enabled and not self._auto_watch_active)
+        for button in getattr(self, "_entry_buttons", ()):
+            button.setEnabled(enabled and not self._auto_watch_active)
 
     def _is_context_question_mode(self) -> bool:
         return self.auto_watch_context_question_radio.isChecked()
@@ -433,13 +488,18 @@ class MainWindow(QWidget):
         self.auto_watch_reselect_context_button.setEnabled(reselect_enabled)
         self.auto_watch_reselect_question_button.setEnabled(reselect_enabled)
 
-    def enter_auto_watch_setup(self):
+    def enter_auto_watch_setup(self, region_mode: str = "single"):
+        if region_mode not in {"single", "context_question"}:
+            return False
         if self._auto_watch_active or self._auto_watch_selection_overlay is not None:
             return False
         self._clear_context_question_selection()
         self._auto_watch_selection_role = None
-        self._auto_watch_region_mode = "single"
-        self.auto_watch_single_region_radio.setChecked(True)
+        self._auto_watch_region_mode = region_mode
+        if region_mode == "context_question":
+            self.auto_watch_context_question_radio.setChecked(True)
+        else:
+            self.auto_watch_single_region_radio.setChecked(True)
         self._auto_watch_in_setup = True
         self.auto_watch_setup_status.setText("Region is kept for this session only.")
         self._update_auto_watch_setup()

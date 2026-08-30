@@ -19,6 +19,8 @@
 - Vision Mode screenshot hotkey (`Ctrl+Shift+S` by default)
 - Drag-to-select screen capture, including macOS fullscreen and Spaces
 - Floating answer window with streaming DeepSeek output
+- Unified floating controller with **Text / OCR**, **Vision**, **Watch**, and **Context Watch** entry cards
+- **Watch** monitors one selected region; **Context Watch** monitors a shared context region plus a question region
 - **Local OCR** with PaddleOCR, processed on-device
 - **Google Cloud Vision** as an optional BYOK online OCR mode
 - Configurable hotkey, persistent window geometry, system tray, and cancellation
@@ -43,6 +45,7 @@ macOS builds are ad-hoc signed and not notarized. macOS may require **Open Anywa
    - **Local OCR:** click **Download Local OCR** in Settings.
    - **Google Cloud Vision:** enter your own Google Vision API key and test the connection.
 4. Press `Ctrl+Shift+A` for a text/OCR question or `Ctrl+Shift+S` for a diagram-heavy Vision question, drag over the question, and wait for the answer window.
+5. For automatic monitoring, choose **Watch** for one region or **Context Watch** for a context region plus a question region in the floating controller, then select **Text / OCR** or **Vision** as the analysis mode.
 
 ## Analysis modes
 

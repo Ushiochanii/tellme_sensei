@@ -19,6 +19,8 @@
 - 视觉模式截图快捷键（默认 `Ctrl+Shift+S`）
 - 鼠标拖拽框选屏幕区域，支持 macOS 全屏应用和多桌面
 - 悬浮窗口流式显示 DeepSeek 回答
+- 统一的悬浮控制器入口：**Text / OCR**、**Vision**、**Watch** 和 **Context Watch**
+- **Watch** 监控一个选定区域；**Context Watch** 同时监控共享的上下文区域和题目区域
 - **Local OCR**：PaddleOCR，本机处理
 - **Google Cloud Vision**：可选的 BYOK 在线 OCR
 - 支持快捷键配置、窗口位置记忆、系统托盘与任务取消
@@ -43,6 +45,7 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
    - **Local OCR：** 在 Settings 中点击 **Download Local OCR**。
    - **Google Cloud Vision：** 填写自己的 Google Vision API Key 并测试连接。
 4. 文字题按 `Ctrl+Shift+A`，图形题按 `Ctrl+Shift+S`，框选题目后等待答案窗口出现。
+5. 需要自动监控时，在悬浮控制器中选择 **Watch**（单个区域）或 **Context Watch**（上下文区域加题目区域），再选择 **Text / OCR** 或 **Vision** 作为分析模式。
 
 ## 分析模式
 
