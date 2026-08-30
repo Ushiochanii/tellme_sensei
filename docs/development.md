@@ -107,6 +107,25 @@ with platform-specific native packages and manifests. The current baseline is
 Local OCR 1.4.0 for Windows x64, macOS Intel x86_64, and macOS Apple Silicon
 arm64.
 
+For stable application releases, pushing a stable application tag such as
+`v0.8.3` is the explicit publish request. Before pushing the tag, the matching
+`app.version` value and `docs/releases/v0.8.3.md` release notes must already be
+committed at the tagged revision.
+
+The tag-triggered release workflow builds and validates all three application
+targets first. Only after all three build jobs succeed does a dedicated release
+job collect those validated artifacts inside GitHub Actions and create the
+stable GitHub Release. A failed build leaves the tag without a published
+Release rather than creating a partial release.
+
+The release job does not download artifacts to the operator's machine merely
+to upload them again. It also does not repeat PE/Mach-O or non-empty checks
+already completed by the build jobs; its assembly check is limited to release
+metadata and the three expected asset names.
+
+`workflow_dispatch` remains available for build-only validation. A manual
+workflow run uploads build artifacts but does not publish a GitHub Release.
+
 ## Feature parity
 
 A normal product feature is complete only when it is available on all three
@@ -133,7 +152,9 @@ release acceptance remains on the corresponding physical platform.
 
 Release builds are produced by the existing GitHub Actions workflows:
 
-- `.github/workflows/release-build.yml` builds the three application assets.
+- `.github/workflows/release-build.yml` builds and validates the three
+  application assets. On a stable `vX.Y.Z` tag, it publishes the stable GitHub
+  Release only after all three build jobs succeed. Manual dispatch is build-only.
 - `.github/workflows/local-ocr-build.yml` builds the three platform-specific
   Local OCR 1.4.0 packages and manifests.
 
