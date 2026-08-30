@@ -93,7 +93,7 @@ def answer_window_stylesheet() -> str:
         background: rgba(255, 255, 255, 220);
         border-color: #c9d8f7;
     }}
-    QLabel#sectionTitle {{
+    QLabel#sectionTitle, QLabel#answerSectionTitle {{
         color: {SECONDARY_TEXT};
         font-size: 13px;
         font-weight: 700;
@@ -109,6 +109,9 @@ def answer_window_stylesheet() -> str:
         selection-background-color: #cfe0ff;
         selection-color: {TEXT};
         font-size: 12px;
+    }}
+    QPlainTextEdit#contextOcrEdit, QPlainTextEdit#questionOcrEdit, QPlainTextEdit#answerEdit {{
+        min-height: 52px;
     }}
     QPlainTextEdit#answerEdit {{ border-color: #c7d8f8; font-size: 13px; }}
     QPlainTextEdit#ocrEdit:focus, QPlainTextEdit#contextOcrEdit:focus,
