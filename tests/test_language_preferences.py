@@ -122,7 +122,8 @@ def test_config_carries_languages_without_changing_ocr_settings(tmp_path) -> Non
     assert config.interface_language == "zh-CN"
     assert config.answer_language == "en"
     assert config.ocr_language == "japan"
-    assert config.ocr_provider == "google_vision"
+    assert config.ocr_mode == "online"
+    assert config.online_ocr_provider == "google_vision"
 
 
 def test_settings_language_selectors_persist_independently(qt_app, tmp_path) -> None:

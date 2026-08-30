@@ -153,7 +153,10 @@ def test_provider_save_and_cancel_semantics(qt_app, tmp_path) -> None:
     window.google_vision_api_key_edit.setText("google-key")
     window.save()
     assert secrets.google == "google-key"
-    assert window.config_manager.settings_repository.load()["ocr_provider"] == "google_vision"
+    saved = window.config_manager.settings_repository.load()
+    assert saved["ocr_mode"] == "online"
+    assert saved["local_ocr_engine"] == "paddleocr"
+    assert saved["online_ocr_provider"] == "google_vision"
 
     window.local_mode_radio.setChecked(True)
     window.google_vision_api_key_edit.setText("unsaved-key")

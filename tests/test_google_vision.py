@@ -79,16 +79,17 @@ def test_factory_defaults_to_local_and_can_create_google() -> None:
     assert isinstance(create_ocr_provider(AppConfig()), LocalOCRProvider)
     provider = create_ocr_provider(
         AppConfig(
-            ocr_provider="google_vision",
+            ocr_mode="online",
+            online_ocr_provider="google_vision",
             google_vision_api_key="google-key",
         )
     )
     assert isinstance(provider, GoogleVisionOCRProvider)
 
 
-def test_factory_rejects_unknown_provider() -> None:
-    with pytest.raises(ConfigError, match="Unsupported OCR provider"):
-        create_ocr_provider(AppConfig(ocr_provider="unknown"))
+def test_factory_rejects_unknown_mode() -> None:
+    with pytest.raises(ConfigError, match="Unsupported OCR mode"):
+        create_ocr_provider(AppConfig(ocr_mode="unknown"))
 
 
 def test_request_uses_header_and_document_detection(qt_app) -> None:

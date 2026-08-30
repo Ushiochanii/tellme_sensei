@@ -8,11 +8,11 @@ from app.ui.main_window import MainWindow
 
 
 class _Config:
-    def __init__(self, provider: str = "local") -> None:
-        self.provider = provider
+    def __init__(self, mode: str = "local") -> None:
+        self.mode = mode
 
     def load(self) -> AppConfig:
-        return AppConfig(ocr_provider=self.provider)
+        return AppConfig(ocr_mode=self.mode)
 
 
 class _ComponentManager:
@@ -91,11 +91,11 @@ def test_local_installed_schedules_one_prewarm(qt_app) -> None:
 
 
 def test_prewarm_is_skipped_without_component_or_for_online(qt_app) -> None:
-    for provider, installed in (("local", False), ("google_vision", True)):
+    for mode, installed in (("local", False), ("online", True)):
         session = _Session()
         window = MainWindow(
             tray_mode=True,
-            config_manager=_Config(provider),
+            config_manager=_Config(mode),
             local_ocr_session=session,
             component_manager=_ComponentManager(installed),
         )
@@ -115,7 +115,7 @@ def test_online_save_cancels_prewarm_and_stops_session(qt_app) -> None:
         component_manager=_ComponentManager(True),
     )
     window.request_local_ocr_prewarm()
-    config.provider = "google_vision"
+    config.mode = "online"
     window._on_settings_saved()
     _finish(qt_app, window)
 

@@ -507,8 +507,10 @@ def run_benchmark(args: argparse.Namespace) -> tuple[Path, Path, dict[str, Any]]
         if not cases:
             raise BenchmarkError(f"benchmark case not found: {smoke_case}")
     config = ConfigManager().load()
-    if config.ocr_provider != "local":
-        raise BenchmarkError("benchmark requires OCR_PROVIDER=local; Google Vision is not used")
+    if config.ocr_mode != "local":
+        raise BenchmarkError(
+            "benchmark requires OCR_MODE=local; Google Vision is not used"
+        )
     worker = args.worker
     model_root = args.model_root
     if worker is None:

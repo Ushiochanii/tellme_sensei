@@ -55,7 +55,7 @@ def _preflight_diagnosis(error: BaseException) -> str:
 def run_ocr_preflight(config, session, output: Callable[[str], None] = print) -> bool:
     """Warm the shared local session and report a retryable startup failure."""
 
-    if config.ocr_provider != "local":
+    if config.ocr_mode != "local":
         return False
     try:
         session.prepare()
@@ -294,10 +294,13 @@ def main(
         except Exception:
             local_ocr_session.stop()
             raise
-        if config_value.ocr_provider == "local":
+        if config_value.ocr_mode == "local":
             output("real OCR 初始化：复用一个 LocalOCRSession；即将执行 persistent worker preflight。")
         else:
-            output(f"real OCR 初始化：provider={config_value.ocr_provider}；不执行 local OCR preflight。")
+            output(
+                f"real OCR 初始化：mode={config_value.ocr_mode}；"
+                "不执行 local OCR preflight。"
+            )
         dispatcher = AnalysisDispatcher(settings=settings, config=config_value,
                                         local_ocr_session=local_ocr_session,
                                         ocr_provider=ocr_provider,

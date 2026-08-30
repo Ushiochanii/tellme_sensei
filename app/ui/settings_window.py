@@ -32,7 +32,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.config import AppConfig, ConfigError, ConfigManager
+from app.config import (
+    AppConfig,
+    ConfigError,
+    ConfigManager,
+    DEFAULT_LOCAL_OCR_ENGINE,
+    DEFAULT_ONLINE_OCR_PROVIDER,
+)
 from app.analysis import AnalysisMode
 from app.localization import (
     DEFAULT_ANSWER_LANGUAGE,
@@ -472,7 +478,7 @@ class SettingsWindow(QWidget):
         mode_layout.addWidget(self.online_mode_radio)
         mode_layout.addStretch(1)
         self.local_engine_combo = QComboBox()
-        self.local_engine_combo.addItem("PaddleOCR", "local")
+        self.local_engine_combo.addItem("PaddleOCR", DEFAULT_LOCAL_OCR_ENGINE)
         self.online_service_combo = QComboBox()
         self.online_service_combo.addItem("Google Cloud Vision", "google_vision")
         self.ocr_provider_override_label = QLabel(
@@ -1411,15 +1417,25 @@ class SettingsWindow(QWidget):
         self.context_watch_shortcut_edit.setKeySequence(
             QKeySequence(config.context_watch_global_shortcut)
         )
-        is_online = config.ocr_provider == "google_vision" or not self._local_ocr_is_usable()
-        provider_env_override = self.config_manager.has_explicit_ocr_provider()
+        is_online = config.ocr_mode == "online" or not self._local_ocr_is_usable()
+        provider_env_override = self.config_manager.has_explicit_ocr_mode()
         self.local_mode_radio.setChecked(not is_online)
         self.online_mode_radio.setChecked(is_online)
         self.local_engine_combo.setCurrentIndex(
-            max(0, self.local_engine_combo.findData("local"))
+            max(
+                0,
+                self.local_engine_combo.findData(
+                    config.local_ocr_engine or DEFAULT_LOCAL_OCR_ENGINE
+                ),
+            )
         )
         self.online_service_combo.setCurrentIndex(
-            max(0, self.online_service_combo.findData("google_vision"))
+            max(
+                0,
+                self.online_service_combo.findData(
+                    config.online_ocr_provider or DEFAULT_ONLINE_OCR_PROVIDER
+                ),
+            )
         )
         self.local_mode_radio.setEnabled(not provider_env_override)
         self.online_mode_radio.setEnabled(not provider_env_override)
@@ -1572,10 +1588,8 @@ class SettingsWindow(QWidget):
         # determine which provider is used by Text mode.
         self._refresh_operation_controls()
 
-    def _current_provider_from_ui(self) -> str:
-        if self.local_mode_radio.isChecked():
-            return str(self.local_engine_combo.currentData() or "local")
-        return str(self.online_service_combo.currentData() or "google_vision")
+    def _ocr_mode_from_ui(self) -> str:
+        return "local" if self.local_mode_radio.isChecked() else "online"
 
     def _show_environment_override_warnings(self) -> None:
         self._on_credentials_provider_changed()
@@ -1654,7 +1668,7 @@ class SettingsWindow(QWidget):
         self.vision_cancel_button.setVisible(vision_connection_running)
         self.vision_cancel_button.setEnabled(vision_connection_running)
         self.google_vision_test_button.setEnabled(not busy)
-        provider_editable = not busy and not self.config_manager.has_explicit_ocr_provider()
+        provider_editable = not busy and not self.config_manager.has_explicit_ocr_mode()
         self.local_mode_radio.setEnabled(provider_editable)
         self.online_mode_radio.setEnabled(provider_editable)
         self.local_engine_combo.setEnabled(provider_editable)
@@ -1924,7 +1938,13 @@ class SettingsWindow(QWidget):
             vision_global_shortcut=vision_shortcut,
             watch_global_shortcut=watch_shortcut,
             context_watch_global_shortcut=context_watch_shortcut,
-            ocr_provider=self._current_provider_from_ui(),
+            ocr_mode=self._ocr_mode_from_ui(),
+            local_ocr_engine=str(
+                self.local_engine_combo.currentData() or DEFAULT_LOCAL_OCR_ENGINE
+            ),
+            online_ocr_provider=str(
+                self.online_service_combo.currentData() or DEFAULT_ONLINE_OCR_PROVIDER
+            ),
             google_vision_api_key=self.google_vision_api_key_edit.text().strip(),
             online_ocr_timeout=current.online_ocr_timeout,
             interface_language=self.interface_language_combo.currentData(),
@@ -2183,9 +2203,9 @@ class SettingsWindow(QWidget):
             if not self._apply_shortcut_changes(changed_shortcuts):
                 self._set_status(self._tr("settings.shortcut_registration_failed"))
                 return
-            provider_to_save = None
-            if not self.config_manager.has_explicit_ocr_provider():
-                provider_to_save = config.ocr_provider
+            mode_to_save = None
+            if not self.config_manager.has_explicit_ocr_mode():
+                mode_to_save = config.ocr_mode
             self._capture_provider_editor()
             provider_keys_to_save: dict[str, str] = {}
             provider_endpoints_to_save: dict[str, str] = {}
@@ -2220,7 +2240,9 @@ class SettingsWindow(QWidget):
                 vision_global_shortcut=config.vision_global_shortcut,
                 watch_global_shortcut=config.watch_global_shortcut,
                 context_watch_global_shortcut=config.context_watch_global_shortcut,
-                ocr_provider=provider_to_save,
+                ocr_mode=mode_to_save,
+                local_ocr_engine=config.local_ocr_engine,
+                online_ocr_provider=config.online_ocr_provider,
                 google_vision_api_key=google_key_to_save,
                 online_ocr_timeout=config.online_ocr_timeout,
                 interface_language=(

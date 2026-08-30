@@ -232,7 +232,7 @@ def test_real_local_preflight_prepares_shared_session_and_reports_ready():
 
     output = []
     session = Session()
-    config = type("Config", (), {"ocr_provider": "local"})()
+    config = type("Config", (), {"ocr_mode": "local"})()
 
     assert run_ocr_preflight(config, session, output.append) is True
     assert session.prepare_calls == 1
@@ -255,7 +255,7 @@ def test_real_local_preflight_reports_classified_failure_and_is_retryable(messag
         def prepare(self): raise RuntimeError(message)
 
     output = []
-    config = type("Config", (), {"ocr_provider": "local"})()
+    config = type("Config", (), {"ocr_mode": "local"})()
 
     assert run_ocr_preflight(config, Session(), output.append) is False
     assert output == [f"real OCR preflight failed diagnosis={diagnosis}: {message}"]
