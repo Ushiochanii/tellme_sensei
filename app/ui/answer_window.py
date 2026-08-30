@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizeGrip,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -243,9 +244,8 @@ class AnswerWindow(QWidget):
         self.context_ocr_edit.setPlaceholderText(
             tr("answer.recognized_context_placeholder", self._interface_language)
         )
-        self.context_ocr_edit.setMaximumHeight(145)
-        context_ocr_layout.addWidget(self.context_ocr_edit)
-        body_layout.addWidget(context_ocr_card)
+        context_ocr_layout.addWidget(self.context_ocr_edit, 1)
+        body_layout.addWidget(context_ocr_card, 3)
 
         question_ocr_card = QFrame()
         question_ocr_card.setObjectName("questionOcrCard")
@@ -264,9 +264,8 @@ class AnswerWindow(QWidget):
         self.question_ocr_edit.setPlaceholderText(
             tr("answer.recognized_question_placeholder", self._interface_language)
         )
-        self.question_ocr_edit.setMaximumHeight(145)
-        question_ocr_layout.addWidget(self.question_ocr_edit)
-        body_layout.addWidget(question_ocr_card)
+        question_ocr_layout.addWidget(self.question_ocr_edit, 1)
+        body_layout.addWidget(question_ocr_card, 2)
 
         answer_card = QFrame()
         answer_card.setObjectName("answerCard")
@@ -285,7 +284,15 @@ class AnswerWindow(QWidget):
         )
         self.answer_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         answer_layout.addWidget(self.answer_edit, 1)
-        body_layout.addWidget(answer_card, 1)
+        body_layout.addWidget(answer_card, 5)
+
+        pair_edit_policy = QSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Ignored,
+        )
+        for edit in (self.context_ocr_edit, self.question_ocr_edit, self.answer_edit):
+            edit.setSizePolicy(pair_edit_policy)
+
         surface_layout.addWidget(body, 1)
 
         footer = QWidget()
@@ -523,7 +530,6 @@ class AnswerWindow(QWidget):
             self.show()
             return
         self.show()
-        self.adjustSize()
         current = self.geometry()
         available = screen.availableGeometry()
         if not self._auto_watch_user_moved or not current.intersects(available):
