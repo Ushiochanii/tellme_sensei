@@ -422,35 +422,11 @@ docs: add v0.8.1 implementation plan
 
 ## 12. Release 流程
 
-对于较大的版本化功能：
+对于较大的版本化功能，仍遵循 feature → review → release preparation → RC / platform validation → stable release 的生命周期。
 
-```text
-feature phases
-    ↓
-all accepted on main
-    ↓
-release preparation
-    ↓
-RC build/tag/release
-    ↓
-real platform validation
-    ↓
-fix only release blockers
-    ↓
-stable tag/release
-```
+TellMeSensei 的**发布系统实现细节与当前 release model 的 source of truth** 位于 [`docs/development.md` 的 Release model / Packaging and release workflows](docs/development.md#release-model-from-v070-onward)。包括支持目标、tag 触发语义、三平台 build、artifact assembly、`workflow_dispatch` 行为及对应 workflow 文件。`AGENTS.md` 这里只规定 Agent 在发布过程中的行为边界，不重复维护整套 release 系统说明。
 
-TellMeSensei 当前既定 application release model：
-
-- 一个 application version
-- 一个 Git tag
-- 一个 GitHub Release
-- 一套共享 product feature set
-- 每个支持的 application target 一个发布 asset
-
-Local OCR 继续作为独立版本的 component，使用各平台 native package。
-
-没有实际完成 platform/manual acceptance，就不要声称已经通过。
+Local OCR 继续作为独立版本的 component，使用各平台 native package。没有实际完成 platform/manual acceptance，就不要声称已经通过。
 
 ### 12.1 异步 CI 不由 Agent 陪跑
 
@@ -480,34 +456,18 @@ trigger CI / build
 
 如果 workflow 最终失败，再读取失败 job / step / log，定位会改变修复动作的真实错误。成功 workflow 不需要为了“确认得更彻底”重复读取已经通过的验证。
 
-### 12.2 Stable application release 自动装配
+### 12.2 Stable application release 的 Agent 行为
 
-在用户已经批准发布、并明确 push 一个稳定 application tag `vX.Y.Z` 后，该 tag 本身就是本次 stable publish request；不需要 Agent 在 build 全绿后再进行第二次人工式发布确认。
+当用户已经批准发布并明确 push 稳定 application tag `vX.Y.Z` 后，该 tag 本身就是本次 stable publish request；Agent 不要在 build 全绿后再制造第二次人工式确认。
 
-稳定发布的默认路径应是：
+具体的自动发布编排以 [`docs/development.md`](docs/development.md#packaging-and-release-workflows) 为准。Agent 只需遵守以下行为规则：
 
-```text
-push stable vX.Y.Z tag
-    ↓
-GitHub Actions builds Windows x64 + macOS x64 + macOS arm64
-    ↓
-各 build job 完成既定架构 / 安装资产验证
-    ↓
-all three succeed
-    ↓
-one release job collects artifacts inside GitHub Actions
-    ↓
-create stable GitHub Release + upload three assets
-```
-
-规则：
-
-- 任一平台 build 失败，则 release job 不运行，不创建 partial stable Release。
-- 不要为了发布而把 GitHub Actions artifact 下载到操作员本地，再从本地重新上传到 GitHub Release；artifact assembly 应留在 GitHub Actions runner 内完成。
-- build job 已验证 PE / Mach-O 架构、文件存在和非空后，release job 不重复这些验证。release assembly 只检查会改变发布动作的 metadata 与三个预期 asset 名称。
+- 任一平台 build 失败时，不绕过 CI 去制造 partial stable Release。
+- 不要为了发布把 GitHub Actions artifact 下载到操作员本地，再从本地重新上传到 GitHub Release；正常 artifact assembly 留在 GitHub Actions 内完成。
+- build job 已完成的 PE / Mach-O、文件存在和非空验证，不在 release assembly 阶段重复执行。
 - 不添加 checksum/hash 作为额外发布门槛；当前流程没有消费者需要它们。
-- `workflow_dispatch` 可以保留为 build-only validation，不应因为一次手动 build 就自动发布。
-- stable tag 对应的 `app.version` 和 `docs/releases/vX.Y.Z.md` 必须在 push tag 前已经提交到该 tagged revision。
+- `workflow_dispatch` 是 build-only validation；不要把一次手动 build 解释为发布请求。
+- stable tag 对应的 `app.version` 和 `docs/releases/vX.Y.Z.md` 必须在 push tag 前已经提交到 tagged revision。
 - Agent 触发或观察到 tag workflow 后，应报告 run URL 并停止，不要陪着三平台 build 或 artifact transfer 持续轮询。
 
 只有当自动 release workflow 本身发生真实故障时，才检查并修复该故障；不要把“退回本地下载再手工上传”作为默认 fallback。
@@ -516,7 +476,9 @@ create stable GitHub Release + upload three assets
 
 ## 13. 实现报告格式
 
-对于有意义的 coding work，除非某个 feature-specific prompt 要求更严格格式，否则按以下顺序汇报：
+报告应与任务规模匹配。目标是让结果、验证和工程状态清楚，而不是机械填满固定栏目。
+
+对于跨多个文件、一个完整 Phase、架构/生命周期变化或需要正式 review 的实现，优先使用完整结构：
 
 ```text
 ## Result
@@ -543,6 +505,10 @@ Branch、commit、push/PR 状态，以及无关本地修改是否原样保留。
 ## Next step
 下一步已批准的流程动作。不要未经允许自动开始。
 ```
+
+对于小型、明确的 bug fix、单点文档修改或很窄的维护任务，可以使用更短的报告，只保留当前任务真正需要的信息，例如 Result、What changed、Tests / validation 和 Git 状态；不要为了形式制造空的 File map、Design notes 或 Known limitations。
+
+**简化报告不意味着省略教学和流程说明。** Section 8.3 的 `What this demonstrates` 与 Section 14 的生命周期定位，在其各自定义的“有意义的实现工作 / 任务”范围内仍然是强制要求。
 
 如果是 review-only 任务，把 `What changed` 替换成 `Findings`；在适用时明确给出：
 
