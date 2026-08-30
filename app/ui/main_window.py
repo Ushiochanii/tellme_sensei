@@ -597,13 +597,16 @@ class MainWindow(QWidget):
             return False
 
         phase = self._auto_watch_selection_phase
-        self._auto_watch_selection_overlay = None
         try:
             screen, roi = overlay.selection_metadata
         except Exception as exc:
             logger.exception("Auto Watch selection metadata failed")
             self._abort_auto_watch_workflow(str(exc))
             return False
+        # Keep ownership with the workflow until metadata succeeds.  On a
+        # getter failure, abort() must still be able to close this full-screen
+        # overlay exactly once before clearing the phase and pending state.
+        self._auto_watch_selection_overlay = None
         try:
             overlay.close()
         except Exception:

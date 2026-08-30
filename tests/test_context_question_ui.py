@@ -18,6 +18,7 @@ class _FakeOverlay(QObject):
     next_metadata = None
     constructor_error: Exception | None = None
     begin_error: Exception | None = None
+    metadata_error: Exception | None = None
 
     def __init__(self, *_args, **_kwargs):
         super().__init__()
@@ -25,7 +26,7 @@ class _FakeOverlay(QObject):
             raise type(self).constructor_error
         if type(self).next_metadata is None:
             raise AssertionError("test must provide selection metadata")
-        self.selection_metadata = (
+        self._selection_metadata = (
             type(self).next_metadata[0],
             QRect(type(self).next_metadata[1]),
         )
@@ -39,6 +40,12 @@ class _FakeOverlay(QObject):
         if type(self).begin_error is not None:
             raise type(self).begin_error
         self._visible = True
+
+    @property
+    def selection_metadata(self):
+        if type(self).metadata_error is not None:
+            raise type(self).metadata_error
+        return self._selection_metadata
 
     def close(self) -> None:
         self.close_count += 1
@@ -90,6 +97,7 @@ def _reset_fakes() -> None:
     _FakeOverlay.next_metadata = None
     _FakeOverlay.constructor_error = None
     _FakeOverlay.begin_error = None
+    _FakeOverlay.metadata_error = None
     _FakeWatchSession.instances.clear()
     _FakeWatchSession.start_error = None
     _FakeWatchSession.start_result = True
@@ -207,7 +215,7 @@ def test_context_different_screen_reopens_question_and_cancel_clears_context(qt_
     _FakeOverlay.instances[0].captured.emit(QImage())
     question_overlay = _FakeOverlay.instances[1]
 
-    question_overlay.selection_metadata = (other_screen, QRect(question_roi))
+    question_overlay._selection_metadata = (other_screen, QRect(question_roi))
     question_overlay.captured.emit(QImage())
     assert window._auto_watch_selection_phase is AutoWatchSelectionPhase.SELECTING_QUESTION
     assert window._auto_watch_context_region is not None
@@ -255,6 +263,26 @@ def test_invalid_first_selection_aborts_without_pending_region(qt_app, monkeypat
     assert window._auto_watch_selection_overlay is None
     assert window._auto_watch_region is None
     assert not _FakeWatchSession.instances
+    _close(window, qt_app)
+
+
+def test_selection_metadata_failure_closes_current_overlay_before_abort(qt_app, monkeypatch):
+    screen = qt_app.primaryScreen()
+    _prepare(monkeypatch, screen, QRect(10, 10, 80, 60))
+    _FakeOverlay.metadata_error = RuntimeError("metadata failed")
+    monkeypatch.setattr(main_window_module, "AutoWatchSession", _FakeWatchSession)
+    window = MainWindow(tray_mode=True)
+    assert window.start_watch() is True
+    overlay = _FakeOverlay.instances[0]
+    overlay.captured.emit(QImage())
+    assert overlay.close_count == 1
+    assert window._auto_watch_selection_phase is AutoWatchSelectionPhase.IDLE
+    assert window._auto_watch_selection_overlay is None
+    assert window._auto_watch_context_region is None
+    assert window._auto_watch_question_region is None
+    assert window._auto_watch_regions is None
+    assert window._auto_watch_workflow_mode is None
+    assert window._auto_watch_session is None
     _close(window, qt_app)
 
 
