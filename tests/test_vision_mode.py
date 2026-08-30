@@ -259,7 +259,7 @@ def test_main_window_controller_has_glass_mode_controls(qt_app) -> None:
     qt_app.processEvents()
 
 
-def test_main_window_displays_configured_shortcuts(qt_app) -> None:
+def test_main_window_uses_static_feature_descriptions_on_mode_cards(qt_app) -> None:
     config = AppConfig(
         api_key="test",
         global_shortcut="Ctrl+Alt+T",
@@ -273,13 +273,15 @@ def test_main_window_displays_configured_shortcuts(qt_app) -> None:
         vision_hotkey_manager=SimpleNamespace(shortcut="Ctrl+Alt+V"),
     )
 
-    assert "Ctrl+Alt+T" in window.text_mode_button.text()
-    assert "Ctrl+Alt+V" in window.vision_mode_button.text()
+    assert window.text_mode_button.text().splitlines()[1] == "Text extraction"
+    assert window.vision_mode_button.text().splitlines()[1] == "Visual analysis"
+    assert "Ctrl+Alt+T" not in window.text_mode_button.text()
+    assert "Ctrl+Alt+V" not in window.vision_mode_button.text()
     window.close()
     qt_app.processEvents()
 
 
-def test_main_window_shortcut_labels_refresh_after_settings_save(qt_app) -> None:
+def test_main_window_card_descriptions_do_not_change_after_settings_save(qt_app) -> None:
     config_values = {"text": "Ctrl+Shift+A", "vision": "Ctrl+Shift+S"}
     config = AppConfig(
         api_key="test",
@@ -300,8 +302,8 @@ def test_main_window_shortcut_labels_refresh_after_settings_save(qt_app) -> None
     vision_hotkey.shortcut = "Ctrl+Alt+V"
     window._on_settings_saved()
 
-    assert "Ctrl+Alt+T" in window.text_mode_button.text()
-    assert "Ctrl+Alt+V" in window.vision_mode_button.text()
+    assert window.text_mode_button.text().splitlines()[1] == "Text extraction"
+    assert window.vision_mode_button.text().splitlines()[1] == "Visual analysis"
     window.close()
     qt_app.processEvents()
 

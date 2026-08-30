@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QTimer, Qt
 
 from app.platform.base import GlobalHotkeyManager
 
@@ -21,6 +21,8 @@ class ApplicationController(QObject):
         tray,
         hotkey: GlobalHotkeyManager,
         vision_hotkey: GlobalHotkeyManager | None = None,
+        watch_hotkey: GlobalHotkeyManager | None = None,
+        context_watch_hotkey: GlobalHotkeyManager | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent or app)
@@ -30,6 +32,8 @@ class ApplicationController(QObject):
         self.hotkey = hotkey
         self.text_hotkey = hotkey
         self.vision_hotkey = vision_hotkey
+        self.watch_hotkey = watch_hotkey
+        self.context_watch_hotkey = context_watch_hotkey
         self._shutting_down = False
         self._quit_called = False
 
@@ -51,6 +55,15 @@ class ApplicationController(QObject):
         self.text_hotkey.triggered.connect(text_capture)
         if self.vision_hotkey is not None and vision_capture is not None:
             self.vision_hotkey.triggered.connect(vision_capture)
+        watch_setup = getattr(self.window, "start_watch", None)
+        if self.watch_hotkey is not None and callable(watch_setup):
+            self.watch_hotkey.triggered.connect(watch_setup, Qt.ConnectionType.QueuedConnection)
+        context_watch_setup = getattr(self.window, "start_context_watch", None)
+        if self.context_watch_hotkey is not None and callable(context_watch_setup):
+            self.context_watch_hotkey.triggered.connect(
+                context_watch_setup,
+                Qt.ConnectionType.QueuedConnection,
+            )
         self.tray.exit_requested.connect(self.request_exit)
         if hasattr(self.window, "shutdown_ready"):
             self.window.shutdown_ready.connect(self._on_shutdown_ready)
@@ -61,6 +74,12 @@ class ApplicationController(QObject):
             logger.warning("Text Mode global hotkey registration failed; open Settings to change it")
         if self.vision_hotkey is not None and not self.vision_hotkey.register():
             logger.warning("Vision Mode global hotkey registration failed; open Settings to change it")
+        if self.watch_hotkey is not None and not self.watch_hotkey.register():
+            logger.warning("Watch global hotkey registration failed; open Settings to change it")
+        if self.context_watch_hotkey is not None and not self.context_watch_hotkey.register():
+            logger.warning(
+                "Context Watch global hotkey registration failed; open Settings to change it"
+            )
         if show_window:
             self.window.show()
         else:
@@ -78,6 +97,10 @@ class ApplicationController(QObject):
         self.text_hotkey.unregister()
         if self.vision_hotkey is not None:
             self.vision_hotkey.unregister()
+        if self.watch_hotkey is not None:
+            self.watch_hotkey.unregister()
+        if self.context_watch_hotkey is not None:
+            self.context_watch_hotkey.unregister()
         request_shutdown = getattr(self.window, "request_shutdown", None)
         if callable(request_shutdown):
             request_shutdown()
@@ -103,5 +126,9 @@ class ApplicationController(QObject):
         self.text_hotkey.unregister()
         if self.vision_hotkey is not None:
             self.vision_hotkey.unregister()
+        if self.watch_hotkey is not None:
+            self.watch_hotkey.unregister()
+        if self.context_watch_hotkey is not None:
+            self.context_watch_hotkey.unregister()
         self.tray.hide()
         self._quit_called = True

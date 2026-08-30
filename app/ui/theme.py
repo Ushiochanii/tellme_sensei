@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QPushButton
 
 
@@ -14,6 +14,9 @@ TEXT = "#172b63"
 SECONDARY_TEXT = "#60739a"
 TEXT_ACCENT = "#2f6fe4"
 VISION_ACCENT = "#6546d8"
+# Shared low-saturation accent for both Auto Watch workflows.  The two cards
+# intentionally share a visual family instead of implying a capture mode.
+WATCH_ACCENT = "#238898"
 BORDER = "#c9d8f7"
 SUCCESS = "#20a35a"
 DANGER = "#c85b68"
@@ -292,12 +295,15 @@ def controller_stylesheet() -> str:
         color: {SECONDARY_TEXT};
         background: rgba(255, 255, 255, 150);
         border: 1px solid rgba(201, 216, 247, 180);
-        border-radius: {RADIUS_MD}px;
-        padding: 7px 10px;
+        border-radius: 10px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 600;
     }}
     QLabel#statusLabel[state="ready"] {{ color: {SUCCESS}; }}
     QLabel#statusLabel[state="busy"] {{ color: {SECONDARY_TEXT}; }}
-    QPushButton#textModeButton, QPushButton#visionModeButton {{
+    QPushButton#textModeButton, QPushButton#visionModeButton,
+    QPushButton#watchModeButton, QPushButton#contextWatchModeButton {{
         color: {TEXT};
         background: rgba(255, 255, 255, 170);
         border: 1px solid {BORDER};
@@ -307,14 +313,17 @@ def controller_stylesheet() -> str:
         font-weight: 600;
         text-align: center;
     }}
-    QPushButton#textModeButton:hover, QPushButton#visionModeButton:hover {{
+    QPushButton#textModeButton:hover, QPushButton#visionModeButton:hover,
+    QPushButton#watchModeButton:hover, QPushButton#contextWatchModeButton:hover {{
         background: rgba(255, 255, 255, 230);
         border-color: #9bbcf4;
     }}
-    QPushButton#textModeButton:pressed, QPushButton#visionModeButton:pressed {{
+    QPushButton#textModeButton:pressed, QPushButton#visionModeButton:pressed,
+    QPushButton#watchModeButton:pressed, QPushButton#contextWatchModeButton:pressed {{
         background: rgba(225, 235, 255, 230);
     }}
-    QPushButton#textModeButton:disabled, QPushButton#visionModeButton:disabled {{
+    QPushButton#textModeButton:disabled, QPushButton#visionModeButton:disabled,
+    QPushButton#watchModeButton:disabled, QPushButton#contextWatchModeButton:disabled {{
         color: #9aa8c2;
         background: rgba(242, 245, 252, 150);
         border-color: #dce4f2;
@@ -329,6 +338,13 @@ def controller_stylesheet() -> str:
         background: rgba(238, 230, 255, 190);
     }}
     QPushButton#visionModeButton:hover {{ border-color: {VISION_ACCENT}; }}
+    QPushButton#watchModeButton, QPushButton#contextWatchModeButton {{
+        border-color: #9fd2d8;
+        background: rgba(228, 247, 248, 190);
+    }}
+    QPushButton#watchModeButton:hover, QPushButton#contextWatchModeButton:hover {{
+        border-color: {WATCH_ACCENT};
+    }}
     QPushButton#settingsButton {{
         color: {SECONDARY_TEXT};
         background: transparent;
@@ -339,6 +355,10 @@ def controller_stylesheet() -> str:
     QPushButton#settingsButton:hover {{
         color: {TEXT_ACCENT};
         background: rgba(255, 255, 255, 150);
+        border-radius: {RADIUS_SM}px;
+    }}
+    QPushButton#settingsButton:focus {{
+        border: 1px solid {FOCUS_BORDER};
         border-radius: {RADIUS_SM}px;
     }}
     """
@@ -389,6 +409,15 @@ def mode_icon(kind: str, color: str, size: int = 24) -> QPixmap:
         painter.drawEllipse(2, 6, size - 4, size - 12)
         painter.setBrush(QColor(color))
         painter.drawEllipse(size // 2 - 3, size // 2 - 3, 6, 6)
+    elif kind == "watch":
+        center = size // 2
+        painter.drawEllipse(3, 3, size - 6, size - 6)
+        painter.drawLine(center, center, size - 5, 5)
+        painter.setBrush(QColor(color))
+        painter.drawEllipse(center - 2, center - 2, 4, 4)
+    elif kind == "context_watch":
+        painter.drawRoundedRect(QRectF(2, 5, size - 9, size - 9), 2, 2)
+        painter.drawRoundedRect(QRectF(8, 2, size - 10, size - 9), 2, 2)
     else:
         arm = 5
         painter.drawLine(3, 3, 3 + arm, 3)
@@ -426,66 +455,117 @@ def settings_icon(color: str = SECONDARY_TEXT, size: int = 18) -> QPixmap:
 
 
 class ModeButton(QPushButton):
-    """Compact glass card with a centered icon, title, and shortcut pill."""
+    """Compact glass card with a centered icon, title, and footer pill.
 
-    def __init__(self, title: str, shortcut: str, icon: QPixmap, accent: str, *, parent=None) -> None:
+    This remains a standard ``QPushButton`` for native keyboard and
+    accessibility behavior; custom painting only supplies the shared card
+    surface and its interaction states.
+    """
+
+    def __init__(self, title: str, footer: str, icon: QPixmap, accent: str, *, parent=None) -> None:
         super().__init__(parent)
         self._title = title
-        self._shortcut = shortcut
+        self._footer = footer
         self._icon = icon
         self._accent = QColor(accent)
-        self.setText(f"{title}\n{shortcut}")
+        self.setText(f"{title}\n{footer}")
+        self.setAccessibleName(title)
+        self.setAccessibleDescription(f"{title}: {footer}")
+        self.setProperty("fluentRole", "card")
+        self.setProperty("fluentAppearance", "subtle")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(108)
+        self.setMinimumHeight(88)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAutoDefault(False)
 
-    def set_shortcut(self, shortcut: str) -> None:
-        self._shortcut = shortcut
-        self.setText(f"{self._title}\n{shortcut}")
+    def set_footer(self, footer: str) -> None:
+        self._footer = footer
+        self.setText(f"{self._title}\n{footer}")
+        self.setAccessibleDescription(f"{self._title}: {footer}")
         self.update()
 
     def paintEvent(self, _event) -> None:  # noqa: N802 - Qt API name
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         outer = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        accent = self._accent
-        if not self.isEnabled():
-            accent = QColor("#aab6cc")
+        enabled = self.isEnabled()
+        hovered = self.underMouse() and enabled
+        pressed = self.isDown() and enabled
+        selected = self.property("selected") is True and enabled
+        focused = self.hasFocus() and enabled
+        accent = self._accent if enabled else QColor("#aab6cc")
         gradient = QLinearGradient(outer.topLeft(), outer.bottomRight())
-        gradient.setColorAt(0.0, QColor(255, 255, 255, 215))
-        gradient.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 38))
+        start_alpha = 205 if enabled else 145
+        end_alpha = 38
+        if hovered:
+            end_alpha = 62
+        if pressed:
+            start_alpha = 180
+            end_alpha = 94
+        if selected:
+            end_alpha = max(end_alpha, 72)
+        gradient.setColorAt(0.0, QColor(255, 255, 255, start_alpha))
+        gradient.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), end_alpha))
         painter.setBrush(gradient)
         border = QColor(accent)
-        border.setAlpha(95 if self.isEnabled() else 45)
-        if self.underMouse() and self.isEnabled():
+        border.setAlpha(95 if enabled else 45)
+        if hovered:
             border.setAlpha(180)
+        if pressed:
+            border.setAlpha(220)
+        if selected:
+            border.setAlpha(205)
         painter.setPen(QPen(border, 1.2))
         painter.drawRoundedRect(outer, 15, 15)
 
         icon_size = self._icon.size()
+        icon_y = 8
+        painter.save()
+        painter.setOpacity(1.0 if enabled else 0.45)
         painter.drawPixmap(
             int((self.width() - icon_size.width()) / 2),
-            12,
+            icon_y,
             self._icon,
         )
-        text_color = QColor(TEXT if self.isEnabled() else "#9aa8c2")
+        painter.restore()
+        text_color = QColor(TEXT if enabled else "#9aa8c2")
         painter.setPen(text_color)
         title_font = QFont(self.font())
         title_font.setPointSize(12)
         title_font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(title_font)
-        painter.drawText(QRectF(4, 43, self.width() - 8, 22), Qt.AlignmentFlag.AlignCenter, self._title)
+        title_y = icon_y + icon_size.height() + 2
+        painter.drawText(
+            QRectF(4, title_y, self.width() - 8, 20),
+            Qt.AlignmentFlag.AlignCenter,
+            self._title,
+        )
 
-        pill = QRectF(10, self.height() - 34, self.width() - 20, 24)
-        pill_color = QColor(255, 255, 255, 150 if self.isEnabled() else 90)
+        pill = QRectF(10, self.height() - 29, self.width() - 20, 20)
+        pill_color = QColor(255, 255, 255, 150 if enabled else 90)
         painter.setBrush(pill_color)
         pill_border = QColor(accent)
-        pill_border.setAlpha(80 if self.isEnabled() else 35)
+        pill_border.setAlpha(80 if enabled else 35)
         painter.setPen(QPen(pill_border, 1))
-        painter.drawRoundedRect(pill, 9, 9)
-        shortcut_font = QFont(self.font())
-        shortcut_font.setPointSize(9)
-        painter.setFont(shortcut_font)
-        painter.setPen(QColor(accent if self.isEnabled() else "#9aa8c2"))
-        painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, self._shortcut)
+        painter.drawRoundedRect(pill, 8, 8)
+        footer_font = QFont(self.font())
+        footer_font.setPointSize(9)
+        painter.setFont(footer_font)
+        painter.setPen(QColor(accent if enabled else "#9aa8c2"))
+        footer = QFontMetrics(footer_font).elidedText(
+            self._footer,
+            Qt.TextElideMode.ElideRight,
+            max(0, int(pill.width() - 8)),
+        )
+        painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, footer)
+
+        if focused:
+            # Keep focus additive and inside the existing card bounds so the
+            # tab ring never shifts the 2x2 grid.
+            focus_rect = outer.adjusted(2, 2, -2, -2)
+            focus_color = QColor(FOCUS_BORDER)
+            focus_color.setAlpha(235)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(focus_color, 2))
+            painter.drawRoundedRect(focus_rect, 13, 13)
         painter.end()

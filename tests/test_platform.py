@@ -5,7 +5,14 @@ import inspect
 
 from app.platform.base import GlobalHotkeyManager
 from app.platform.factory import create_global_hotkey_manager
-from app.platform.hotkey import TEXT_HOTKEY_ID, VISION_HOTKEY_ID, HotkeySpec, HotkeySpecError
+from app.platform.hotkey import (
+    CONTEXT_WATCH_HOTKEY_ID,
+    TEXT_HOTKEY_ID,
+    VISION_HOTKEY_ID,
+    WATCH_HOTKEY_ID,
+    HotkeySpec,
+    HotkeySpecError,
+)
 from app.platform.macos.hotkey import (
     EVENT_NOT_HANDLED,
     HOTKEY_SIGNATURE,
@@ -276,6 +283,59 @@ def test_windows_two_hotkeys_use_distinct_ids_and_filter_events(qt_app) -> None:
     assert calls[-2:] == [("unregister", TEXT_HOTKEY_ID), ("unregister", VISION_HOTKEY_ID)]
 
 
+def test_windows_four_hotkeys_use_distinct_ids_and_register_defaults(qt_app) -> None:
+    calls: list[tuple] = []
+
+    def register(hwnd, hotkey_id, modifiers, key) -> int:
+        calls.append(("register", hotkey_id, modifiers, key))
+        return 1
+
+    def unregister(hwnd, hotkey_id) -> int:
+        calls.append(("unregister", hotkey_id))
+        return 1
+
+    managers = [
+        WindowsGlobalHotkey(qt_app, register, unregister, hotkey_id=TEXT_HOTKEY_ID),
+        WindowsGlobalHotkey(
+            qt_app,
+            register,
+            unregister,
+            shortcut="Ctrl+Shift+S",
+            hotkey_id=VISION_HOTKEY_ID,
+        ),
+        WindowsGlobalHotkey(
+            qt_app,
+            register,
+            unregister,
+            shortcut="Ctrl+Shift+W",
+            hotkey_id=WATCH_HOTKEY_ID,
+        ),
+        WindowsGlobalHotkey(
+            qt_app,
+            register,
+            unregister,
+            shortcut="Ctrl+Shift+C",
+            hotkey_id=CONTEXT_WATCH_HOTKEY_ID,
+        ),
+    ]
+
+    assert [manager.register() for manager in managers] == [True, True, True, True]
+    assert [call[1] for call in calls] == [
+        TEXT_HOTKEY_ID,
+        VISION_HOTKEY_ID,
+        WATCH_HOTKEY_ID,
+        CONTEXT_WATCH_HOTKEY_ID,
+    ]
+    for manager in managers:
+        manager.unregister()
+    assert [call[1] for call in calls[-4:]] == [
+        TEXT_HOTKEY_ID,
+        VISION_HOTKEY_ID,
+        WATCH_HOTKEY_ID,
+        CONTEXT_WATCH_HOTKEY_ID,
+    ]
+
+
 def test_macos_two_hotkeys_pass_distinct_ids_to_carbon_backend(qt_app) -> None:
     text_backend = _FakeMacHotkeyBackend()
     vision_backend = _FakeMacHotkeyBackend()
@@ -303,6 +363,25 @@ def test_macos_two_hotkeys_pass_distinct_ids_to_carbon_backend(qt_app) -> None:
     assert vision_events == [True]
     text.unregister()
     vision.unregister()
+
+
+def test_macos_four_hotkeys_pass_distinct_ids_to_carbon_backend(qt_app) -> None:
+    specs = (
+        ("Ctrl+Shift+A", TEXT_HOTKEY_ID),
+        ("Ctrl+Shift+S", VISION_HOTKEY_ID),
+        ("Ctrl+Shift+W", WATCH_HOTKEY_ID),
+        ("Ctrl+Shift+C", CONTEXT_WATCH_HOTKEY_ID),
+    )
+    backends = [_FakeMacHotkeyBackend() for _ in specs]
+    managers = [
+        MacOSGlobalHotkey(qt_app, shortcut=shortcut, hotkey_id=hotkey_id, backend=backend)
+        for (shortcut, hotkey_id), backend in zip(specs, backends, strict=True)
+    ]
+
+    assert [manager.register() for manager in managers] == [True, True, True, True]
+    assert [backend.calls[0][2] for backend in backends] == [hotkey_id for _shortcut, hotkey_id in specs]
+    for manager in managers:
+        manager.unregister()
 
 
 def test_macos_carbon_handler_passes_other_hotkey_events_to_next_handler() -> None:

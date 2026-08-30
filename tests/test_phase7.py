@@ -203,6 +203,49 @@ def test_application_controller_routes_two_hotkeys_and_shutdown(qt_app) -> None:
     assert vision_hotkey.unregister_count == 1
 
 
+def test_application_controller_routes_watch_hotkeys_and_shutdown(qt_app) -> None:
+    class WatchWindow(FakeWindow):
+        def __init__(self) -> None:
+            super().__init__()
+            self.watch_count = 0
+            self.context_watch_count = 0
+
+        def start_watch(self) -> None:
+            self.watch_count += 1
+
+        def start_context_watch(self) -> None:
+            self.context_watch_count += 1
+
+    window = WatchWindow()
+    tray = SystemTrayController(tray_icon=FakeTrayIcon())
+    text_hotkey = FakeHotkey()
+    vision_hotkey = FakeHotkey()
+    watch_hotkey = FakeHotkey()
+    context_watch_hotkey = FakeHotkey()
+    controller = ApplicationController(
+        qt_app,
+        window,
+        tray,
+        text_hotkey,
+        vision_hotkey,
+        watch_hotkey,
+        context_watch_hotkey,
+    )
+    controller.start()
+
+    watch_hotkey.triggered.emit()
+    context_watch_hotkey.triggered.emit()
+    qt_app.processEvents()
+
+    assert window.watch_count == 1
+    assert window.context_watch_count == 1
+    assert watch_hotkey.register_count == 1
+    assert context_watch_hotkey.register_count == 1
+    controller.cleanup()
+    assert watch_hotkey.unregister_count == 1
+    assert context_watch_hotkey.unregister_count == 1
+
+
 def test_busy_state_prevents_second_capture(qt_app) -> None:
     window = MainWindow(tray_mode=True)
     window.state = AppState.CAPTURING
