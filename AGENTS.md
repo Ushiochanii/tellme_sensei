@@ -452,6 +452,66 @@ Local OCR 继续作为独立版本的 component，使用各平台 native package
 
 没有实际完成 platform/manual acceptance，就不要声称已经通过。
 
+### 12.1 异步 CI 不由 Agent 陪跑
+
+GitHub Actions、远端 build、artifact upload/download 等等待型任务是外部异步工作。除非用户明确要求实时监控，并且中间状态确实会改变下一步动作，否则不要让 coding-agent 会话长时间陪跑。
+
+默认行为：
+
+```text
+trigger CI / build
+    ↓
+记录 run URL / run id
+    ↓
+向用户报告已经启动
+    ↓
+停止当前 Agent 工作
+```
+
+之后只有在用户再次询问结果、或后续任务确实需要最终状态时，再读取一次当前/最终结果。
+
+特别不要把以下行为作为默认流程：
+
+- `gh run watch --interval 15` 之类的短间隔持续监控
+- 每隔几十秒重复 `gh run view` / status polling
+- 为了叙述下载进度而反复检查文件大小、artifact 数量或 job 状态
+- 对正常进行中的成功 build 持续读取完整日志
+- 仅仅为了说“还在运行”而开启新的 Agent 推理轮次
+
+如果 workflow 最终失败，再读取失败 job / step / log，定位会改变修复动作的真实错误。成功 workflow 不需要为了“确认得更彻底”重复读取已经通过的验证。
+
+### 12.2 Stable application release 自动装配
+
+在用户已经批准发布、并明确 push 一个稳定 application tag `vX.Y.Z` 后，该 tag 本身就是本次 stable publish request；不需要 Agent 在 build 全绿后再进行第二次人工式发布确认。
+
+稳定发布的默认路径应是：
+
+```text
+push stable vX.Y.Z tag
+    ↓
+GitHub Actions builds Windows x64 + macOS x64 + macOS arm64
+    ↓
+各 build job 完成既定架构 / 安装资产验证
+    ↓
+all three succeed
+    ↓
+one release job collects artifacts inside GitHub Actions
+    ↓
+create stable GitHub Release + upload three assets
+```
+
+规则：
+
+- 任一平台 build 失败，则 release job 不运行，不创建 partial stable Release。
+- 不要为了发布而把 GitHub Actions artifact 下载到操作员本地，再从本地重新上传到 GitHub Release；artifact assembly 应留在 GitHub Actions runner 内完成。
+- build job 已验证 PE / Mach-O 架构、文件存在和非空后，release job 不重复这些验证。release assembly 只检查会改变发布动作的 metadata 与三个预期 asset 名称。
+- 不添加 checksum/hash 作为额外发布门槛；当前流程没有消费者需要它们。
+- `workflow_dispatch` 可以保留为 build-only validation，不应因为一次手动 build 就自动发布。
+- stable tag 对应的 `app.version` 和 `docs/releases/vX.Y.Z.md` 必须在 push tag 前已经提交到该 tagged revision。
+- Agent 触发或观察到 tag workflow 后，应报告 run URL 并停止，不要陪着三平台 build 或 artifact transfer 持续轮询。
+
+只有当自动 release workflow 本身发生真实故障时，才检查并修复该故障；不要把“退回本地下载再手工上传”作为默认 fallback。
+
 ---
 
 ## 13. 实现报告格式
