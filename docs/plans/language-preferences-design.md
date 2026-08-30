@@ -119,6 +119,9 @@ The following established product/technical terms remain English in both interfa
 - Watch
 - Context Watch
 - Ready
+- Context
+- Question
+- Answer
 - Local OCR
 - PaddleOCR
 - Google Cloud Vision
@@ -126,7 +129,7 @@ The following established product/technical terms remain English in both interfa
 - API Key
 - model names and environment-variable names
 
-The main floating controller therefore keeps its current core vocabulary and visual identity in both interface languages.
+The main floating controller therefore keeps its current core vocabulary and visual identity in both interface languages. The AnswerWindow structural labels `Context`, `Question`, and `Answer` also remain English so the application's main information structure stays consistent across interface languages.
 
 Supporting descriptions around those terms may be localized where they are ordinary prose. For example, a Chinese interface may keep `Context Watch` as the card title while translating explanatory tooltips or Settings help text.
 
@@ -135,7 +138,7 @@ Supporting descriptions around those terms may be localized where they are ordin
 Ordinary product-owned copy should follow `Interface language`, including where applicable:
 
 - Settings page titles, descriptions, field labels, buttons, warnings, validation messages, connection-test messages, update messages, and restart notice;
-- AnswerWindow structural labels such as `Context`, `Question`, `Answer`, placeholders, action buttons, and processing/status messages;
+- AnswerWindow placeholders, action buttons, and processing/status messages, while the structural labels `Context`, `Question`, and `Answer` remain English;
 - tray/menu text and tooltips;
 - capture/watch selection guidance and user-facing workflow errors;
 - product-owned DeepSeek configuration/request errors shown to the user.
@@ -172,11 +175,12 @@ Translation keys should describe meaning rather than literal English text, for e
 ```text
 settings.title
 settings.restart_required
-answer.section.context
 answer.action.copy
 status.recognizing_question
 error.deepseek_timeout
 ```
+
+Invariant labels such as `Context`, `Question`, and `Answer` do not need duplicate translation-catalog entries merely to return the same English text.
 
 ## 10. Persistence and runtime config
 
@@ -306,7 +310,7 @@ app/config.py                        # expose language preferences in AppConfig
 app/services/deepseek_service.py     # language-aware prompts and user-facing errors
 app/ui/settings_window.py            # language controls + translated Settings copy
 app/ui/main_window.py                # localized ordinary controller copy/tooltips; invariant card terms stay English
-app/ui/answer_window.py              # translated structural/action/status copy
+app/ui/answer_window.py              # invariant structure labels + translated action/status copy
 app/ui/tray.py and relevant watch UI # translate user-facing prose where present
 
 tests/...                            # settings, prompt, catalog parity, focused UI regression coverage
@@ -327,7 +331,7 @@ Minimum meaningful coverage:
 5. Text prompt contains the configured answer-language instruction/headings.
 6. Vision prompt contains the configured answer-language instruction/headings.
 7. Context + Question prompt contains the configured answer-language instruction/headings.
-8. Main controller still displays invariant terms such as `Text / OCR`, `Vision`, `Watch`, `Context Watch`, and `Ready` under both interface languages.
+8. Main controller and AnswerWindow still display invariant terms such as `Text / OCR`, `Vision`, `Watch`, `Context Watch`, `Ready`, `Context`, `Question`, and `Answer` under both interface languages.
 9. Focused Settings/AnswerWindow tests verify translated ordinary UI copy for both languages.
 10. Existing OCR/provider/analysis-mode behavior remains unchanged.
 
@@ -341,7 +345,7 @@ Documentation should explain:
 
 - Interface language and Answer language are independent;
 - first-version supported languages;
-- `Text / OCR`, `Vision`, `Watch`, `Context Watch`, `Ready`, and technical product names intentionally remain English;
+- `Text / OCR`, `Vision`, `Watch`, `Context Watch`, `Ready`, `Context`, `Question`, `Answer`, and technical product names intentionally remain English;
 - interface-language changes require application restart;
 - answer-language changes apply to subsequent analyses;
 - OCR recognition language is a separate setting/concept.
@@ -369,6 +373,4 @@ The feature is complete when:
 
 ## 19. Open questions for design review
 
-There are no architecture blockers. One visual/product wording decision can be adjusted during review without changing the implementation shape:
-
-- whether `Context / Question / Answer` in AnswerWindow should follow Interface language (proposed) or be promoted into the invariant English product vocabulary.
+There are no remaining architecture or product-wording blockers for the first implementation.
