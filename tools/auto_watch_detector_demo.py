@@ -286,7 +286,7 @@ def main(
         from app.ocr.local_session import LocalOCRSession
         local_ocr_session = LocalOCRSession()
         try:
-            config_value = ConfigManager().load(require_api_key=True)
+            config_value = ConfigManager().load()
             local_ocr_session.language = config_value.ocr_language
             ocr_provider = create_ocr_provider(
                 config_value, local_ocr_session=local_ocr_session

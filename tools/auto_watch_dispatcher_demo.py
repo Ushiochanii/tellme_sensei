@@ -38,7 +38,7 @@ def main(argv=None):
         print(f"finished generation={request.generation} state={dispatcher.state.name} active={bool(dispatcher.active_request)} pending={bool(dispatcher.pending_request)}")
         app.quit()
     if args.real:
-        config = ConfigManager().load(require_api_key=True)
+        config = ConfigManager().load()
         dispatcher = AnalysisDispatcher(settings=AutoWatchSettings(analysis_delay_ms=args.delay_ms), config=config,
                                         on_finished=finished)
     else:

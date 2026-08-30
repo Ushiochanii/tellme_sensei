@@ -63,6 +63,15 @@ class SettingsRepository:
             value = raw.get(key)
             if isinstance(value, str) and value.strip():
                 settings[key] = value.strip()
+        for key in (
+            "text_ai_provider",
+            "text_ai_model",
+            "vision_ai_provider",
+            "vision_ai_model",
+        ):
+            value = raw.get(key)
+            if isinstance(value, str) and value.strip():
+                settings[key] = value.strip()
         for key in ("interface_language", "answer_language"):
             value = raw.get(key)
             if isinstance(value, str) and value.strip() in SUPPORTED_LANGUAGES:
@@ -177,6 +186,25 @@ class SettingsRepository:
             if request_timeout <= 0:
                 raise ValueError("request_timeout 必须是正数")
             payload["request_timeout"] = request_timeout
+        for key in ("base_url", "ocr_language"):
+            if key not in settings:
+                continue
+            value = settings[key]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{key} 不能为空")
+            payload[key] = value.strip()
+        for key in (
+            "text_ai_provider",
+            "text_ai_model",
+            "vision_ai_provider",
+            "vision_ai_model",
+        ):
+            if key not in settings:
+                continue
+            value = settings[key]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{key} 不能为空")
+            payload[key] = value.strip()
         if "global_shortcut" in settings:
             shortcut = str(settings["global_shortcut"]).strip()
             if not shortcut:

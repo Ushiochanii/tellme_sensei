@@ -11,8 +11,8 @@ class _Config:
     def __init__(self, provider: str = "local") -> None:
         self.provider = provider
 
-    def load(self, require_api_key: bool = True) -> AppConfig:
-        return AppConfig(api_key="", ocr_provider=self.provider)
+    def load(self) -> AppConfig:
+        return AppConfig(ocr_provider=self.provider)
 
 
 class _ComponentManager:

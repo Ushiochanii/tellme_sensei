@@ -7,7 +7,8 @@ import sys
 
 from app.config import ConfigError, ConfigManager
 from app.logging_config import configure_logging
-from app.services.deepseek_service import DeepSeekError, DeepSeekService
+from app.ai.errors import AIProviderError
+from app.ai.service import AnalysisService
 
 
 def main() -> int:
@@ -16,8 +17,8 @@ def main() -> int:
     args = parser.parse_args()
     configure_logging()
     try:
-        answer = DeepSeekService(ConfigManager().load()).analyze(args.question)
-    except (ConfigError, DeepSeekError) as exc:
+        answer = AnalysisService(ConfigManager().load()).analyze(args.question)
+    except (ConfigError, AIProviderError) as exc:
         print(f"测试失败：{exc}", file=sys.stderr)
         return 1
     print(answer)

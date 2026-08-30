@@ -12,7 +12,7 @@ from PySide6.QtCore import QThread, QTimer, QObject, Signal, Slot
 from app.analysis import AnalysisMode
 from app.config import AppConfig
 from app.ocr.factory import create_ocr_provider
-from app.services.deepseek_service import DeepSeekService
+from app.ai.service import AnalysisService
 from app.workers.context_question_processing_worker import ContextQuestionProcessingWorker
 from app.workers.processing_worker import ProcessingWorker
 from app.workers.vision_processing_worker import VisionProcessingWorker
@@ -144,12 +144,12 @@ class AnalysisDispatcher:
                  scheduler=None, config: AppConfig | None = None, ocr_provider=None,
                  local_ocr_session=None,
                  context_ocr_cache: ContextOCRCache | None = None,
-                 deepseek_service=None, on_result=None, on_error=None, on_cancelled=None,
+                 analysis_service=None, on_result=None, on_error=None, on_cancelled=None,
                  on_finished=None, on_ocr=None, on_observe=None, session_id: str = "auto-watch") -> None:
         self.settings = settings or AutoWatchSettings()
         self.worker_factory = worker_factory or self._default_worker_factory
         self.scheduler = scheduler or _TimerScheduler()
-        self.config, self.ocr_provider, self.deepseek_service = config, ocr_provider, deepseek_service
+        self.config, self.ocr_provider, self.analysis_service = config, ocr_provider, analysis_service
         # Keep the session separate from the provider so callers can own its
         # lifetime (MainWindow and the real demo do).  The provider itself is
         # cached after first construction, avoiding a model/worker cold start
@@ -493,16 +493,16 @@ class AnalysisDispatcher:
 
     def _default_worker_factory(self, request):
         config = self.config
-        if self.deepseek_service is None:
+        if self.analysis_service is None:
             if config is None: raise ValueError("config or worker_factory is required")
-            self.deepseek_service = DeepSeekService(config)
+            self.analysis_service = AnalysisService(config)
         if isinstance(request, ContextQuestionAnalysisRequest):
             if request.mode is AnalysisMode.VISION:
                 image = compose_context_question_image(
                     request.context_image,
                     request.question_image,
                 )
-                worker = VisionProcessingWorker(image, self.deepseek_service, request.request_id)
+                worker = VisionProcessingWorker(image, self.analysis_service, request.request_id)
                 return _QtWorkerHandle(worker)
             if self.ocr_provider is None:
                 try:
@@ -528,14 +528,14 @@ class AnalysisDispatcher:
                 request.context_image,
                 request.question_image,
                 self.ocr_provider,
-                self.deepseek_service,
+                self.analysis_service,
                 request.context_revision,
                 request.question_revision,
                 job_id=request.request_id,
                 context_ocr_cache=self.context_ocr_cache,
             )
         elif request.mode is AnalysisMode.VISION:
-            worker = VisionProcessingWorker(request.image, self.deepseek_service, request.request_id)
+            worker = VisionProcessingWorker(request.image, self.analysis_service, request.request_id)
         else:
             if self.ocr_provider is None:
                 try:
@@ -560,7 +560,7 @@ class AnalysisDispatcher:
                     self.session_id, type(self.ocr_provider).__name__,
                 )
             provider = self.ocr_provider
-            worker = ProcessingWorker(request.image, provider, self.deepseek_service, job_id=request.request_id)
+            worker = ProcessingWorker(request.image, provider, self.analysis_service, job_id=request.request_id)
         return _QtWorkerHandle(worker)
 
 

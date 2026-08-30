@@ -228,7 +228,7 @@ def test_default_factory_returns_async_handle_without_running_worker():
     from app.auto_watch import dispatcher as module
     from app.config import AppConfig
     request = AnalysisRequest(1, AnalysisMode.TEXT, image(), request_id="job")
-    dispatcher = AnalysisDispatcher(config=AppConfig(api_key="test"), ocr_provider=object())
+    dispatcher = AnalysisDispatcher(config=AppConfig(), ocr_provider=object())
     handle = dispatcher._default_worker_factory(request)
     assert isinstance(handle, module._QtWorkerHandle)
     assert handle.thread.isRunning() is False
@@ -249,9 +249,9 @@ def test_default_factory_reuses_provider_across_generations(monkeypatch):
 
     monkeypatch.setattr(module, "create_ocr_provider", factory)
     dispatcher = AnalysisDispatcher(
-        config=AppConfig(api_key="test"),
+        config=AppConfig(),
         local_ocr_session=object(),
-        deepseek_service=object(),
+        analysis_service=object(),
     )
     first = dispatcher._default_worker_factory(
         AnalysisRequest(1, AnalysisMode.TEXT, image(), request_id="one")

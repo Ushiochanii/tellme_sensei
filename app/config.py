@@ -8,6 +8,14 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from app.ai.models import (
+    AIBackendConfig,
+    DEFAULT_DEEPSEEK_BASE_URL,
+    DEFAULT_DEEPSEEK_PROVIDER,
+    DEFAULT_DEEPSEEK_TEXT_MODEL,
+    DEFAULT_DEEPSEEK_VISION_MODEL,
+    DEFAULT_REQUEST_TIMEOUT,
+)
 from app.localization import (
     DEFAULT_ANSWER_LANGUAGE,
     DEFAULT_INTERFACE_LANGUAGE,
@@ -30,14 +38,30 @@ class ConfigError(RuntimeError):
     """Raised when application configuration is invalid or incomplete."""
 
 
+def _default_text_ai_config() -> AIBackendConfig:
+    return AIBackendConfig(
+        provider_id=DEFAULT_DEEPSEEK_PROVIDER,
+        model_id=DEFAULT_DEEPSEEK_TEXT_MODEL,
+        base_url=DEFAULT_DEEPSEEK_BASE_URL,
+        request_timeout=DEFAULT_REQUEST_TIMEOUT,
+    )
+
+
+def _default_vision_ai_config() -> AIBackendConfig:
+    return AIBackendConfig(
+        provider_id=DEFAULT_DEEPSEEK_PROVIDER,
+        model_id=DEFAULT_DEEPSEEK_VISION_MODEL,
+        base_url=DEFAULT_DEEPSEEK_BASE_URL,
+        request_timeout=DEFAULT_REQUEST_TIMEOUT,
+    )
+
+
 @dataclass(frozen=True)
 class AppConfig:
     """Immutable runtime settings shared by services and one processing job."""
 
-    api_key: str = field(repr=False)
-    model: str = "deepseek-chat"
-    base_url: str = "https://api.deepseek.com"
-    request_timeout: float = 60.0
+    text_ai: AIBackendConfig = field(default_factory=_default_text_ai_config)
+    vision_ai: AIBackendConfig = field(default_factory=_default_vision_ai_config)
     ocr_language: str = "japan"
     global_shortcut: str = DEFAULT_SHORTCUT
     vision_global_shortcut: str = DEFAULT_VISION_SHORTCUT
@@ -77,7 +101,7 @@ class ConfigManager:
 
         return bool(os.environ.get("OCR_PROVIDER", "").strip())
 
-    def load(self, require_api_key: bool = True) -> AppConfig:
+    def load(self) -> AppConfig:
         """Return one immutable runtime configuration without logging secrets."""
 
         dotenv_config = self._read_dotenv_values()
@@ -88,10 +112,6 @@ class ConfigManager:
             api_key = self.secret_store.get_api_key()
         if not api_key:
             api_key = self._file_value(dotenv_config, "DEEPSEEK_API_KEY") or ""
-        if require_api_key and not api_key:
-            raise ConfigError(
-                "未配置 DeepSeek API Key。请在设置中保存，或在 .env 中填写 DEEPSEEK_API_KEY。"
-            )
 
         try:
             request_timeout = float(
@@ -163,24 +183,50 @@ class ConfigManager:
             )
         )
 
+        text_provider = self._resolve_ai_selection(
+            "TEXT_AI_PROVIDER",
+            "text_ai_provider",
+            dotenv_config,
+            saved_settings,
+            DEFAULT_DEEPSEEK_PROVIDER,
+        )
+        vision_provider = self._resolve_ai_selection(
+            "VISION_AI_PROVIDER",
+            "vision_ai_provider",
+            dotenv_config,
+            saved_settings,
+            DEFAULT_DEEPSEEK_PROVIDER,
+        )
+        text_model = self._resolve_text_model(dotenv_config, saved_settings)
+        vision_model = self._resolve_ai_selection(
+            "VISION_AI_MODEL",
+            "vision_ai_model",
+            dotenv_config,
+            saved_settings,
+            DEFAULT_DEEPSEEK_VISION_MODEL,
+            lowercase=False,
+        )
+        legacy_base_url = (
+            self._os_value("DEEPSEEK_BASE_URL")
+            or saved_settings.get("base_url")
+            or self._file_value(dotenv_config, "DEEPSEEK_BASE_URL")
+            or DEFAULT_DEEPSEEK_BASE_URL
+        )
         return AppConfig(
-            api_key=api_key,
-            model=(
-                self._os_value("DEEPSEEK_MODEL")
-                or saved_settings.get(
-                    "model",
-                    self._file_value(dotenv_config, "DEEPSEEK_MODEL") or "deepseek-chat",
-                )
+            text_ai=AIBackendConfig(
+                provider_id=text_provider,
+                model_id=text_model,
+                api_key=api_key,
+                base_url=str(legacy_base_url),
+                request_timeout=request_timeout,
             ),
-            base_url=(
-                self._os_value("DEEPSEEK_BASE_URL")
-                or saved_settings.get(
-                    "base_url",
-                    self._file_value(dotenv_config, "DEEPSEEK_BASE_URL")
-                    or "https://api.deepseek.com",
-                )
+            vision_ai=AIBackendConfig(
+                provider_id=vision_provider,
+                model_id=vision_model,
+                api_key=api_key,
+                base_url=str(legacy_base_url),
+                request_timeout=request_timeout,
             ),
-            request_timeout=request_timeout,
             ocr_language=(
                 self._os_value("OCR_LANGUAGE")
                 or saved_settings.get(
@@ -206,6 +252,45 @@ class ConfigManager:
                 saved_settings,
             ),
         )
+
+    def _resolve_text_model(
+        self,
+        dotenv_config: dict[str, str],
+        saved_settings: dict[str, object],
+    ) -> str:
+        """Resolve the new Text model before falling back to DeepSeek values."""
+
+        value = (
+            self._os_value("TEXT_AI_MODEL")
+            or saved_settings.get("text_ai_model")
+            or self._file_value(dotenv_config, "TEXT_AI_MODEL")
+            or self._os_value("DEEPSEEK_MODEL")
+            or saved_settings.get("model")
+            or self._file_value(dotenv_config, "DEEPSEEK_MODEL")
+            or DEFAULT_DEEPSEEK_TEXT_MODEL
+        )
+        return str(value).strip() or DEFAULT_DEEPSEEK_TEXT_MODEL
+
+    def _resolve_ai_selection(
+        self,
+        environment_name: str,
+        setting_name: str,
+        dotenv_config: dict[str, str],
+        saved_settings: dict[str, object],
+        default: str,
+        *,
+        lowercase: bool = True,
+    ) -> str:
+        value = (
+            self._os_value(environment_name)
+            or saved_settings.get(setting_name)
+            or self._file_value(dotenv_config, environment_name)
+            or default
+        )
+        normalized = str(value).strip()
+        if lowercase:
+            normalized = normalized.lower()
+        return normalized or default
 
     def _language_setting(
         self,
@@ -288,6 +373,10 @@ class ConfigManager:
         online_ocr_timeout: float | None = None,
         interface_language: str | None = None,
         answer_language: str | None = None,
+        text_ai_provider: str | None = None,
+        text_ai_model: str | None = None,
+        vision_ai_provider: str | None = None,
+        vision_ai_model: str | None = None,
     ) -> None:
         """Save settings; a None secret value leaves that stored secret unchanged."""
 
@@ -297,7 +386,18 @@ class ConfigManager:
             else:
                 self.secret_store.delete_api_key()
         settings = {"model": model, "request_timeout": request_timeout}
-        current_config = self.load(require_api_key=False)
+        for key, value in (
+            ("text_ai_provider", text_ai_provider),
+            ("text_ai_model", text_ai_model),
+            ("vision_ai_provider", vision_ai_provider),
+            ("vision_ai_model", vision_ai_model),
+        ):
+            if value is None:
+                continue
+            if not isinstance(value, str) or not value.strip():
+                raise ConfigError(f"{key} 不能为空")
+            settings[key] = value.strip()
+        current_config = self.load()
         requested_shortcuts = (
             self._normalized_shortcut(
                 global_shortcut,

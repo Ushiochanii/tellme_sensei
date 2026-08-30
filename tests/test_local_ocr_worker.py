@@ -560,6 +560,6 @@ def test_local_provider_rejects_malformed_worker_result(tmp_path: Path) -> None:
 
 
 def test_factory_exposes_local_provider_without_changing_default() -> None:
-    config = AppConfig(api_key="test-key")
+    config = AppConfig()
     provider = create_local_ocr_provider(config)
     assert isinstance(provider, LocalOCRProvider)

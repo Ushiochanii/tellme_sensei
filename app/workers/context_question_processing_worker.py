@@ -14,7 +14,7 @@ from PySide6.QtGui import QImage
 from app.ocr.base import OCRProvider
 from app.ocr.types import OCRCancelled, OCRError, OCRResult
 from app.pipeline import ContextQuestionPipelineResult, PipelineError
-from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
+from app.ai.errors import AIProviderError, AIRequestCancelled
 from app.thread_info import current_thread_info
 from app.workers.processing_worker import ProcessingCancelled
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 
 class ContextQuestionProcessingWorker(QObject):
-    """Run Context OCR, Question OCR, and one structured DeepSeek request."""
+    """Run Context OCR, Question OCR, and one structured AI request."""
 
     context_ocr_started = Signal()
     context_ocr_finished = Signal(str)
@@ -54,7 +54,7 @@ class ContextQuestionProcessingWorker(QObject):
         context_image: QImage,
         question_image: QImage,
         ocr_service: OCRProvider,
-        deepseek_service: DeepSeekService,
+        analysis_service,
         context_revision: int,
         question_revision: int,
         job_id: str | None = None,
@@ -65,7 +65,7 @@ class ContextQuestionProcessingWorker(QObject):
         self.context_image = self._copy_image(context_image, "context_image")
         self.question_image = self._copy_image(question_image, "question_image")
         self.ocr_service = ocr_service
-        self.deepseek_service = deepseek_service
+        self.analysis_service = analysis_service
         self.context_revision = self._validate_revision(context_revision, "context_revision")
         self.question_revision = self._validate_revision(question_revision, "question_revision")
         self.job_id = job_id or uuid.uuid4().hex
@@ -148,9 +148,9 @@ class ContextQuestionProcessingWorker(QObject):
             )
             self.result_ready.emit(result)
             self.job_result_ready.emit(self.job_id, result)
-        except (ProcessingCancelled, OCRCancelled, DeepSeekCancelled):
+        except (ProcessingCancelled, OCRCancelled, AIRequestCancelled):
             self._emit_cancelled()
-        except (OCRError, DeepSeekError, PipelineError) as exc:
+        except (OCRError, AIProviderError, PipelineError) as exc:
             logger.error("Context/question processing failed job_id=%s: %s", self.job_id, exc)
             self.error_occurred.emit(str(exc))
             self.job_error_occurred.emit(self.job_id, str(exc))
@@ -175,7 +175,7 @@ class ContextQuestionProcessingWorker(QObject):
         self.cancelled.emit(self.job_id)
 
     def _analyze_with_cancellation(self, context_text: str, question_text: str) -> str:
-        analyze = self.deepseek_service.analyze_context_question
+        analyze = self.analysis_service.analyze_context_question
         try:
             parameters = inspect.signature(analyze).parameters
             accepts_cancel = "cancel_event" in parameters or any(

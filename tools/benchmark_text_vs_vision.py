@@ -25,13 +25,15 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import ConfigManager
+from app.ai.models import DEFAULT_DEEPSEEK_VISION_MODEL
+from app.ai.prompts import SYSTEM_PROMPT, VISION_SYSTEM_PROMPT
 from app.ocr.factory import create_ocr_provider
 from app.ocr.local_session import LocalOCRSession
 from app.ocr.local_runtime import component_model_root, worker_executable_candidates
-from app.services.deepseek_service import SYSTEM_PROMPT, VISION_MODEL, VISION_SYSTEM_PROMPT
 
 
 TEXT_MODEL = "deepseek-v4-flash"
+VISION_MODEL = DEFAULT_DEEPSEEK_VISION_MODEL
 ALLOWED_CATEGORIES = frozenset({"text", "code_table", "diagram", "math", "mixed"})
 JAPANESE_ANSWERS = frozenset({"ア", "イ", "ウ", "エ"})
 JAPANESE_LABELS = "アイウエ"
@@ -453,9 +455,9 @@ def _build_client(config: Any) -> Any:
     except ImportError as exc:
         raise BenchmarkError("未安装 openai 依赖") from exc
     return OpenAI(
-        api_key=config.api_key,
-        base_url=config.base_url,
-        timeout=config.request_timeout,
+        api_key=config.text_ai.api_key,
+        base_url=config.text_ai.base_url,
+        timeout=config.text_ai.request_timeout,
         max_retries=0,
     )
 
@@ -504,7 +506,7 @@ def run_benchmark(args: argparse.Namespace) -> tuple[Path, Path, dict[str, Any]]
         cases = [case for case in cases if case.case_id == smoke_case]
         if not cases:
             raise BenchmarkError(f"benchmark case not found: {smoke_case}")
-    config = ConfigManager().load(require_api_key=True)
+    config = ConfigManager().load()
     if config.ocr_provider != "local":
         raise BenchmarkError("benchmark requires OCR_PROVIDER=local; Google Vision is not used")
     worker = args.worker
@@ -516,7 +518,7 @@ def run_benchmark(args: argparse.Namespace) -> tuple[Path, Path, dict[str, Any]]
         executable=worker,
         model_root=model_root,
         language=config.ocr_language,
-        timeout=config.request_timeout,
+        timeout=config.text_ai.request_timeout,
     )
     provider = create_ocr_provider(config, local_ocr_session=session)
     try:
@@ -543,14 +545,14 @@ def run_benchmark(args: argparse.Namespace) -> tuple[Path, Path, dict[str, Any]]
                             client,
                             model=TEXT_MODEL,
                             messages=text_messages(ocr_result.text),
-                            timeout=config.request_timeout,
+                            timeout=config.text_ai.request_timeout,
                         )
                     else:
                         answer, usage, timings = stream_completion(
                             client,
                             model=VISION_MODEL,
                             messages=vision_messages(image_as_png(case.image)),
-                            timeout=config.request_timeout,
+                            timeout=config.text_ai.request_timeout,
                             extra_body=VISION_EXTRA_BODY,
                         )
                     row["response_text"] = answer

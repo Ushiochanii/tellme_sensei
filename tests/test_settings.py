@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
 
 from app.analysis import AnalysisMode
 from app.config import AppConfig, ConfigManager
-from app.services.deepseek_service import DeepSeekError
+from app.ai.errors import AIProviderError
 from app.auto_watch.models import AutoWatchSettings
 from app.settings.repository import SettingsRepository
 from app.settings.secret_store import SecretStore
@@ -167,24 +167,24 @@ def test_env_overrides_saved_model_and_timeout(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DEEPSEEK_MODEL", "env-model")
     monkeypatch.setenv("DEEPSEEK_TIMEOUT", "25")
 
-    config = make_manager(tmp_path).load(require_api_key=False)
+    config = make_manager(tmp_path).load()
 
-    assert config.model == "env-model"
-    assert config.request_timeout == 25.0
+    assert config.text_ai.model_id == "env-model"
+    assert config.text_ai.request_timeout == 25.0
 
 
 def test_secret_store_api_key_overrides_dotenv_api_key(tmp_path, monkeypatch) -> None:
     write_dotenv(tmp_path, DEEPSEEK_API_KEY="dotenv-key")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    config = make_manager(tmp_path, FakeSecretStore("stored-key")).load(False)
-    assert config.api_key == "stored-key"
+    config = make_manager(tmp_path, FakeSecretStore("stored-key")).load()
+    assert config.text_ai.api_key == "stored-key"
 
 
 def test_explicit_os_api_key_overrides_secret_store(tmp_path, monkeypatch) -> None:
     write_dotenv(tmp_path, DEEPSEEK_API_KEY="dotenv-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
-    config = make_manager(tmp_path, FakeSecretStore("stored-key")).load(False)
-    assert config.api_key == "env-key"
+    config = make_manager(tmp_path, FakeSecretStore("stored-key")).load()
+    assert config.text_ai.api_key == "env-key"
 
 
 def test_dotenv_api_key_is_used_when_secret_store_is_empty(tmp_path, monkeypatch) -> None:
@@ -192,8 +192,8 @@ def test_dotenv_api_key_is_used_when_secret_store_is_empty(tmp_path, monkeypatch
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
     monkeypatch.delenv("DEEPSEEK_TIMEOUT", raising=False)
-    config = make_manager(tmp_path, FakeSecretStore()).load(False)
-    assert config.api_key == "dotenv-key"
+    config = make_manager(tmp_path, FakeSecretStore()).load()
+    assert config.text_ai.api_key == "dotenv-key"
 
 
 def test_saved_shortcut_is_restored_on_startup(tmp_path, monkeypatch) -> None:
@@ -201,17 +201,17 @@ def test_saved_shortcut_is_restored_on_startup(tmp_path, monkeypatch) -> None:
     SettingsRepository(tmp_path / "settings.json").update(
         {"global_shortcut": "Ctrl+Alt+A"}
     )
-    assert make_manager(tmp_path).load(False).global_shortcut == "Ctrl+Alt+A"
+    assert make_manager(tmp_path).load().global_shortcut == "Ctrl+Alt+A"
 
 
 def test_fresh_shortcut_defaults_and_saved_legacy_values_are_preserved(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("GLOBAL_SHORTCUT", raising=False)
     monkeypatch.delenv("VISION_GLOBAL_SHORTCUT", raising=False)
     manager = make_manager(tmp_path)
-    assert manager.load(False).global_shortcut == "Ctrl+Shift+A"
-    assert manager.load(False).vision_global_shortcut == "Ctrl+Shift+S"
-    assert manager.load(False).watch_global_shortcut == "Ctrl+Shift+W"
-    assert manager.load(False).context_watch_global_shortcut == "Ctrl+Shift+C"
+    assert manager.load().global_shortcut == "Ctrl+Shift+A"
+    assert manager.load().vision_global_shortcut == "Ctrl+Shift+S"
+    assert manager.load().watch_global_shortcut == "Ctrl+Shift+W"
+    assert manager.load().context_watch_global_shortcut == "Ctrl+Shift+C"
 
     manager.settings_repository.update(
         {
@@ -221,7 +221,7 @@ def test_fresh_shortcut_defaults_and_saved_legacy_values_are_preserved(tmp_path,
             "context_watch_global_shortcut": "Ctrl+Shift+C",
         }
     )
-    config = manager.load(False)
+    config = manager.load()
     assert config.global_shortcut == "Ctrl+Shift+Q"
     assert config.vision_global_shortcut == "Ctrl+Shift+E"
     assert config.watch_global_shortcut == "Ctrl+Shift+W"
@@ -233,17 +233,17 @@ def test_vision_shortcut_uses_environment_saved_dotenv_default_precedence(tmp_pa
     repository = SettingsRepository(tmp_path / "settings.json")
     repository.update({"vision_global_shortcut": "Ctrl+Alt+F2"})
     monkeypatch.delenv("VISION_GLOBAL_SHORTCUT", raising=False)
-    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Alt+F2"
+    assert make_manager(tmp_path).load().vision_global_shortcut == "Ctrl+Alt+F2"
 
     monkeypatch.setenv("VISION_GLOBAL_SHORTCUT", "Ctrl+Alt+F3")
-    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Alt+F3"
+    assert make_manager(tmp_path).load().vision_global_shortcut == "Ctrl+Alt+F3"
 
     repository.path.unlink()
     monkeypatch.delenv("VISION_GLOBAL_SHORTCUT", raising=False)
-    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Alt+F1"
+    assert make_manager(tmp_path).load().vision_global_shortcut == "Ctrl+Alt+F1"
 
     (tmp_path / ".env").unlink()
-    assert make_manager(tmp_path).load(False).vision_global_shortcut == "Ctrl+Shift+S"
+    assert make_manager(tmp_path).load().vision_global_shortcut == "Ctrl+Shift+S"
 
 
 def test_invalid_saved_shortcut_falls_back_to_default(tmp_path, monkeypatch) -> None:
@@ -251,7 +251,7 @@ def test_invalid_saved_shortcut_falls_back_to_default(tmp_path, monkeypatch) -> 
     SettingsRepository(tmp_path / "settings.json").update(
         {"global_shortcut": "Ctrl+Win+Q"}
     )
-    assert make_manager(tmp_path).load(False).global_shortcut == "Ctrl+Shift+A"
+    assert make_manager(tmp_path).load().global_shortcut == "Ctrl+Shift+A"
 
 
 def test_duplicate_saved_shortcuts_are_normalized_to_unique_defaults(tmp_path, monkeypatch) -> None:
@@ -268,7 +268,7 @@ def test_duplicate_saved_shortcuts_are_normalized_to_unique_defaults(tmp_path, m
         }
     )
 
-    config = make_manager(tmp_path).load(False)
+    config = make_manager(tmp_path).load()
 
     assert len({
         config.global_shortcut,
@@ -285,10 +285,10 @@ def test_saved_model_and_timeout_override_dotenv(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
     monkeypatch.delenv("DEEPSEEK_TIMEOUT", raising=False)
 
-    config = make_manager(tmp_path).load(False)
+    config = make_manager(tmp_path).load()
 
-    assert config.model == "saved-model"
-    assert config.request_timeout == 20.0
+    assert config.text_ai.model_id == "saved-model"
+    assert config.text_ai.request_timeout == 20.0
 
 
 def test_explicit_os_model_and_timeout_override_saved_settings(tmp_path, monkeypatch) -> None:
@@ -298,10 +298,10 @@ def test_explicit_os_model_and_timeout_override_saved_settings(tmp_path, monkeyp
     monkeypatch.setenv("DEEPSEEK_MODEL", "env-model")
     monkeypatch.setenv("DEEPSEEK_TIMEOUT", "25")
 
-    config = make_manager(tmp_path).load(False)
+    config = make_manager(tmp_path).load()
 
-    assert config.model == "env-model"
-    assert config.request_timeout == 25.0
+    assert config.text_ai.model_id == "env-model"
+    assert config.text_ai.request_timeout == 25.0
 
 
 def test_config_manager_does_not_inject_dotenv_into_os_environment(tmp_path, monkeypatch) -> None:
@@ -309,9 +309,9 @@ def test_config_manager_does_not_inject_dotenv_into_os_environment(tmp_path, mon
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
     assert "DEEPSEEK_API_KEY" not in os.environ
-    config = make_manager(tmp_path, FakeSecretStore()).load(False)
+    config = make_manager(tmp_path, FakeSecretStore()).load()
 
-    assert config.api_key == "dotenv-key"
+    assert config.text_ai.api_key == "dotenv-key"
     assert "DEEPSEEK_API_KEY" not in os.environ
 
 
@@ -337,7 +337,7 @@ def test_config_test_path_never_uses_real_keyring(tmp_path, monkeypatch) -> None
         secret_store=FakeSecretStore(),
     )
 
-    assert manager.load(require_api_key=False).api_key == ""
+    assert manager.load().text_ai.api_key == ""
 
 
 def test_repository_partial_update_preserves_existing_settings(tmp_path) -> None:
@@ -848,7 +848,7 @@ def test_connection_success_runs_off_gui_thread(qt_app, tmp_path, monkeypatch) -
             time.sleep(0.05)
             return True
 
-    monkeypatch.setattr(settings_window_module, "DeepSeekService", FakeService)
+    monkeypatch.setattr(settings_window_module, "AnalysisService", FakeService)
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
     window.test_connection()
     assert window.is_connection_running()
@@ -871,15 +871,15 @@ def test_connection_uses_current_input_key_and_bounded_timeout(qt_app, tmp_path,
         def test_connection(self, _cancel_event) -> bool:
             return True
 
-    monkeypatch.setattr(settings_window_module, "DeepSeekService", FakeService)
+    monkeypatch.setattr(settings_window_module, "AnalysisService", FakeService)
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("stored-key")))
     window.api_key_edit.setText("input-key")
     window.timeout_edit.setText("60")
     window.test_connection()
     wait_for_connection(window, qt_app)
 
-    assert received and received[0].api_key == "input-key"
-    assert received[0].request_timeout == 10.0
+    assert received and received[0].text_ai.api_key == "input-key"
+    assert received[0].text_ai.request_timeout == 10.0
     window.deleteLater()
     qt_app.processEvents()
 
@@ -890,9 +890,9 @@ def test_connection_401_is_shown_in_window(qt_app, tmp_path, monkeypatch) -> Non
             pass
 
         def test_connection(self, _cancel_event) -> bool:
-            raise DeepSeekError("DeepSeek API Key 无效（401）")
+            raise AIProviderError("DeepSeek API Key 无效（401）")
 
-    monkeypatch.setattr(settings_window_module, "DeepSeekService", FakeService)
+    monkeypatch.setattr(settings_window_module, "AnalysisService", FakeService)
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("bad-key")))
     window.test_connection()
     wait_for_connection(window, qt_app)
@@ -910,7 +910,7 @@ def test_closing_connection_test_cleans_up_thread(qt_app, tmp_path, monkeypatch)
             time.sleep(0.05)
             return not cancel_event.is_set()
 
-    monkeypatch.setattr(settings_window_module, "DeepSeekService", FakeService)
+    monkeypatch.setattr(settings_window_module, "AnalysisService", FakeService)
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
     window.test_connection()
     window.close()

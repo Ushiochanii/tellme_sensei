@@ -57,19 +57,19 @@ def _clear_env(monkeypatch) -> None:
 def test_google_key_precedence_is_environment_then_secret_then_dotenv(tmp_path, monkeypatch) -> None:
     _clear_env(monkeypatch)
     (tmp_path / ".env").write_text("GOOGLE_VISION_API_KEY=dotenv-google\n", encoding="utf-8")
-    assert _manager(tmp_path, _Secrets(google="stored-google")).load(False).google_vision_api_key == "stored-google"
+    assert _manager(tmp_path, _Secrets(google="stored-google")).load().google_vision_api_key == "stored-google"
 
     monkeypatch.setenv("GOOGLE_VISION_API_KEY", "environment-google")
-    assert _manager(tmp_path, _Secrets(google="stored-google")).load(False).google_vision_api_key == "environment-google"
+    assert _manager(tmp_path, _Secrets(google="stored-google")).load().google_vision_api_key == "environment-google"
 
     monkeypatch.delenv("GOOGLE_VISION_API_KEY")
-    assert _manager(tmp_path, _Secrets()).load(False).google_vision_api_key == "dotenv-google"
+    assert _manager(tmp_path, _Secrets()).load().google_vision_api_key == "dotenv-google"
 
 
 def test_provider_precedence_and_default(tmp_path, monkeypatch) -> None:
     _clear_env(monkeypatch)
     (tmp_path / ".env").write_text("OCR_PROVIDER=google_vision\n", encoding="utf-8")
-    assert _manager(tmp_path, _Secrets()).load(False).ocr_provider == "google_vision"
+    assert _manager(tmp_path, _Secrets()).load().ocr_provider == "google_vision"
 
 
 def test_explicit_ocr_provider_only_means_os_environment(tmp_path, monkeypatch) -> None:
@@ -81,17 +81,17 @@ def test_explicit_ocr_provider_only_means_os_environment(tmp_path, monkeypatch) 
     assert manager.has_explicit_ocr_provider()
 
     SettingsRepository(tmp_path / "settings.json").update({"ocr_provider": "local"})
-    assert _manager(tmp_path, _Secrets()).load(False).ocr_provider == "local"
+    assert _manager(tmp_path, _Secrets()).load().ocr_provider == "local"
 
     monkeypatch.setenv("OCR_PROVIDER", "google_vision")
-    assert _manager(tmp_path, _Secrets()).load(False).ocr_provider == "google_vision"
+    assert _manager(tmp_path, _Secrets()).load().ocr_provider == "google_vision"
 
 
 def test_online_timeout_precedence_and_dotenv_is_not_injected(tmp_path, monkeypatch) -> None:
     _clear_env(monkeypatch)
     (tmp_path / ".env").write_text("ONLINE_OCR_TIMEOUT=12\n", encoding="utf-8")
     assert "ONLINE_OCR_TIMEOUT" not in os.environ
-    assert _manager(tmp_path, _Secrets()).load(False).online_ocr_timeout == 12.0
+    assert _manager(tmp_path, _Secrets()).load().online_ocr_timeout == 12.0
     assert "ONLINE_OCR_TIMEOUT" not in os.environ
 
 
@@ -133,5 +133,5 @@ def test_google_key_is_not_in_app_config_repr() -> None:
     from app.config import AppConfig
 
     assert "google-secret" not in repr(
-        AppConfig(api_key="deepseek", google_vision_api_key="google-secret")
+        AppConfig(google_vision_api_key="google-secret")
     )

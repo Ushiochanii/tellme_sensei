@@ -27,7 +27,7 @@ class _Config:
     def __init__(self, repository):
         self.settings_repository = repository
 
-    def load(self, require_api_key=False):
+    def load(self):
         return object()
 
 

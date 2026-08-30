@@ -11,12 +11,9 @@ from PySide6.QtGui import QImage
 
 from app.analysis import AnalysisMode
 from app.config import AppConfig
-from app.services.deepseek_service import (
-    DeepSeekCancelled,
-    DeepSeekError,
-    DeepSeekService,
-    VISION_MODEL,
-)
+from app.ai.errors import AIProviderError, AIRequestCancelled
+from app.ai.models import AIBackendConfig, DEFAULT_DEEPSEEK_VISION_MODEL
+from app.ai.service import AnalysisService
 from app.state import AppState
 from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
@@ -85,14 +82,24 @@ class _Client:
         return self.stream
 
 
+def _configured_ai() -> AppConfig:
+    return AppConfig(
+        text_ai=AIBackendConfig(api_key="test"),
+        vision_ai=AIBackendConfig(
+            api_key="test",
+            model_id=DEFAULT_DEEPSEEK_VISION_MODEL,
+        ),
+    )
+
+
 def test_vision_request_uses_fixed_model_and_png_data_url() -> None:
     stream = _Stream([_chunk("第一段"), _chunk("第二段")])
     client = _Client(stream)
-    service = DeepSeekService(AppConfig(api_key="test"), client=client)
+    service = AnalysisService(_configured_ai(), client=client)
     image_bytes = VisionProcessingWorker.encode_png(_image())
 
     assert service.analyze_image(image_bytes) == "第一段第二段"
-    assert client.kwargs["model"] == VISION_MODEL
+    assert client.kwargs["model"] == DEFAULT_DEEPSEEK_VISION_MODEL
     assert client.kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
     content = client.kwargs["messages"][1]["content"]
     assert content[0]["type"] == "text"
@@ -108,7 +115,7 @@ def test_vision_request_uses_fixed_model_and_png_data_url() -> None:
 def test_text_request_does_not_enable_vision_thinking_override() -> None:
     stream = _Stream([_chunk("文字答案"), _finish_chunk()])
     client = _Client(stream)
-    service = DeepSeekService(AppConfig(api_key="test"), client=client)
+    service = AnalysisService(_configured_ai(), client=client)
 
     assert service.analyze("题目文字") == "文字答案"
     assert "extra_body" not in client.kwargs
@@ -116,9 +123,9 @@ def test_text_request_does_not_enable_vision_thinking_override() -> None:
 
 def test_vision_reasoning_without_final_content_is_empty_answer_error() -> None:
     stream = _Stream([_reasoning_chunk("内部推理，不是最终答案"), _finish_chunk()])
-    service = DeepSeekService(AppConfig(api_key="test"), client=_Client(stream))
+    service = AnalysisService(_configured_ai(), client=_Client(stream))
 
-    with pytest.raises(DeepSeekError, match="empty answer"):
+    with pytest.raises(AIProviderError, match="empty answer"):
         service.analyze_image(VisionProcessingWorker.encode_png(_image()))
 
 
@@ -131,21 +138,21 @@ def test_vision_request_cancellation_and_empty_response() -> None:
             cancel_event.set()
             return chunk
 
-    service = DeepSeekService(
-        AppConfig(api_key="test"),
+    service = AnalysisService(
+        _configured_ai(),
         client=_Client(CancellingStream([_chunk("部分答案")])),
     )
-    with pytest.raises(DeepSeekCancelled):
+    with pytest.raises(AIRequestCancelled):
         service.analyze_image(
             VisionProcessingWorker.encode_png(_image()),
             cancel_event=cancel_event,
         )
 
-    empty = DeepSeekService(
-        AppConfig(api_key="test"),
+    empty = AnalysisService(
+        _configured_ai(),
         client=_Client(_Stream([])),
     )
-    with pytest.raises(DeepSeekError, match="empty answer"):
+    with pytest.raises(AIProviderError, match="empty answer"):
         empty.analyze_image(VisionProcessingWorker.encode_png(_image()))
 
 
@@ -175,7 +182,7 @@ def test_vision_worker_cancellation_is_structured() -> None:
 
     class CancelledVision:
         def analyze_image(self, _image_bytes: bytes, cancel_event=None) -> str:
-            raise DeepSeekCancelled("cancelled")
+            raise AIRequestCancelled("cancelled")
 
     worker = VisionProcessingWorker(_image(), CancelledVision(), "vision-cancel")
     worker.cancelled.connect(cancelled.append)
@@ -261,11 +268,15 @@ def test_main_window_controller_has_glass_mode_controls(qt_app) -> None:
 
 def test_main_window_uses_static_feature_descriptions_on_mode_cards(qt_app) -> None:
     config = AppConfig(
-        api_key="test",
+        text_ai=AIBackendConfig(api_key="test"),
+        vision_ai=AIBackendConfig(
+            api_key="test",
+            model_id=DEFAULT_DEEPSEEK_VISION_MODEL,
+        ),
         global_shortcut="Ctrl+Alt+T",
         vision_global_shortcut="Ctrl+Alt+V",
     )
-    manager = SimpleNamespace(load=lambda require_api_key=False: config)
+    manager = SimpleNamespace(load=lambda: config)
     window = MainWindow(
         tray_mode=True,
         config_manager=manager,
@@ -284,11 +295,15 @@ def test_main_window_uses_static_feature_descriptions_on_mode_cards(qt_app) -> N
 def test_main_window_card_descriptions_do_not_change_after_settings_save(qt_app) -> None:
     config_values = {"text": "Ctrl+Shift+A", "vision": "Ctrl+Shift+S"}
     config = AppConfig(
-        api_key="test",
+        text_ai=AIBackendConfig(api_key="test"),
+        vision_ai=AIBackendConfig(
+            api_key="test",
+            model_id=DEFAULT_DEEPSEEK_VISION_MODEL,
+        ),
         global_shortcut=config_values["text"],
         vision_global_shortcut=config_values["vision"],
     )
-    manager = SimpleNamespace(load=lambda require_api_key=False: config)
+    manager = SimpleNamespace(load=lambda: config)
     text_hotkey = SimpleNamespace(shortcut="Ctrl+Shift+A")
     vision_hotkey = SimpleNamespace(shortcut="Ctrl+Shift+S")
     window = MainWindow(

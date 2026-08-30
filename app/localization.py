@@ -2,7 +2,7 @@
 
 The application deliberately keeps this module lightweight.  Interface copy is
 selected once when the application starts, while answer-language metadata is
-read by the DeepSeek service for every request.  Keeping those two concerns
+read by the analysis service for every request.  Keeping those two concerns
 separate prevents a Settings edit from partially retranslating already-built
 Qt widgets.
 """

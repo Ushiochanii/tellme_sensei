@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 from app.config import ConfigError, ConfigManager
+from app.ai.service import AnalysisService
 from app.logging_config import configure_logging
 from app.pipeline import PipelineError, StudyPipeline
-from app.services.deepseek_service import DeepSeekService
 from app.services.ocr_service import OCRService
 
 
@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         config = ConfigManager().load()
         pipeline = StudyPipeline(
             ocr_service=OCRService(language=config.ocr_language),
-            deepseek_service=DeepSeekService(config),
+            analysis_service=AnalysisService(config),
         )
         result = pipeline.run(args.image)
     except (ConfigError, PipelineError) as exc:
