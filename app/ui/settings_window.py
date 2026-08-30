@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.config import AppConfig, ConfigError, ConfigManager
+from app.analysis import AnalysisMode
 from app.local_ocr.component_manager import ComponentError, LocalOCRComponentManager
 from app.local_ocr.download import LocalOCRDownloadWorker
 from app.local_ocr.manifest import manifest_url_available, resolve_manifest_url
@@ -282,6 +283,7 @@ class SettingsWindow(QWidget):
         self._loaded_api_key = ""
         self._loaded_google_vision_api_key = ""
         self._loaded_auto_watch_values: dict[str, int | float] = {}
+        self._loaded_auto_watch_analysis_mode = AnalysisMode.TEXT
         self._local_ocr_download_terminal_status: str | None = None
 
         self.setWindowTitle("TellMeSensei Settings")
@@ -454,6 +456,20 @@ class SettingsWindow(QWidget):
         self.analysis_delay_ms_spin = QSpinBox()
         self.analysis_delay_ms_spin.setRange(0, 60000)
         self.analysis_delay_ms_spin.setSuffix(" ms")
+        auto_watch_mode_widget = QWidget()
+        auto_watch_mode_layout = QHBoxLayout(auto_watch_mode_widget)
+        auto_watch_mode_layout.setContentsMargins(0, 0, 0, 0)
+        self.auto_watch_text_radio = QRadioButton("Text / OCR")
+        self.auto_watch_text_radio.setAccessibleName("Auto Watch Text / OCR")
+        self.auto_watch_vision_radio = QRadioButton("Vision")
+        self.auto_watch_vision_radio.setAccessibleName("Auto Watch Vision")
+        self.auto_watch_analysis_mode_group = QButtonGroup(self)
+        self.auto_watch_analysis_mode_group.setExclusive(True)
+        self.auto_watch_analysis_mode_group.addButton(self.auto_watch_text_radio)
+        self.auto_watch_analysis_mode_group.addButton(self.auto_watch_vision_radio)
+        auto_watch_mode_layout.addWidget(self.auto_watch_text_radio)
+        auto_watch_mode_layout.addWidget(self.auto_watch_vision_radio)
+        auto_watch_mode_layout.addStretch(1)
         self.expected_stability_label = QLabel()
         self.expected_stability_label.setWordWrap(True)
         self.restore_auto_watch_button = QPushButton("Restore Defaults")
@@ -576,6 +592,7 @@ class SettingsWindow(QWidget):
         auto_watch_card_layout = QVBoxLayout(auto_watch_card)
         auto_watch_card_layout.setContentsMargins(16, 14, 16, 16)
         auto_watch_form = QFormLayout()
+        auto_watch_form.addRow("Analysis mode", auto_watch_mode_widget)
         auto_watch_form.addRow("Detection interval", self.poll_interval_ms_spin)
         auto_watch_form.addRow("Pixel delta threshold", self.pixel_delta_threshold_spin)
         auto_watch_form.addRow("New-question ratio", self.novelty_ratio_spin)
@@ -743,6 +760,26 @@ class SettingsWindow(QWidget):
     def _load_auto_watch_values(self) -> None:
         saved = self.config_manager.settings_repository.load()
         settings = self.config_manager.settings_repository.auto_watch_settings()
+        mode_getter = getattr(
+            self.config_manager.settings_repository,
+            "auto_watch_analysis_mode",
+            None,
+        )
+        if callable(mode_getter):
+            try:
+                mode = AnalysisMode(mode_getter())
+            except (TypeError, ValueError):
+                mode = AnalysisMode.TEXT
+        else:
+            try:
+                mode = AnalysisMode(
+                    saved.get("auto_watch_analysis_mode", AnalysisMode.TEXT.value)
+                )
+            except (TypeError, ValueError):
+                mode = AnalysisMode.TEXT
+        self._loaded_auto_watch_analysis_mode = mode
+        self.auto_watch_text_radio.setChecked(mode is AnalysisMode.TEXT)
+        self.auto_watch_vision_radio.setChecked(mode is AnalysisMode.VISION)
         self._loaded_auto_watch_values = {
             key: saved[key]
             for key in (
@@ -758,8 +795,13 @@ class SettingsWindow(QWidget):
         self.analysis_delay_ms_spin.setValue(settings.analysis_delay_ms)
         self._refresh_expected_stability()
 
-    def _auto_watch_values(self) -> dict[str, int | float]:
+    def _auto_watch_values(self) -> dict[str, int | float | str]:
         return {
+            "auto_watch_analysis_mode": (
+                AnalysisMode.VISION.value
+                if self.auto_watch_vision_radio.isChecked()
+                else AnalysisMode.TEXT.value
+            ),
             "poll_interval_ms": self.poll_interval_ms_spin.value(),
             "pixel_delta_threshold": self.pixel_delta_threshold_spin.value(),
             "novelty_ratio": self.novelty_ratio_spin.value() / 100.0,
@@ -768,18 +810,23 @@ class SettingsWindow(QWidget):
             "analysis_delay_ms": self.analysis_delay_ms_spin.value(),
         }
 
-    def _changed_auto_watch_values(self) -> dict[str, int | float]:
+    def _changed_auto_watch_values(self) -> dict[str, int | float | str]:
         current = self._auto_watch_values()
         defaults = AutoWatchSettings()
-        return {
+        changed: dict[str, int | float | str] = {
             key: value
             for key, value in current.items()
-            if value != self._loaded_auto_watch_values.get(key, getattr(defaults, key))
+            if key != "auto_watch_analysis_mode"
+            and value != self._loaded_auto_watch_values.get(key, getattr(defaults, key))
         }
+        if current["auto_watch_analysis_mode"] != self._loaded_auto_watch_analysis_mode.value:
+            changed["auto_watch_analysis_mode"] = current["auto_watch_analysis_mode"]
+        return changed
 
     @Slot()
     def _restore_auto_watch_defaults(self) -> None:
         defaults = AutoWatchSettings()
+        self.auto_watch_text_radio.setChecked(True)
         self.poll_interval_ms_spin.setValue(defaults.poll_interval_ms)
         self.pixel_delta_threshold_spin.setValue(defaults.pixel_delta_threshold)
         self.novelty_ratio_spin.setValue(defaults.novelty_ratio * 100.0)

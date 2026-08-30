@@ -12,6 +12,7 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
 
+from app.analysis import AnalysisMode
 from app.config import AppConfig, ConfigManager
 from app.services.deepseek_service import DeepSeekError
 from app.auto_watch.models import AutoWatchSettings
@@ -934,6 +935,12 @@ def test_auto_watch_repository_round_trip_partial_and_validation(tmp_path) -> No
     repository = SettingsRepository(tmp_path / "settings.json")
     defaults = AutoWatchSettings()
     assert repository.auto_watch_settings() == defaults
+    assert repository.auto_watch_analysis_mode() is AnalysisMode.TEXT
+    repository.update({"auto_watch_analysis_mode": AnalysisMode.VISION})
+    assert repository.auto_watch_analysis_mode() is AnalysisMode.VISION
+    with pytest.raises(ValueError):
+        repository.update({"auto_watch_analysis_mode": "invalid"})
+    assert repository.auto_watch_analysis_mode() is AnalysisMode.VISION
     repository.save({"model": "kept", "poll_interval_ms": 1, "novelty_ratio": 0.0})
     repository.update({"stable_samples_required": 1000, "analysis_delay_ms": 60000})
     assert repository.auto_watch_settings().poll_interval_ms == 1
@@ -969,10 +976,17 @@ def test_auto_watch_repository_round_trip_partial_and_validation(tmp_path) -> No
 
 def test_auto_watch_corrupt_values_fall_back_independently(tmp_path) -> None:
     path = tmp_path / "settings.json"
-    path.write_text(json.dumps({"model": "kept", "poll_interval_ms": "bad", "novelty_ratio": 0.25}), encoding="utf-8")
+    path.write_text(json.dumps({
+        "model": "kept",
+        "auto_watch_analysis_mode": "not-a-mode",
+        "poll_interval_ms": "bad",
+        "novelty_ratio": 0.25,
+    }), encoding="utf-8")
     repository = SettingsRepository(path)
     defaults = AutoWatchSettings()
     settings = repository.auto_watch_settings()
+    assert repository.auto_watch_analysis_mode() is AnalysisMode.TEXT
+    assert repository.load()["model"] == "kept"
     assert settings.poll_interval_ms == defaults.poll_interval_ms
     assert settings.novelty_ratio == 0.25
     path.write_text("[not an object]", encoding="utf-8")
@@ -985,12 +999,15 @@ def test_auto_watch_settings_window_load_save_and_navigation(qt_app, tmp_path) -
         "poll_interval_ms": 500, "pixel_delta_threshold": 20,
         "novelty_ratio": 0.125, "stability_ratio": 0.25,
         "stable_samples_required": 4, "analysis_delay_ms": 30,
+        "auto_watch_analysis_mode": AnalysisMode.VISION,
     })
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
     assert isinstance(window.poll_interval_ms_spin, QSpinBox)
     assert isinstance(window.novelty_ratio_spin, QDoubleSpinBox)
     assert window.poll_interval_ms_spin.value() == 500
     assert window.novelty_ratio_spin.value() == 12.5
+    assert window.auto_watch_vision_radio.isChecked()
+    assert not window.auto_watch_text_radio.isChecked()
     assert next(button for button in window._navigation_buttons if button.text() == "Auto Watch").property("navLevel") == "primary"
     window.poll_interval_ms_spin.setValue(200)
     window.pixel_delta_threshold_spin.setValue(25)
@@ -998,6 +1015,7 @@ def test_auto_watch_settings_window_load_save_and_navigation(qt_app, tmp_path) -
     window.stability_ratio_spin.setValue(50.0)
     window.stable_samples_required_spin.setValue(6)
     window.analysis_delay_ms_spin.setValue(40)
+    window.auto_watch_text_radio.click()
     window.save()
     saved = repository.auto_watch_settings()
     assert saved.poll_interval_ms == 200
@@ -1006,22 +1024,31 @@ def test_auto_watch_settings_window_load_save_and_navigation(qt_app, tmp_path) -
     assert saved.stability_ratio == 0.5
     assert saved.stable_samples_required == 6
     assert saved.analysis_delay_ms == 40
+    assert repository.auto_watch_analysis_mode() is AnalysisMode.TEXT
     window.deleteLater()
     qt_app.processEvents()
 
 
 def test_auto_watch_settings_window_cancel_restore_and_expected_time(qt_app, tmp_path) -> None:
     repository = SettingsRepository(tmp_path / "settings.json")
-    repository.update({"poll_interval_ms": 500, "stable_samples_required": 4})
+    repository.update({
+        "poll_interval_ms": 500,
+        "stable_samples_required": 4,
+        "auto_watch_analysis_mode": AnalysisMode.VISION,
+    })
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
     window.poll_interval_ms_spin.setValue(200)
     window.stable_samples_required_spin.setValue(6)
     assert "1200 ms" in window.expected_stability_label.text()
     window.restore_auto_watch_button.click()
     assert window.poll_interval_ms_spin.value() == AutoWatchSettings().poll_interval_ms
+    assert window.auto_watch_text_radio.isChecked()
+    assert not window.auto_watch_vision_radio.isChecked()
     assert repository.auto_watch_settings().poll_interval_ms == 500
+    assert repository.auto_watch_analysis_mode() is AnalysisMode.VISION
     window.save()
     assert repository.auto_watch_settings() == AutoWatchSettings()
+    assert repository.auto_watch_analysis_mode() is AnalysisMode.TEXT
     repository.update({"poll_interval_ms": 500})
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
     window.poll_interval_ms_spin.setValue(200)

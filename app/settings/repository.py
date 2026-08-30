@@ -11,6 +11,8 @@ from typing import Any, Mapping
 
 from PySide6.QtCore import QStandardPaths
 
+from app.analysis import AnalysisMode
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "deepseek-chat"
@@ -72,11 +74,25 @@ class SettingsRepository:
             shortcut = raw.get(key)
             if isinstance(shortcut, str) and shortcut.strip():
                 settings[key] = shortcut.strip()
+        analysis_mode = raw.get("auto_watch_analysis_mode")
+        if isinstance(analysis_mode, str) and analysis_mode.strip().lower() in {
+            mode.value for mode in AnalysisMode
+        }:
+            settings["auto_watch_analysis_mode"] = analysis_mode.strip().lower()
         geometry = self._normalize_geometry(raw.get("answer_window_geometry"))
         if geometry is not None:
             settings["answer_window_geometry"] = geometry
         settings.update(self._load_auto_watch(raw))
         return settings
+
+    def auto_watch_analysis_mode(self) -> AnalysisMode:
+        """Return the persisted Auto Watch mode, defaulting safely to Text."""
+
+        value = self.load().get("auto_watch_analysis_mode")
+        try:
+            return AnalysisMode(value)
+        except (TypeError, ValueError):
+            return AnalysisMode.TEXT
 
     @staticmethod
     def _load_auto_watch(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -152,6 +168,16 @@ class SettingsRepository:
             if not shortcut:
                 raise ValueError(f"{key} 不能为空")
             payload[key] = shortcut
+        if "auto_watch_analysis_mode" in settings:
+            candidate = settings["auto_watch_analysis_mode"]
+            if isinstance(candidate, AnalysisMode):
+                candidate = candidate.value
+            if not isinstance(candidate, str):
+                raise ValueError("auto_watch_analysis_mode must be 'text' or 'vision'")
+            candidate = candidate.strip().lower()
+            if candidate not in {mode.value for mode in AnalysisMode}:
+                raise ValueError("auto_watch_analysis_mode must be 'text' or 'vision'")
+            payload["auto_watch_analysis_mode"] = candidate
         if "ocr_provider" in settings:
             provider = str(settings["ocr_provider"]).strip().lower()
             if provider not in {"local", "google_vision"}:

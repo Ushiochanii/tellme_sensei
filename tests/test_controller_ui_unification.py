@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QRect
 from PySide6.QtWidgets import QSizePolicy, QPushButton
 
-from app.auto_watch.models import WatchRegion
-from app.ui.main_window import MainWindow
+from app.ui.main_window import AutoWatchSelectionPhase, MainWindow
 
 
 def test_controller_exposes_four_cards_in_visual_tab_order(qt_app) -> None:
@@ -61,74 +59,48 @@ def test_controller_exposes_four_cards_in_visual_tab_order(qt_app) -> None:
     qt_app.processEvents()
 
 
-def test_watch_cards_route_directly_to_the_matching_setup(qt_app) -> None:
+def test_watch_cards_route_directly_to_the_canonical_entry_methods(qt_app, monkeypatch) -> None:
     window = MainWindow(tray_mode=True)
     calls: list[str] = []
 
-    def record(region_mode: str = "single") -> bool:
-        calls.append(region_mode)
+    def record_watch(_checked: bool = False) -> bool:
+        calls.append("watch")
         return True
 
-    window.enter_auto_watch_setup = record
+    def record_context(_checked: bool = False) -> bool:
+        calls.append("context")
+        return True
+
+    monkeypatch.setattr(MainWindow, "start_watch", record_watch)
+    monkeypatch.setattr(MainWindow, "start_context_watch", record_context)
+    # The card signal connections are made during construction, so use a fresh
+    # window after replacing the public canonical entry methods.
+    window.close()
+    window = MainWindow(tray_mode=True)
     window.watch_mode_button.click()
     window.context_watch_mode_button.click()
 
-    assert calls == ["single", "context_question"]
+    assert calls == ["watch", "context"]
     window.close()
     qt_app.processEvents()
 
 
-def test_watch_hotkeys_show_matching_setup_without_starting_selection(qt_app) -> None:
+def test_watch_hotkeys_use_the_same_selection_entry_methods(qt_app, monkeypatch) -> None:
     window = MainWindow(tray_mode=True)
+    phases: list[AutoWatchSelectionPhase] = []
+
+    def record(phase: AutoWatchSelectionPhase) -> bool:
+        phases.append(phase)
+        return True
+
+    monkeypatch.setattr(window, "_begin_auto_watch_workflow", record)
 
     assert window.start_watch() is True
-    assert window.isVisible()
-    assert window._auto_watch_region_mode == "single"
-    assert window._auto_watch_session is None
-    assert window._auto_watch_selection_overlay is None
-    assert window.auto_watch_setup.isVisible()
-
-    window.exit_auto_watch_setup()
-    window.hide()
     assert window.start_context_watch() is True
-    assert window.isVisible()
-    assert window._auto_watch_region_mode == "context_question"
-    assert window._auto_watch_session is None
-    assert window._auto_watch_selection_overlay is None
-    assert window.auto_watch_setup.isVisible()
-
-    window.close()
-    qt_app.processEvents()
-
-
-def test_watch_setup_hides_region_mode_and_reentry_resets_selection(qt_app) -> None:
-    window = MainWindow(tray_mode=True)
-    window.show()
-    qt_app.processEvents()
-
-    window.context_watch_mode_button.click()
-    assert window._auto_watch_region_mode == "context_question"
-    assert window.auto_watch_setup.isVisible()
-    assert window.auto_watch_text_radio.isVisible()
-    assert window.auto_watch_vision_radio.isVisible()
-    assert not window.auto_watch_single_region_radio.isVisible()
-    assert not window.auto_watch_context_question_radio.isVisible()
-    assert window.auto_watch_select_button.text() == "Select Context"
-
-    screen = qt_app.primaryScreen()
-    context = WatchRegion.create(screen, QRect(10, 10, 80, 60), "ui-session")
-    question = WatchRegion.create(screen, QRect(120, 10, 80, 60), "ui-session")
-    window._auto_watch_context_region = context
-    window._auto_watch_question_region = question
-
-    window.auto_watch_back_button.click()
-    window.watch_mode_button.click()
-
-    assert window._auto_watch_region_mode == "single"
-    assert window._auto_watch_context_region is None
-    assert window._auto_watch_question_region is None
-    assert window.auto_watch_select_button.text() == "Select Region"
-    assert not window.auto_watch_start_button.isVisible()
+    assert phases == [
+        AutoWatchSelectionPhase.SELECTING_SINGLE,
+        AutoWatchSelectionPhase.SELECTING_CONTEXT,
+    ]
 
     window.close()
     qt_app.processEvents()

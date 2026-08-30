@@ -24,9 +24,50 @@ from app.services.ocr_service import OCRLine, OCRResult
 from app.ocr.providers.local_worker import LocalOCRProvider
 from app.ui import main_window as main_window_module
 from app.ui import answer_window as answer_window_module
-from app.ui.main_window import MainWindow, _AutoWatchFakeHandle
+from app.ui.main_window import AutoWatchSelectionPhase, MainWindow, _AutoWatchFakeHandle
 from app.ui.answer_window import AnswerWindow
 from app.workers.processing_worker import ProcessingWorker
+
+
+class _WatchSelectionOverlay(QObject):
+    """Deterministic CaptureOverlay double for direct Auto Watch workflows."""
+
+    captured = Signal(object)
+    cancelled = Signal()
+    next_metadata = None
+    instances: list["_WatchSelectionOverlay"] = []
+
+    def __init__(self, *_args, **_kwargs):
+        super().__init__()
+        self.selection_metadata = (
+            type(self).next_metadata[0],
+            QRect(type(self).next_metadata[1]),
+        )
+        self.close_count = 0
+        type(self).instances.append(self)
+
+    def begin(self):
+        return None
+
+    def close(self):
+        self.close_count += 1
+
+
+def _start_fake_watch(window, qt_app, monkeypatch, *, mode=AnalysisMode.TEXT):
+    screen = qt_app.primaryScreen()
+    _WatchSelectionOverlay.instances.clear()
+    _WatchSelectionOverlay.next_metadata = (screen, QRect(2, 3, 40, 30))
+    monkeypatch.setattr(main_window_module, "CaptureOverlay", _WatchSelectionOverlay)
+    monkeypatch.setattr(
+        main_window_module.screen_permissions,
+        "has_screen_recording_permission",
+        lambda: True,
+    )
+    monkeypatch.setattr(window, "_read_auto_watch_analysis_mode", lambda: mode)
+    assert window.start_watch() is True
+    overlay = _WatchSelectionOverlay.instances[-1]
+    overlay.captured.emit(QImage())
+    return overlay
 
 
 @pytest.fixture(scope="session")
@@ -283,33 +324,48 @@ def test_capture_overlay_exposes_read_only_watch_metadata(qt_app) -> None:
     assert selection.x() != overlay.selection.x()
 
 
-def test_main_window_auto_watch_setup_is_exclusive_and_back_restores(qt_app) -> None:
+def test_main_window_auto_watch_direct_entry_and_cancel_restore(qt_app, monkeypatch) -> None:
     window = MainWindow(tray_mode=True)
     assert window.auto_watch_main_view.isVisible() is False
     window.show()
     qt_app.processEvents()
     assert window.auto_watch_main_view.isVisible()
-    assert not window.auto_watch_setup.isVisible()
-    window.enter_auto_watch_setup()
-    assert not window.auto_watch_main_view.isVisible()
-    assert window.auto_watch_setup.isVisible()
+    _WatchSelectionOverlay.instances.clear()
+    _WatchSelectionOverlay.next_metadata = (qt_app.primaryScreen(), QRect(10, 10, 80, 60))
+    monkeypatch.setattr(main_window_module, "CaptureOverlay", _WatchSelectionOverlay)
+    monkeypatch.setattr(
+        main_window_module.screen_permissions,
+        "has_screen_recording_permission",
+        lambda: True,
+    )
+    assert window.start_watch()
+    assert window._auto_watch_selection_phase is AutoWatchSelectionPhase.SELECTING_SINGLE
+    assert len(_WatchSelectionOverlay.instances) == 1
+    assert window._auto_watch_selection_overlay is _WatchSelectionOverlay.instances[0]
     assert window.start_text_capture() is False
-    window.auto_watch_vision_radio.click()
-    assert window.auto_watch_vision_radio.isChecked()
-    window.auto_watch_back_button.click()
+    window._auto_watch_selection_overlay.cancelled.emit()
     assert window.auto_watch_main_view.isVisible()
-    assert not window.auto_watch_setup.isVisible()
+    assert window._auto_watch_selection_phase is AutoWatchSelectionPhase.IDLE
     window.close()
     qt_app.processEvents()
 
 
-def test_main_window_auto_watch_selection_cancel_returns_to_setup(qt_app) -> None:
+def test_main_window_auto_watch_selection_cancel_returns_to_idle(qt_app, monkeypatch) -> None:
     window = MainWindow(tray_mode=True)
-    window.show(); window.enter_auto_watch_setup()
-    window._on_auto_watch_selection_cancelled()
+    window.show()
+    _WatchSelectionOverlay.instances.clear()
+    _WatchSelectionOverlay.next_metadata = (qt_app.primaryScreen(), QRect(10, 10, 80, 60))
+    monkeypatch.setattr(main_window_module, "CaptureOverlay", _WatchSelectionOverlay)
+    monkeypatch.setattr(
+        main_window_module.screen_permissions,
+        "has_screen_recording_permission",
+        lambda: True,
+    )
+    assert window.start_watch()
+    _WatchSelectionOverlay.instances[0].cancelled.emit()
     assert window._auto_watch_selection_overlay is None
-    assert window.auto_watch_setup.isVisible()
-    assert not window.auto_watch_main_view.isVisible()
+    assert window._auto_watch_selection_phase is AutoWatchSelectionPhase.IDLE
+    assert window.auto_watch_main_view.isVisible()
     window.close()
     qt_app.processEvents()
 
@@ -323,25 +379,22 @@ def test_main_window_watch_start_failure_cleans_created_session(qt_app, monkeypa
         def start(self): raise RuntimeError("start failed")
         def stop(self): self.stop_count += 1
 
-    class FakeSelection:
-        selection_metadata = (qt_app.primaryScreen(), QRect(2, 3, 40, 30))
-
     monkeypatch.setattr(main_window_module, "AutoWatchSession", FakeSession)
     window = MainWindow(tray_mode=True)
-    window.show(); window.enter_auto_watch_setup()
-    window._auto_watch_selection_overlay = FakeSelection()
-    assert window._on_auto_watch_capture(QImage()) is False
+    window.show()
+    overlay = _start_fake_watch(window, qt_app, monkeypatch)
     assert FakeSession.last.stop_count == 1
     assert window._auto_watch_session is None
-    assert window.auto_watch_setup.isVisible()
-    assert not window.auto_watch_main_view.isVisible()
+    assert window._auto_watch_selection_phase is AutoWatchSelectionPhase.IDLE
+    assert window.auto_watch_main_view.isVisible()
+    assert overlay.close_count == 1
     window.close()
     qt_app.processEvents()
 
 
 def test_main_window_watch_active_disables_manual_capture_and_stop_restores(qt_app) -> None:
     window = MainWindow(tray_mode=True)
-    window.show(); window.enter_auto_watch_setup()
+    window.show()
     window._auto_watch_active = True
     window._set_capture_controls_enabled(False)
     assert not window.text_mode_button.isEnabled()
@@ -428,14 +481,10 @@ def test_fake_handle_emits_result_and_finished_once_and_is_cancel_idempotent(qt_
     assert second_finished == [True]
 
 
-def test_fake_main_window_watch_dispatches_result_and_keeps_watching(qt_app) -> None:
-    class FakeSelection:
-        selection_metadata = (qt_app.primaryScreen(), QRect(2, 3, 40, 30))
-
+def test_fake_main_window_watch_dispatches_result_and_keeps_watching(qt_app, monkeypatch) -> None:
     window = MainWindow(tray_mode=True, auto_watch_fake=True)
-    window.show(); window.enter_auto_watch_setup()
-    window._auto_watch_selection_overlay = FakeSelection()
-    assert window._on_auto_watch_capture(QImage()) is True
+    window.show()
+    _start_fake_watch(window, qt_app, monkeypatch)
     session = window._auto_watch_session
     assert session is not None
     image = QImage(40, 30, QImage.Format.Format_RGBA8888)
@@ -468,15 +517,10 @@ def test_fake_main_window_watch_dispatches_result_and_keeps_watching(qt_app) -> 
     window.close(); qt_app.processEvents()
 
 
-def test_fake_main_window_vision_result_updates_answer_window_without_ocr(qt_app) -> None:
-    class FakeSelection:
-        selection_metadata = (qt_app.primaryScreen(), QRect(2, 3, 40, 30))
-
+def test_fake_main_window_vision_result_updates_answer_window_without_ocr(qt_app, monkeypatch) -> None:
     window = MainWindow(tray_mode=True, auto_watch_fake=True)
-    window.show(); window.enter_auto_watch_setup()
-    window.auto_watch_vision_radio.click()
-    window._auto_watch_selection_overlay = FakeSelection()
-    assert window._on_auto_watch_capture(QImage()) is True
+    window.show()
+    _start_fake_watch(window, qt_app, monkeypatch, mode=AnalysisMode.VISION)
     session = window._auto_watch_session
     assert session is not None
     image = QImage(40, 30, QImage.Format.Format_RGBA8888)
@@ -555,15 +599,10 @@ def test_old_text_and_vision_callbacks_cannot_create_or_modify_answer_window(qt_
     answer.close(); window.close(); qt_app.processEvents()
 
 
-def test_non_tray_watch_hides_main_window_and_stop_restores_it(qt_app) -> None:
-    class FakeSelection:
-        selection_metadata = (qt_app.primaryScreen(), QRect(2, 3, 40, 30))
-
+def test_non_tray_watch_hides_main_window_and_stop_restores_it(qt_app, monkeypatch) -> None:
     window = MainWindow(tray_mode=False, auto_watch_fake=True)
     window.show(); qt_app.processEvents()
-    window.enter_auto_watch_setup()
-    window._auto_watch_selection_overlay = FakeSelection()
-    assert window._on_auto_watch_capture(QImage()) is True
+    _start_fake_watch(window, qt_app, monkeypatch)
     assert not window.isVisible()
     session = window._auto_watch_session
     assert session is not None
@@ -598,14 +637,10 @@ def test_non_tray_watch_hides_main_window_and_stop_restores_it(qt_app) -> None:
     window.close(); qt_app.processEvents()
 
 
-def test_tray_watch_stop_does_not_force_show_hidden_controller(qt_app) -> None:
-    class FakeSelection:
-        selection_metadata = (qt_app.primaryScreen(), QRect(2, 3, 40, 30))
-
+def test_tray_watch_stop_does_not_force_show_hidden_controller(qt_app, monkeypatch) -> None:
     window = MainWindow(tray_mode=True, auto_watch_fake=True)
-    window.hide(); window.enter_auto_watch_setup()
-    window._auto_watch_selection_overlay = FakeSelection()
-    assert window._on_auto_watch_capture(QImage()) is True
+    window.hide()
+    _start_fake_watch(window, qt_app, monkeypatch)
     session = window._auto_watch_session
     assert session is not None
     session.stop(); qt_app.processEvents()
