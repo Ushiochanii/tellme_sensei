@@ -19,7 +19,8 @@ from app.capture.overlay import CaptureOverlay
 from app.config import AppConfig
 from app.pipeline import PipelineResult
 from app.state import AppState
-from app.services.deepseek_service import DeepSeekError, DeepSeekService
+from app.ai.errors import AIProviderError
+from app.ai.service import AnalysisService
 from app.services.ocr_service import OCRLine, OCRResult
 from app.ocr.providers.local_worker import LocalOCRProvider
 from app.ui import main_window as main_window_module
@@ -673,7 +674,7 @@ def test_worker_keeps_ocr_text_when_ai_key_is_missing(qt_app) -> None:
             return OCRResult("保留的 OCR", (OCRLine("保留的 OCR"),))
 
     worker = ProcessingWorker(
-        object(), FakeOCR(), DeepSeekService(AppConfig(api_key=""))
+        object(), FakeOCR(), AnalysisService(AppConfig())
     )
     ocr_texts: list[str] = []
     errors: list[str] = []
@@ -708,14 +709,14 @@ def test_main_window_runs_worker_through_real_qthread(qt_app, monkeypatch) -> No
     monkeypatch.setattr(
         main_window_module.ConfigManager,
         "load",
-        lambda _self, require_api_key=True: AppConfig(api_key="test"),
+        lambda _self: AppConfig(),
     )
     monkeypatch.setattr(
         main_window_module,
         "create_ocr_provider",
         lambda config: FakeOCR(config.ocr_language),
     )
-    monkeypatch.setattr(main_window_module, "DeepSeekService", FakeAI)
+    monkeypatch.setattr(main_window_module, "AnalysisService", FakeAI)
 
     window = MainWindow()
     window._show_or_create_answer()
@@ -754,19 +755,19 @@ def test_main_window_ai_error_renders_terminal_answer_state(qt_app, monkeypatch)
             self.config = config
 
         def analyze(self, text: str) -> str:
-            raise DeepSeekError("DeepSeek API Key 无效（401）")
+            raise AIProviderError("DeepSeek API Key 无效（401）")
 
     monkeypatch.setattr(
         main_window_module.ConfigManager,
         "load",
-        lambda _self, require_api_key=True: AppConfig(api_key="test"),
+        lambda _self: AppConfig(),
     )
     monkeypatch.setattr(
         main_window_module,
         "create_ocr_provider",
         lambda config: FakeOCR(config.ocr_language),
     )
-    monkeypatch.setattr(main_window_module, "DeepSeekService", FakeAI)
+    monkeypatch.setattr(main_window_module, "AnalysisService", FakeAI)
 
     window = MainWindow(tray_mode=True)
     window._show_or_create_answer()

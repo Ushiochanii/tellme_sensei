@@ -10,7 +10,9 @@ from PySide6.QtGui import QKeyEvent, QImage
 
 from app.config import AppConfig
 from app.pipeline import PipelineResult
-from app.services.deepseek_service import DeepSeekCancelled, DeepSeekService
+from app.ai.errors import AIRequestCancelled
+from app.ai.models import AIBackendConfig
+from app.ai.service import AnalysisService
 from app.services.ocr_service import OCRLine, OCRResult
 from app.ocr.types import OCRCancelled
 from app.state import AppState
@@ -87,7 +89,10 @@ class FakeClient:
 def test_deepseek_stream_assembles_complete_answer_and_closes_stream() -> None:
     stream = FakeStream([_chunk("第一段"), _chunk("第二段")])
     client = FakeClient(stream)
-    service = DeepSeekService(AppConfig(api_key="test"), client=client)
+    service = AnalysisService(
+        AppConfig(text_ai=AIBackendConfig(api_key="test")),
+        client=client,
+    )
 
     answer = service.analyze("题目")
 
@@ -107,9 +112,12 @@ def test_deepseek_stream_cancellation_closes_response() -> None:
             return chunk
 
     stream = CancellingStream([_chunk("部分答案"), _chunk("不应消费")])
-    service = DeepSeekService(AppConfig(api_key="test"), client=FakeClient(stream))
+    service = AnalysisService(
+        AppConfig(text_ai=AIBackendConfig(api_key="test")),
+        client=FakeClient(stream),
+    )
 
-    with pytest.raises(DeepSeekCancelled):
+    with pytest.raises(AIRequestCancelled):
         service.analyze("题目", cancel_event=cancel_event)
     assert stream.closed is True
 
@@ -194,19 +202,19 @@ def test_real_qthread_cancel_during_ai_restores_idle(qt_app, monkeypatch) -> Non
         def analyze(self, _text: str, cancel_event=None) -> str:
             while not cancel_event.wait(0.01):
                 pass
-            raise DeepSeekCancelled("cancelled by test")
+            raise AIRequestCancelled("cancelled by test")
 
     monkeypatch.setattr(
         main_window_module.ConfigManager,
         "load",
-        lambda _self, require_api_key=True: AppConfig(api_key="test"),
+        lambda _self: AppConfig(),
     )
     monkeypatch.setattr(
         main_window_module,
         "create_ocr_provider",
         lambda config: FakeOCR(config.ocr_language),
     )
-    monkeypatch.setattr(main_window_module, "DeepSeekService", BlockingAI)
+    monkeypatch.setattr(main_window_module, "AnalysisService", BlockingAI)
 
     window = MainWindow(tray_mode=True)
     window._show_or_create_answer()

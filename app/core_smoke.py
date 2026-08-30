@@ -42,14 +42,14 @@ def _run_checks() -> None:
     from app.ocr.factory import create_ocr_provider
     from app.ocr.providers.google_vision import GoogleVisionOCRProvider
     from app.platform import factory as platform_factory
-    from app.services.deepseek_service import DeepSeekService
+    from app.ai.service import AnalysisService
     from app.version import __version__
 
     if not isinstance(__version__, str) or not __version__.strip():
         raise CoreSmokeError("CORE_SMOKE_RESOURCE_FAILED", "version metadata is empty")
 
     try:
-        config = ConfigManager().load(require_api_key=False)
+        config = ConfigManager().load()
     except Exception as exc:  # noqa: BLE001 - normalize config failures for the CLI.
         raise CoreSmokeError(
             "CORE_SMOKE_CONFIG_FAILED",
@@ -57,7 +57,7 @@ def _run_checks() -> None:
         ) from exc
     create_ocr_provider(config)
     GoogleVisionOCRProvider(api_key="core-smoke-placeholder")
-    DeepSeekService(config)
+    AnalysisService(config)
 
     # Importing the factory validates that the packaged platform boundary is
     # present. Instantiating it would register a real global hotkey, which is

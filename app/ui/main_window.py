@@ -39,7 +39,7 @@ from app.ocr.factory import create_ocr_provider
 from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
 from app.platform import screen_permissions
-from app.services.deepseek_service import DeepSeekService
+from app.ai.service import AnalysisService
 from app.state import AppState
 from app.thread_info import current_thread_info
 from app.ui.answer_window import AnswerWindow
@@ -1097,7 +1097,7 @@ class MainWindow(QWidget):
             current_thread_info(),
         )
         try:
-            config = self.config_manager.load(require_api_key=False)
+            config = self.config_manager.load()
         except ConfigError as exc:
             self._answer_window.show_error(str(exc))
             self._restore_idle()
@@ -1118,12 +1118,12 @@ class MainWindow(QWidget):
             )
         else:
             ocr_provider = create_ocr_provider(config)
-        deepseek_service = DeepSeekService(config)
+        analysis_service = AnalysisService(config)
         thread = QThread(self)
         thread.setObjectName("StudyAssistantProcessingThread")
         thread.setProperty("processing_job_id", job_id)
         logger.info("QThread created job_id=%s [%s]", job_id, current_thread_info())
-        worker = ProcessingWorker(image, ocr_provider, deepseek_service, ocr_text=ocr_text, job_id=job_id)
+        worker = ProcessingWorker(image, ocr_provider, analysis_service, ocr_text=ocr_text, job_id=job_id)
         logger.info("Worker created job_id=%s [%s]", job_id, current_thread_info())
         worker.moveToThread(thread)
 
@@ -1149,23 +1149,23 @@ class MainWindow(QWidget):
         logger.info("QThread.start called job_id=%s [%s]", job_id, current_thread_info())
 
     def _launch_vision_worker(self, image: QImage) -> None:
-        """Launch the direct image-to-DeepSeek Vision worker without OCR."""
+        """Launch the direct image-to-Vision-AI worker without OCR."""
 
         job_id = uuid.uuid4().hex
         logger.info("start_vision_processing called job_id=%s [%s]", job_id, current_thread_info())
         try:
-            config = self.config_manager.load(require_api_key=False)
+            config = self.config_manager.load()
         except ConfigError as exc:
             self._answer_window.show_error(str(exc))
             self._restore_idle()
             self.processing_finished.emit()
             return
 
-        deepseek_service = DeepSeekService(config)
+        analysis_service = AnalysisService(config)
         thread = QThread(self)
         thread.setObjectName("VisionProcessingThread")
         thread.setProperty("processing_job_id", job_id)
-        worker = VisionProcessingWorker(image, deepseek_service, job_id)
+        worker = VisionProcessingWorker(image, analysis_service, job_id)
         worker.moveToThread(thread)
 
         thread.started.connect(self._on_thread_started)
@@ -1449,7 +1449,7 @@ class MainWindow(QWidget):
         if self._local_ocr_session.is_running() or self._local_ocr_session.capability_unsupported:
             return
         try:
-            config = self.config_manager.load(require_api_key=False)
+            config = self.config_manager.load()
         except ConfigError:
             return
         if config.ocr_provider != "local" or not self._component_manager.is_installed():
@@ -1501,7 +1501,7 @@ class MainWindow(QWidget):
 
     def _schedule_or_stop_local_ocr(self) -> None:
         try:
-            config = self.config_manager.load(require_api_key=False)
+            config = self.config_manager.load()
         except ConfigError:
             return
         if config.ocr_provider == "local":
@@ -1513,7 +1513,7 @@ class MainWindow(QWidget):
         if self._local_ocr_session.is_busy():
             return
         try:
-            config = self.config_manager.load(require_api_key=False)
+            config = self.config_manager.load()
         except ConfigError:
             return
         if config.ocr_provider != "local":

@@ -25,7 +25,7 @@ from scripts.profile_local_ocr import median_ms
 
 
 def test_factory_returns_local_provider_by_default() -> None:
-    provider = create_ocr_provider(AppConfig(api_key="test", ocr_language="en"))
+    provider = create_ocr_provider(AppConfig(ocr_language="en"))
 
     assert isinstance(provider, LocalOCRProvider)
     assert provider.language == "en"
@@ -37,7 +37,7 @@ def test_factory_injects_shared_local_session_without_starting_it(tmp_path) -> N
     session = LocalOCRSession(executable=executable)
 
     provider = create_ocr_provider(
-        AppConfig(api_key="test", ocr_provider="local"),
+        AppConfig(ocr_provider="local"),
         local_ocr_session=session,
     )
 

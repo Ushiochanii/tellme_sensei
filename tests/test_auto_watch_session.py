@@ -25,7 +25,7 @@ class _Config:
     def __init__(self, repo):
         self.settings_repository = repo
         self.calls = 0
-    def load(self, require_api_key=False):
+    def load(self):
         self.calls += 1
         return object()
 

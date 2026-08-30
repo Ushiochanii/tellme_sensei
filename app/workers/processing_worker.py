@@ -1,4 +1,4 @@
-"""QThread worker for cancellable OCR and DeepSeek processing."""
+"""QThread worker for cancellable OCR and AI processing."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 from app.ocr.base import OCRProvider
 from app.ocr.types import OCRCancelled, OCRError, OCRLine, OCRResult
 from app.pipeline import PipelineError, PipelineResult
-from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
+from app.ai.errors import AIProviderError, AIRequestCancelled
 from app.thread_info import current_thread_info
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class ProcessingWorker(QObject):
         self,
         image: Any | None,
         ocr_service: OCRProvider,
-        deepseek_service: DeepSeekService,
+        analysis_service,
         ocr_text: str | None = None,
         job_id: str | None = None,
         cancel_event: threading.Event | None = None,
@@ -54,7 +54,7 @@ class ProcessingWorker(QObject):
         super().__init__()
         self.image = image
         self.ocr_service = ocr_service
-        self.deepseek_service = deepseek_service
+        self.analysis_service = analysis_service
         self.job_id = job_id or uuid.uuid4().hex
         self._ocr_text = ocr_text
         self._cancel_event = cancel_event or threading.Event()
@@ -126,9 +126,9 @@ class ProcessingWorker(QObject):
             result = PipelineResult(ocr=ocr_result, answer=answer)
             self.result_ready.emit(result)
             self.job_result_ready.emit(self.job_id, result)
-        except (ProcessingCancelled, OCRCancelled, DeepSeekCancelled):
+        except (ProcessingCancelled, OCRCancelled, AIRequestCancelled):
             self._emit_cancelled()
-        except (OCRError, DeepSeekError, PipelineError) as exc:
+        except (OCRError, AIProviderError, PipelineError) as exc:
             logger.error("GUI processing failed job_id=%s: %s [%s]", self.job_id, exc, current_thread_info())
             self.error_occurred.emit(str(exc))
             self.job_error_occurred.emit(self.job_id, str(exc))
@@ -154,7 +154,7 @@ class ProcessingWorker(QObject):
         self.cancelled.emit(self.job_id)
 
     def _analyze_with_cancellation(self, text: str) -> str:
-        analyze = self.deepseek_service.analyze
+        analyze = self.analysis_service.analyze
         try:
             parameters = inspect.signature(analyze).parameters
             accepts_cancel = "cancel_event" in parameters or any(

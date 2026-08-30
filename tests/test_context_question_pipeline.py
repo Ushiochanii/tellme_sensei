@@ -20,9 +20,10 @@ from app.auto_watch import (
     compose_context_question_image,
 )
 from app.config import AppConfig
+from app.ai.models import AIBackendConfig
 from app.ocr.types import OCRLine, OCRResult
 from app.pipeline import ContextQuestionPipelineResult
-from app.services.deepseek_service import DeepSeekService
+from app.ai.service import AnalysisService
 from app.workers.context_question_processing_worker import ContextQuestionProcessingWorker
 from app.workers.vision_processing_worker import VisionProcessingWorker
 
@@ -301,7 +302,10 @@ def test_deepseek_context_question_request_preserves_semantic_sections() -> None
             completions=SimpleNamespace(create=lambda **kwargs: setattr(client, "kwargs", kwargs) or stream)
         )
     )
-    service = DeepSeekService(AppConfig(api_key="test"), client=client)
+    service = AnalysisService(
+        AppConfig(text_ai=AIBackendConfig(api_key="test")),
+        client=client,
+    )
 
     assert service.analyze_context_question("common context", "current question") == "structured answer"
 
@@ -315,8 +319,8 @@ def test_deepseek_context_question_request_preserves_semantic_sections() -> None
 def test_dispatcher_routes_dual_vision_through_existing_worker_once() -> None:
     service = _VisionService()
     dispatcher = AnalysisDispatcher(
-        config=AppConfig(api_key="test"),
-        deepseek_service=service,
+        config=AppConfig(),
+        analysis_service=service,
     )
     request = ContextQuestionAnalysisRequest(
         10,
@@ -340,8 +344,8 @@ def test_dispatcher_routes_dual_vision_through_existing_worker_once() -> None:
 def test_dispatcher_routes_dual_text_to_dedicated_worker_and_shared_cache() -> None:
     cache = ContextOCRCache()
     dispatcher = AnalysisDispatcher(
-        config=AppConfig(api_key="test"),
-        deepseek_service=_RecordingContextQuestionAI(),
+        config=AppConfig(),
+        analysis_service=_RecordingContextQuestionAI(),
         ocr_provider=_RecordingOCR(),
         context_ocr_cache=cache,
     )

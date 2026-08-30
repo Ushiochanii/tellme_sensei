@@ -9,7 +9,7 @@ from pathlib import Path
 from app.config import ConfigError, ConfigManager
 from app.logging_config import configure_logging
 from app.pipeline import PipelineError, StudyPipeline
-from app.services.deepseek_service import DeepSeekService
+from app.ai.service import AnalysisService
 from app.services.ocr_service import OCRService
 
 
@@ -21,7 +21,7 @@ def main() -> int:
     try:
         config = ConfigManager().load()
         result = StudyPipeline(
-            OCRService(language=config.ocr_language), DeepSeekService(config)
+            OCRService(language=config.ocr_language), AnalysisService(config)
         ).run(args.image)
     except (ConfigError, PipelineError) as exc:
         print(f"测试失败：{exc}", file=sys.stderr)

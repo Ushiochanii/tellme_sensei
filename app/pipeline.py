@@ -9,7 +9,7 @@ from typing import Any
 
 from app.ocr.base import OCRProvider
 from app.ocr.types import OCRError, OCRResult
-from app.services.deepseek_service import DeepSeekError, DeepSeekService
+from app.ai.errors import AIProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +40,9 @@ class ContextQuestionPipelineResult:
 class StudyPipeline:
     """Coordinate OCR and DeepSeek without coupling either service to the CLI."""
 
-    def __init__(self, ocr_service: OCRProvider, deepseek_service: DeepSeekService) -> None:
+    def __init__(self, ocr_service: OCRProvider, analysis_service) -> None:
         self.ocr_service = ocr_service
-        self.deepseek_service = deepseek_service
+        self.analysis_service = analysis_service
 
     def run(self, image: str | Path | Any) -> PipelineResult:
         try:
@@ -53,7 +53,7 @@ class StudyPipeline:
             raise PipelineError("没有识别到有效文字，请重新截取题目区域。")
 
         try:
-            answer = self.deepseek_service.analyze(ocr_result.text)
-        except DeepSeekError as exc:
+            answer = self.analysis_service.analyze(ocr_result.text)
+        except AIProviderError as exc:
             raise PipelineError(str(exc)) from exc
         return PipelineResult(ocr=ocr_result, answer=answer)

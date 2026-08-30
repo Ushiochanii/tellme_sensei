@@ -1,4 +1,4 @@
-"""QThread worker for direct screenshot analysis through DeepSeek Vision."""
+"""QThread worker for direct screenshot analysis through Vision AI."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 from PySide6.QtCore import QBuffer, QObject, QIODevice, Signal, Slot
 from PySide6.QtGui import QImage
 
-from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
+from app.ai.errors import AIProviderError, AIRequestCancelled
 from app.thread_info import current_thread_info
 
 logger = logging.getLogger(__name__)
@@ -31,13 +31,13 @@ class VisionProcessingWorker(QObject):
     def __init__(
         self,
         image: QImage,
-        deepseek_service: DeepSeekService,
+        analysis_service,
         job_id: str,
         cancel_event: threading.Event | None = None,
     ) -> None:
         super().__init__()
         self.image = image
-        self.deepseek_service = deepseek_service
+        self.analysis_service = analysis_service
         self.job_id = job_id
         self._cancel_event = cancel_event or threading.Event()
         self._cancelled_emitted = False
@@ -63,16 +63,16 @@ class VisionProcessingWorker(QObject):
             )
             self.ai_started.emit()
             self.job_ai_started.emit(self.job_id)
-            answer = self.deepseek_service.analyze_image(
+            answer = self.analysis_service.analyze_image(
                 image_bytes,
                 cancel_event=self._cancel_event,
             )
             self._raise_if_cancelled()
             self.result_ready.emit(answer)
             self.job_result_ready.emit(self.job_id, answer)
-        except DeepSeekCancelled:
+        except AIRequestCancelled:
             self._emit_cancelled()
-        except DeepSeekError as exc:
+        except AIProviderError as exc:
             logger.error("Vision analysis failed job_id=%s: %s", self.job_id, exc)
             self.error_occurred.emit(str(exc))
             self.job_error_occurred.emit(self.job_id, str(exc))
@@ -87,7 +87,7 @@ class VisionProcessingWorker(QObject):
 
     def _raise_if_cancelled(self) -> None:
         if self._cancel_event.is_set():
-            raise DeepSeekCancelled("DeepSeek request cancelled")
+            raise AIRequestCancelled("AI request cancelled")
 
     def _emit_cancelled(self) -> None:
         if self._cancelled_emitted:
@@ -98,13 +98,13 @@ class VisionProcessingWorker(QObject):
     @staticmethod
     def encode_png(image: Any) -> bytes:
         if not isinstance(image, QImage) or image.isNull():
-            raise DeepSeekError("截图内容为空，无法进行 Vision 分析。")
+            raise AIProviderError("截图内容为空，无法进行 Vision 分析。")
         buffer = QBuffer()
         if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
-            raise DeepSeekError("无法编码 Vision 截图。")
+            raise AIProviderError("无法编码 Vision 截图。")
         try:
             if not image.save(buffer, "PNG"):
-                raise DeepSeekError("无法编码 Vision 截图。")
+                raise AIProviderError("无法编码 Vision 截图。")
             return bytes(buffer.data())
         finally:
             buffer.close()

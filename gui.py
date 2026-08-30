@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config_manager = ConfigManager()
     try:
-        startup_config = config_manager.load(require_api_key=False)
+        startup_config = config_manager.load()
         startup_shortcut = startup_config.global_shortcut
         startup_vision_shortcut = startup_config.vision_global_shortcut
         startup_watch_shortcut = startup_config.watch_global_shortcut

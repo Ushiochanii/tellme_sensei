@@ -76,10 +76,9 @@ def _success_payload() -> dict:
 
 
 def test_factory_defaults_to_local_and_can_create_google() -> None:
-    assert isinstance(create_ocr_provider(AppConfig(api_key="x")), LocalOCRProvider)
+    assert isinstance(create_ocr_provider(AppConfig()), LocalOCRProvider)
     provider = create_ocr_provider(
         AppConfig(
-            api_key="x",
             ocr_provider="google_vision",
             google_vision_api_key="google-key",
         )
@@ -89,7 +88,7 @@ def test_factory_defaults_to_local_and_can_create_google() -> None:
 
 def test_factory_rejects_unknown_provider() -> None:
     with pytest.raises(ConfigError, match="Unsupported OCR provider"):
-        create_ocr_provider(AppConfig(api_key="x", ocr_provider="unknown"))
+        create_ocr_provider(AppConfig(ocr_provider="unknown"))
 
 
 def test_request_uses_header_and_document_detection(qt_app) -> None:

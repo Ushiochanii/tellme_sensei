@@ -70,7 +70,7 @@ class ContextQuestionAutoWatchSession(QObject):
             context_ocr_cache = getattr(dispatcher, "context_ocr_cache", None)
         self.context_ocr_cache = context_ocr_cache or ContextOCRCache()
 
-        config = self.config_manager.load(require_api_key=False)
+        config = self.config_manager.load()
         self._interface_language = normalize_language(
             getattr(config, "interface_language", DEFAULT_INTERFACE_LANGUAGE),
             default=DEFAULT_INTERFACE_LANGUAGE,

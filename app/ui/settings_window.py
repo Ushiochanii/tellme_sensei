@@ -57,7 +57,9 @@ from app.platform.hotkey import HotkeySpec, HotkeySpecError, validate_unique_sho
 from app.ocr.providers.google_vision import GoogleVisionOCRProvider
 from app.ocr.types import OCRCancelled, OCRError
 from app.platform.ocr import is_local_ocr_supported
-from app.services.deepseek_service import DeepSeekCancelled, DeepSeekError, DeepSeekService
+from app.ai.errors import AIProviderError, AIRequestCancelled
+from app.ai.models import AIBackendConfig
+from app.ai.service import AnalysisService
 from app.settings.secret_store import SecretStoreError
 from app.auto_watch.models import AutoWatchSettings
 from app.ui.theme import settings_window_stylesheet
@@ -84,7 +86,7 @@ GOOGLE_VISION_ENV_OVERRIDE_MESSAGE = (
 
 
 class ConnectionTestWorker(QObject):
-    """Run one minimal DeepSeek request outside the Qt GUI thread."""
+    """Run one minimal AI request outside the Qt GUI thread."""
 
     succeeded = Signal()
     failed = Signal(str)
@@ -98,12 +100,12 @@ class ConnectionTestWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            DeepSeekService(self.config).test_connection(self.cancel_event)
+            AnalysisService(self.config).test_connection(self.cancel_event)
             if not self.cancel_event.is_set():
                 self.succeeded.emit()
-        except DeepSeekCancelled:
+        except AIRequestCancelled:
             pass
-        except DeepSeekError as exc:
+        except AIProviderError as exc:
             self.failed.emit(str(exc))
         except Exception:
             logger.exception("settings connection test failed")
@@ -1187,9 +1189,9 @@ class SettingsWindow(QWidget):
 
     def _load_current_values(self) -> None:
         try:
-            config = self.config_manager.load(require_api_key=False)
+            config = self.config_manager.load()
         except ConfigError:
-            config = AppConfig(api_key="")
+            config = AppConfig()
         self._loaded_interface_language = normalize_language(
             getattr(config, "interface_language", DEFAULT_INTERFACE_LANGUAGE),
             default=DEFAULT_INTERFACE_LANGUAGE,
@@ -1205,9 +1207,9 @@ class SettingsWindow(QWidget):
             combo.blockSignals(True)
             combo.setCurrentIndex(max(0, combo.findData(value)))
             combo.blockSignals(False)
-        self._loaded_api_key = config.api_key
+        self._loaded_api_key = config.text_ai.api_key
         self._loaded_google_vision_api_key = config.google_vision_api_key
-        self.api_key_edit.setText(config.api_key)
+        self.api_key_edit.setText(config.text_ai.api_key)
         self.google_vision_api_key_edit.setText(config.google_vision_api_key)
         google_env_override = self.config_manager.has_explicit_google_vision_api_key()
         self.google_vision_api_key_edit.setReadOnly(google_env_override)
@@ -1215,8 +1217,9 @@ class SettingsWindow(QWidget):
         self.google_vision_override_label.setVisible(google_env_override)
         api_env_override = self.config_manager.has_explicit_api_key()
         self.api_key_override_label.setVisible(api_env_override)
-        self.model_edit.setText(config.model)
-        self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
+        self.model_edit.setText(config.text_ai.model_id)
+        request_timeout = config.text_ai.request_timeout
+        self.timeout_edit.setText(str(int(request_timeout) if request_timeout.is_integer() else request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
         self.vision_shortcut_edit.setKeySequence(QKeySequence(config.vision_global_shortcut))
         self.watch_shortcut_edit.setKeySequence(QKeySequence(config.watch_global_shortcut))
@@ -1570,12 +1573,23 @@ class SettingsWindow(QWidget):
             )
         except HotkeySpecError as exc:
             raise ValueError(self._tr("settings.validation_shortcuts")) from exc
-        current = self.config_manager.load(require_api_key=False)
+        current = self.config_manager.load()
+        api_key = self.api_key_edit.text().strip()
         return AppConfig(
-            api_key=self.api_key_edit.text().strip(),
-            model=model,
-            base_url=current.base_url,
-            request_timeout=request_timeout,
+            text_ai=AIBackendConfig(
+                provider_id=current.text_ai.provider_id,
+                model_id=model,
+                api_key=api_key,
+                base_url=current.text_ai.base_url,
+                request_timeout=request_timeout,
+            ),
+            vision_ai=AIBackendConfig(
+                provider_id=current.vision_ai.provider_id,
+                model_id=current.vision_ai.model_id,
+                api_key=api_key,
+                base_url=current.vision_ai.base_url,
+                request_timeout=request_timeout,
+            ),
             ocr_language=current.ocr_language,
             global_shortcut=global_shortcut,
             vision_global_shortcut=vision_shortcut,
@@ -1610,11 +1624,21 @@ class SettingsWindow(QWidget):
         except (ConfigError, ValueError) as exc:
             self._set_status(str(exc))
             return
-        if not config.api_key:
+        if not config.text_ai.api_key:
             self._set_status(self._tr("settings.enter_api_key"))
             return
 
-        config = replace(config, request_timeout=min(config.request_timeout, CONNECTION_TEST_TIMEOUT))
+        config = replace(
+            config,
+            text_ai=replace(
+                config.text_ai,
+                request_timeout=min(config.text_ai.request_timeout, CONNECTION_TEST_TIMEOUT),
+            ),
+            vision_ai=replace(
+                config.vision_ai,
+                request_timeout=min(config.vision_ai.request_timeout, CONNECTION_TEST_TIMEOUT),
+            ),
+        )
         self._close_requested = False
         self._connection_cancel_event = threading.Event()
         worker = ConnectionTestWorker(config, self._connection_cancel_event)
@@ -1662,7 +1686,7 @@ class SettingsWindow(QWidget):
             self._set_status(self._tr("settings.wait_operation_before_google"))
             return
         try:
-            config = self.config_manager.load(require_api_key=False)
+            config = self.config_manager.load()
         except ConfigError as exc:
             self.google_vision_status_label.setText(str(exc))
             return
@@ -1761,7 +1785,9 @@ class SettingsWindow(QWidget):
             if not self.config_manager.has_explicit_ocr_provider():
                 provider_to_save = config.ocr_provider
             api_key_to_save = (
-                config.api_key if config.api_key != self._loaded_api_key else None
+                config.text_ai.api_key
+                if config.text_ai.api_key != self._loaded_api_key
+                else None
             )
             google_key_to_save = None
             if not self.config_manager.has_explicit_google_vision_api_key():
@@ -1769,8 +1795,8 @@ class SettingsWindow(QWidget):
                     google_key_to_save = config.google_vision_api_key
             self.config_manager.save_settings(
                 api_key_to_save,
-                config.model,
-                config.request_timeout,
+                config.text_ai.model_id,
+                config.text_ai.request_timeout,
                 config.global_shortcut,
                 vision_global_shortcut=config.vision_global_shortcut,
                 watch_global_shortcut=config.watch_global_shortcut,

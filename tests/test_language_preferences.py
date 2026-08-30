@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 from app.config import AppConfig, ConfigManager
+from app.ai.models import AIBackendConfig, DEFAULT_DEEPSEEK_VISION_MODEL
 from app.localization import (
     CATALOGS,
     DEFAULT_ANSWER_LANGUAGE,
@@ -11,7 +12,7 @@ from app.localization import (
     answer_language_headings,
     answer_language_instruction,
 )
-from app.services.deepseek_service import DeepSeekService
+from app.ai.service import AnalysisService
 from app.settings.repository import SettingsRepository
 from app.ui.answer_window import AnswerWindow
 from app.ui.main_window import MainWindow
@@ -116,7 +117,7 @@ def test_config_carries_languages_without_changing_ocr_settings(tmp_path) -> Non
     config = ConfigManager(
         project_root=tmp_path,
         settings_repository=repository,
-    ).load(require_api_key=False)
+    ).load()
 
     assert config.interface_language == "zh-CN"
     assert config.answer_language == "en"
@@ -160,8 +161,15 @@ def test_all_deepseek_prompt_paths_carry_answer_language_contract() -> None:
             lambda service: service.analyze_image(image_bytes),
         ):
             client = _Client()
-            service = DeepSeekService(
-                AppConfig(api_key="test", answer_language=language),
+            service = AnalysisService(
+                AppConfig(
+                    text_ai=AIBackendConfig(api_key="test"),
+                    vision_ai=AIBackendConfig(
+                        api_key="test",
+                        model_id=DEFAULT_DEEPSEEK_VISION_MODEL,
+                    ),
+                    answer_language=language,
+                ),
                 client=client,
             )
             invoke(service)
