@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizeGrip,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -284,6 +285,20 @@ class AnswerWindow(QWidget):
         self.answer_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         answer_layout.addWidget(self.answer_edit, 1)
         body_layout.addWidget(answer_card, 5)
+
+        pair_card_policy = QSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Ignored,
+        )
+        pair_edit_policy = QSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Ignored,
+        )
+        for card in (context_ocr_card, question_ocr_card, answer_card):
+            card.setSizePolicy(pair_card_policy)
+        for edit in (self.context_ocr_edit, self.question_ocr_edit, self.answer_edit):
+            edit.setSizePolicy(pair_edit_policy)
+
         surface_layout.addWidget(body, 1)
 
         footer = QWidget()
