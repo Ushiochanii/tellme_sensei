@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Mapping
 
 from dotenv import dotenv_values
 
@@ -16,6 +17,7 @@ from app.ai.models import (
     DEFAULT_DEEPSEEK_VISION_MODEL,
     DEFAULT_REQUEST_TIMEOUT,
 )
+from app.ai.catalog import default_model, get_provider_descriptor
 from app.localization import (
     DEFAULT_ANSWER_LANGUAGE,
     DEFAULT_INTERFACE_LANGUAGE,
@@ -88,10 +90,38 @@ class ConfigManager:
         self.settings_repository = settings_repository or SettingsRepository(config_path)
         self.secret_store = secret_store or SecretStore()
 
-    def has_explicit_api_key(self) -> bool:
-        """Return whether a real OS environment variable overrides stored settings."""
+    def has_explicit_provider_api_key(self, provider_id: str) -> bool:
+        """Return whether an OS environment variable overrides one provider key."""
 
-        return bool(os.environ.get("DEEPSEEK_API_KEY", "").strip())
+        try:
+            environment_name = get_provider_descriptor(provider_id).api_key_env
+        except ValueError:
+            return False
+        return bool(self._os_value(environment_name))
+
+    def get_provider_api_key(self, provider_id: str) -> str:
+        """Resolve one provider key using the same precedence as ``load``."""
+
+        dotenv_config = self._read_dotenv_values()
+        return self._resolve_provider_api_key(provider_id, dotenv_config)
+
+    def get_provider_base_url(self, provider_id: str) -> str:
+        """Resolve one provider endpoint using the same precedence as ``load``."""
+
+        return self._resolve_provider_base_url(
+            provider_id,
+            self._read_dotenv_values(),
+            self.settings_repository.load(),
+        )
+
+    def has_explicit_provider_base_url(self, provider_id: str) -> bool:
+        """Return whether an OS endpoint override is active for a provider."""
+
+        try:
+            get_provider_descriptor(provider_id)
+        except ValueError:
+            return False
+        return bool(self._os_value(f"{str(provider_id).strip().upper()}_BASE_URL"))
 
     def has_explicit_google_vision_api_key(self) -> bool:
         return bool(os.environ.get("GOOGLE_VISION_API_KEY", "").strip())
@@ -107,24 +137,21 @@ class ConfigManager:
         dotenv_config = self._read_dotenv_values()
         saved_settings = self.settings_repository.load()
 
-        api_key = self._os_value("DEEPSEEK_API_KEY")
-        if api_key is None:
-            api_key = self.secret_store.get_api_key()
-        if not api_key:
-            api_key = self._file_value(dotenv_config, "DEEPSEEK_API_KEY") or ""
-
         try:
             request_timeout = float(
-                self._os_value("DEEPSEEK_TIMEOUT")
+                self._os_value("AI_REQUEST_TIMEOUT")
+                or self._os_value("DEEPSEEK_TIMEOUT")
                 or saved_settings.get(
                     "request_timeout",
-                    self._file_value(dotenv_config, "DEEPSEEK_TIMEOUT") or 60,
+                    self._file_value(dotenv_config, "AI_REQUEST_TIMEOUT")
+                    or self._file_value(dotenv_config, "DEEPSEEK_TIMEOUT")
+                    or DEFAULT_REQUEST_TIMEOUT,
                 )
             )
         except (TypeError, ValueError) as exc:
-            raise ConfigError("DEEPSEEK_TIMEOUT 必须是正数") from exc
+            raise ConfigError("AI request timeout 必须是正数") from exc
         if request_timeout <= 0:
-            raise ConfigError("DEEPSEEK_TIMEOUT 必须是正数")
+            raise ConfigError("AI request timeout 必须是正数")
 
         try:
             online_ocr_timeout = float(
@@ -197,36 +224,40 @@ class ConfigManager:
             saved_settings,
             DEFAULT_DEEPSEEK_PROVIDER,
         )
-        text_model = self._resolve_text_model(dotenv_config, saved_settings)
-        vision_model = self._resolve_ai_selection(
-            "VISION_AI_MODEL",
-            "vision_ai_model",
+        try:
+            get_provider_descriptor(text_provider)
+            get_provider_descriptor(vision_provider)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+        text_model = self._resolve_model(
+            text_provider,
+            "text",
             dotenv_config,
             saved_settings,
-            DEFAULT_DEEPSEEK_VISION_MODEL,
-            lowercase=False,
         )
-        legacy_base_url = (
-            self._os_value("DEEPSEEK_BASE_URL")
-            or saved_settings.get("base_url")
-            or self._file_value(dotenv_config, "DEEPSEEK_BASE_URL")
-            or DEFAULT_DEEPSEEK_BASE_URL
+        vision_model = self._resolve_model(
+            vision_provider,
+            "vision",
+            dotenv_config,
+            saved_settings,
+        )
+        text_backend = self._backend_config(
+            text_provider,
+            text_model,
+            dotenv_config,
+            saved_settings,
+            request_timeout,
+        )
+        vision_backend = self._backend_config(
+            vision_provider,
+            vision_model,
+            dotenv_config,
+            saved_settings,
+            request_timeout,
         )
         return AppConfig(
-            text_ai=AIBackendConfig(
-                provider_id=text_provider,
-                model_id=text_model,
-                api_key=api_key,
-                base_url=str(legacy_base_url),
-                request_timeout=request_timeout,
-            ),
-            vision_ai=AIBackendConfig(
-                provider_id=vision_provider,
-                model_id=vision_model,
-                api_key=api_key,
-                base_url=str(legacy_base_url),
-                request_timeout=request_timeout,
-            ),
+            text_ai=text_backend,
+            vision_ai=vision_backend,
             ocr_language=(
                 self._os_value("OCR_LANGUAGE")
                 or saved_settings.get(
@@ -253,23 +284,117 @@ class ConfigManager:
             ),
         )
 
-    def _resolve_text_model(
+    def _resolve_model(
         self,
+        provider_id: str,
+        capability: str,
         dotenv_config: dict[str, str],
         saved_settings: dict[str, object],
     ) -> str:
-        """Resolve the new Text model before falling back to DeepSeek values."""
+        """Resolve capability-specific model settings and DeepSeek upgrades."""
 
-        value = (
-            self._os_value("TEXT_AI_MODEL")
-            or saved_settings.get("text_ai_model")
-            or self._file_value(dotenv_config, "TEXT_AI_MODEL")
-            or self._os_value("DEEPSEEK_MODEL")
-            or saved_settings.get("model")
-            or self._file_value(dotenv_config, "DEEPSEEK_MODEL")
-            or DEFAULT_DEEPSEEK_TEXT_MODEL
+        environment_name = (
+            "TEXT_AI_MODEL" if capability == "text" else "VISION_AI_MODEL"
         )
-        return str(value).strip() or DEFAULT_DEEPSEEK_TEXT_MODEL
+        setting_name = (
+            "text_ai_model" if capability == "text" else "vision_ai_model"
+        )
+        selected = (
+            self._os_value(environment_name)
+            or saved_settings.get(setting_name)
+            or self._file_value(dotenv_config, environment_name)
+        )
+        if selected is None and provider_id == DEFAULT_DEEPSEEK_PROVIDER:
+            if capability == "text":
+                selected = (
+                    self._os_value("DEEPSEEK_MODEL")
+                    or saved_settings.get("model")
+                    or self._file_value(dotenv_config, "DEEPSEEK_MODEL")
+                )
+        if selected is not None and str(selected).strip():
+            return str(selected).strip()
+        if provider_id == DEFAULT_DEEPSEEK_PROVIDER:
+            return (
+                DEFAULT_DEEPSEEK_TEXT_MODEL
+                if capability == "text"
+                else DEFAULT_DEEPSEEK_VISION_MODEL
+            )
+        return default_model(provider_id, capability)  # type: ignore[arg-type]
+
+    def _backend_config(
+        self,
+        provider_id: str,
+        model_id: str,
+        dotenv_config: dict[str, str],
+        saved_settings: dict[str, object],
+        request_timeout: float,
+    ) -> AIBackendConfig:
+        return AIBackendConfig(
+            provider_id=provider_id,
+            model_id=model_id,
+            api_key=self._resolve_provider_api_key(provider_id, dotenv_config),
+            base_url=self._resolve_provider_base_url(
+                provider_id,
+                dotenv_config,
+                saved_settings,
+            ),
+            request_timeout=request_timeout,
+        )
+
+    def _resolve_provider_api_key(
+        self,
+        provider_id: str,
+        dotenv_config: dict[str, str],
+    ) -> str:
+        descriptor = get_provider_descriptor(provider_id)
+        value = self._os_value(descriptor.api_key_env)
+        if value is None:
+            getter = getattr(self.secret_store, "get_provider_api_key", None)
+            if callable(getter):
+                value = getter(provider_id)
+            elif provider_id == DEFAULT_DEEPSEEK_PROVIDER:
+                legacy_getter = getattr(self.secret_store, "get_api_key", None)
+                value = legacy_getter() if callable(legacy_getter) else ""
+                if not value:
+                    generic = getattr(self.secret_store, "get_secret", None)
+                    value = (
+                        generic(descriptor.secret_account_name)
+                        if callable(generic)
+                        else ""
+                    )
+            else:
+                generic = getattr(self.secret_store, "get_secret", None)
+                value = (
+                    generic(descriptor.secret_account_name)
+                    if callable(generic)
+                    else ""
+                )
+        if not value:
+            value = self._file_value(dotenv_config, descriptor.api_key_env) or ""
+        return value.strip() if isinstance(value, str) else ""
+
+    def _resolve_provider_base_url(
+        self,
+        provider_id: str,
+        dotenv_config: dict[str, str],
+        saved_settings: dict[str, object],
+    ) -> str:
+        descriptor = get_provider_descriptor(provider_id)
+        normalized_provider_id = descriptor.provider_id
+        endpoint_key = f"{normalized_provider_id}_base_url"
+        value = self._os_value(f"{normalized_provider_id.upper()}_BASE_URL")
+        if value is None:
+            value = saved_settings.get(endpoint_key)
+        if value is None and normalized_provider_id == DEFAULT_DEEPSEEK_PROVIDER:
+            value = saved_settings.get("base_url")
+        if value is None:
+            value = self._file_value(
+                dotenv_config,
+                f"{normalized_provider_id.upper()}_BASE_URL",
+            )
+        if value is None and normalized_provider_id == DEFAULT_DEEPSEEK_PROVIDER:
+            value = self._file_value(dotenv_config, "DEEPSEEK_BASE_URL")
+        return str(value).strip() if value and str(value).strip() else descriptor.default_base_url
 
     def _resolve_ai_selection(
         self,
@@ -360,11 +485,15 @@ class ConfigManager:
 
     def save_settings(
         self,
-        api_key: str | None,
-        model: str,
+        *,
+        text_ai_provider: str,
+        text_ai_model: str,
+        vision_ai_provider: str,
+        vision_ai_model: str,
         request_timeout: float,
         global_shortcut: str | None = None,
-        *,
+        provider_api_keys: Mapping[str, str | None] | None = None,
+        provider_base_urls: Mapping[str, str | None] | None = None,
         vision_global_shortcut: str | None = None,
         watch_global_shortcut: str | None = None,
         context_watch_global_shortcut: str | None = None,
@@ -373,30 +502,51 @@ class ConfigManager:
         online_ocr_timeout: float | None = None,
         interface_language: str | None = None,
         answer_language: str | None = None,
-        text_ai_provider: str | None = None,
-        text_ai_model: str | None = None,
-        vision_ai_provider: str | None = None,
-        vision_ai_model: str | None = None,
     ) -> None:
-        """Save settings; a None secret value leaves that stored secret unchanged."""
+        """Persist independent AI selections plus shared provider credentials."""
 
-        if api_key is not None:
-            if api_key.strip():
-                self.secret_store.set_api_key(api_key)
-            else:
-                self.secret_store.delete_api_key()
-        settings = {"model": model, "request_timeout": request_timeout}
-        for key, value in (
-            ("text_ai_provider", text_ai_provider),
-            ("text_ai_model", text_ai_model),
-            ("vision_ai_provider", vision_ai_provider),
-            ("vision_ai_model", vision_ai_model),
-        ):
-            if value is None:
-                continue
-            if not isinstance(value, str) or not value.strip():
+        try:
+            get_provider_descriptor(text_ai_provider)
+            get_provider_descriptor(vision_ai_provider)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+        settings: dict[str, object] = {
+            "text_ai_provider": str(text_ai_provider).strip().lower(),
+            "text_ai_model": str(text_ai_model).strip(),
+            "vision_ai_provider": str(vision_ai_provider).strip().lower(),
+            "vision_ai_model": str(vision_ai_model).strip(),
+        }
+        for key in ("text_ai_model", "vision_ai_model"):
+            if not isinstance(settings[key], str) or not settings[key]:
                 raise ConfigError(f"{key} 不能为空")
-            settings[key] = value.strip()
+        try:
+            timeout_value = float(request_timeout)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("AI request timeout 必须是正数") from exc
+        if timeout_value <= 0:
+            raise ConfigError("AI request timeout 必须是正数")
+        settings["request_timeout"] = timeout_value
+
+        if provider_base_urls:
+            for provider_id, endpoint in provider_base_urls.items():
+                try:
+                    get_provider_descriptor(provider_id)
+                except ValueError as exc:
+                    raise ConfigError(str(exc)) from exc
+                if endpoint is None:
+                    continue
+                if not isinstance(endpoint, str) or not endpoint.strip():
+                    raise ConfigError(f"{provider_id}_base_url 不能为空")
+                settings[f"{str(provider_id).strip().lower()}_base_url"] = endpoint.strip()
+        if provider_api_keys:
+            for provider_id, key in provider_api_keys.items():
+                try:
+                    get_provider_descriptor(provider_id)
+                except ValueError as exc:
+                    raise ConfigError(str(exc)) from exc
+                if key is None:
+                    continue
+                self._save_provider_api_key(provider_id, key)
         current_config = self.load()
         requested_shortcuts = (
             self._normalized_shortcut(
@@ -475,3 +625,43 @@ class ConfigManager:
                     if callable(generic_deleter):
                         generic_deleter("google-vision-api-key")
         self.settings_repository.update(settings)
+
+    def save_ai_settings(self, **kwargs: object) -> None:
+        """Named entry point for callers saving the independent AI cards."""
+
+        self.save_settings(**kwargs)
+
+    def _save_provider_api_key(self, provider_id: str, value: str) -> None:
+        normalized = str(provider_id).strip().lower()
+        if not isinstance(value, str):
+            raise ConfigError(f"{normalized} API Key must be a string")
+        if value.strip():
+            setter = getattr(self.secret_store, "set_provider_api_key", None)
+            if callable(setter):
+                setter(normalized, value)
+                return
+            if normalized == DEFAULT_DEEPSEEK_PROVIDER:
+                legacy = getattr(self.secret_store, "set_api_key", None)
+                if callable(legacy):
+                    legacy(value)
+                    return
+            generic = getattr(self.secret_store, "set_secret", None)
+            if callable(generic):
+                generic(get_provider_descriptor(normalized).secret_account_name, value)
+                return
+            raise ConfigError(f"Unable to save {normalized} API Key")
+
+        deleter = getattr(self.secret_store, "delete_provider_api_key", None)
+        if callable(deleter):
+            deleter(normalized)
+            return
+        if normalized == DEFAULT_DEEPSEEK_PROVIDER:
+            legacy = getattr(self.secret_store, "delete_api_key", None)
+            if callable(legacy):
+                legacy()
+                return
+        generic = getattr(self.secret_store, "delete_secret", None)
+        if callable(generic):
+            generic(get_provider_descriptor(normalized).secret_account_name)
+            return
+        raise ConfigError(f"Unable to delete {normalized} API Key")

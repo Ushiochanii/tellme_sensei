@@ -59,7 +59,13 @@ class SettingsRepository:
         timeout = raw.get("request_timeout")
         if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout > 0:
             settings["request_timeout"] = float(timeout)
-        for key in ("base_url", "ocr_language"):
+        for key in (
+            "base_url",
+            "deepseek_base_url",
+            "qwen_base_url",
+            "zai_base_url",
+            "ocr_language",
+        ):
             value = raw.get(key)
             if isinstance(value, str) and value.strip():
                 settings[key] = value.strip()
@@ -186,7 +192,13 @@ class SettingsRepository:
             if request_timeout <= 0:
                 raise ValueError("request_timeout 必须是正数")
             payload["request_timeout"] = request_timeout
-        for key in ("base_url", "ocr_language"):
+        for key in (
+            "base_url",
+            "deepseek_base_url",
+            "qwen_base_url",
+            "zai_base_url",
+            "ocr_language",
+        ):
             if key not in settings:
                 continue
             value = settings[key]

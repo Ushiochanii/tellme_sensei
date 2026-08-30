@@ -10,6 +10,13 @@ logger = logging.getLogger(__name__)
 SERVICE_NAME = "tellme-sensei"
 ACCOUNT_NAME = "default"
 GOOGLE_VISION_ACCOUNT_NAME = "google-vision-api-key"
+QWEN_ACCOUNT_NAME = "qwen"
+ZAI_ACCOUNT_NAME = "zai"
+AI_PROVIDER_ACCOUNT_NAMES = {
+    "deepseek": ACCOUNT_NAME,
+    "qwen": QWEN_ACCOUNT_NAME,
+    "zai": ZAI_ACCOUNT_NAME,
+}
 
 
 class SecretStoreError(RuntimeError):
@@ -41,7 +48,16 @@ class SecretStore:
     def get_api_key(self) -> str:
         """Return the legacy DeepSeek key from tellme-sensei/default."""
 
-        return self.get_secret(self.account_name)
+        return self.get_provider_api_key("deepseek")
+
+    def get_provider_api_key(self, provider_id: str) -> str:
+        """Return the key stored for one supported AI provider."""
+
+        normalized = str(provider_id).strip().lower()
+        account = self.account_name if normalized == "deepseek" else AI_PROVIDER_ACCOUNT_NAMES.get(normalized)
+        if account is None:
+            return ""
+        return self.get_secret(account)
 
     def get_google_vision_api_key(self) -> str:
         """Return the separately stored Google Vision key."""
@@ -62,7 +78,16 @@ class SecretStore:
     def set_api_key(self, value: str) -> None:
         """Store the legacy DeepSeek key without changing its account name."""
 
-        self.set_secret(self.account_name, value)
+        self.set_provider_api_key("deepseek", value)
+
+    def set_provider_api_key(self, provider_id: str, value: str) -> None:
+        """Store one provider key in its named account."""
+
+        normalized = str(provider_id).strip().lower()
+        account = self.account_name if normalized == "deepseek" else AI_PROVIDER_ACCOUNT_NAMES.get(normalized)
+        if account is None:
+            raise SecretStoreError(f"Unsupported AI provider: {provider_id}")
+        self.set_secret(account, value)
 
     def set_google_vision_api_key(self, value: str) -> None:
         self.set_secret(GOOGLE_VISION_ACCOUNT_NAME, value)
@@ -85,7 +110,16 @@ class SecretStore:
     def delete_api_key(self) -> None:
         """Delete only the legacy DeepSeek account."""
 
-        self.delete_secret(self.account_name)
+        self.delete_provider_api_key("deepseek")
+
+    def delete_provider_api_key(self, provider_id: str) -> None:
+        """Delete one provider key while leaving all other credentials intact."""
+
+        normalized = str(provider_id).strip().lower()
+        account = self.account_name if normalized == "deepseek" else AI_PROVIDER_ACCOUNT_NAMES.get(normalized)
+        if account is None:
+            raise SecretStoreError(f"Unsupported AI provider: {provider_id}")
+        self.delete_secret(account)
 
     def delete_google_vision_api_key(self) -> None:
         self.delete_secret(GOOGLE_VISION_ACCOUNT_NAME)

@@ -233,20 +233,24 @@ def settings_window_stylesheet() -> str:
         min-height: 9px; text-align: center;
     }}
     QProgressBar::chunk {{ background: {TEXT_ACCENT}; border-radius: 5px; }}
-    QPushButton#testConnectionButton, QPushButton#googleVisionTestButton,
+    QPushButton#testConnectionButton, QPushButton#testTextAIButton,
+    QPushButton#testVisionAIButton, QPushButton#googleVisionTestButton,
     QPushButton#downloadOcrButton, QPushButton#verifyOcrButton {{
         color: {TEXT_ACCENT}; background: #edf5ff; border: 1px solid #b9d1f5;
         border-radius: {RADIUS_MD}px; padding: 7px 12px; min-height: 24px;
     }}
-    QPushButton#testConnectionButton:hover, QPushButton#googleVisionTestButton:hover,
+    QPushButton#testConnectionButton:hover, QPushButton#testTextAIButton:hover,
+    QPushButton#testVisionAIButton:hover, QPushButton#googleVisionTestButton:hover,
     QPushButton#downloadOcrButton:hover, QPushButton#verifyOcrButton:hover {{
         background: #e1edff; border-color: {TEXT_ACCENT};
     }}
-    QPushButton#removeOcrButton, QPushButton#cancelDownloadButton {{
+    QPushButton#removeOcrButton, QPushButton#cancelDownloadButton,
+    QPushButton#cancelTextAIButton, QPushButton#cancelVisionAIButton {{
         color: {DANGER}; background: #fff1f4; border: 1px solid #efc5cc;
         border-radius: {RADIUS_MD}px; padding: 7px 12px; min-height: 24px;
     }}
-    QPushButton#removeOcrButton:hover, QPushButton#cancelDownloadButton:hover {{
+    QPushButton#removeOcrButton:hover, QPushButton#cancelDownloadButton:hover,
+    QPushButton#cancelTextAIButton:hover, QPushButton#cancelVisionAIButton:hover {{
         background: #ffe7eb; border-color: {DANGER};
     }}
     QPushButton#saveButton {{

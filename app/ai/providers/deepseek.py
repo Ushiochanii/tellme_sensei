@@ -21,6 +21,7 @@ class DeepSeekProvider(OpenAICompatibleProvider):
 
     provider_id = DEFAULT_DEEPSEEK_PROVIDER
     display_name = "DeepSeek"
+    default_base_url = "https://api.deepseek.com"
 
     def _extra_body(self, request: AIRequest) -> dict[str, Any] | None:
         if request.capability == "vision":
