@@ -41,8 +41,15 @@ def test_context_question_layout_prioritizes_usable_text_space(qt_app) -> None:
 
         assert window.answer_edit.height() > window.context_ocr_edit.height()
         assert window.context_ocr_edit.height() > window.question_ocr_edit.height()
-        assert window.question_ocr_edit.height() > 24
+        assert window.question_ocr_edit.height() >= 52
         assert window.question_ocr_section_label.isVisible()
+
+        # Answer keeps its stronger color, but all three section titles use
+        # the same typography contract.
+        assert window.answer_section_label.font().pointSizeF() == window.context_ocr_section_label.font().pointSizeF()
+        assert window.answer_section_label.font().weight() == window.context_ocr_section_label.font().weight()
+        assert window.question_ocr_section_label.font().pointSizeF() == window.context_ocr_section_label.font().pointSizeF()
+        assert window.question_ocr_section_label.font().weight() == window.context_ocr_section_label.font().weight()
 
         _assert_edit_fills_card(
             window.context_ocr_card,
