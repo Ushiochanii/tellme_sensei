@@ -9,10 +9,13 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from app.platform.hotkey import (
+    DEFAULT_CONTEXT_WATCH_SHORTCUT,
     DEFAULT_SHORTCUT,
     DEFAULT_VISION_SHORTCUT,
+    DEFAULT_WATCH_SHORTCUT,
     HotkeySpec,
     HotkeySpecError,
+    validate_unique_shortcuts,
 )
 from app.settings.repository import SettingsRepository
 from app.settings.secret_store import SecretStore
@@ -33,6 +36,8 @@ class AppConfig:
     ocr_language: str = "japan"
     global_shortcut: str = DEFAULT_SHORTCUT
     vision_global_shortcut: str = DEFAULT_VISION_SHORTCUT
+    watch_global_shortcut: str = DEFAULT_WATCH_SHORTCUT
+    context_watch_global_shortcut: str = DEFAULT_CONTEXT_WATCH_SHORTCUT
     ocr_provider: str = "local"
     google_vision_api_key: str = field(default="", repr=False)
     online_ocr_timeout: float = 15.0
@@ -123,6 +128,34 @@ class ConfigManager:
         if ocr_provider not in {"local", "google_vision"}:
             raise ConfigError(f"Unsupported OCR provider: {ocr_provider}")
 
+        shortcuts = self._normalized_shortcuts(
+            (
+                self._os_value("GLOBAL_SHORTCUT")
+                or saved_settings.get(
+                    "global_shortcut",
+                    self._file_value(dotenv_config, "GLOBAL_SHORTCUT") or DEFAULT_SHORTCUT,
+                ),
+                self._os_value("VISION_GLOBAL_SHORTCUT")
+                or saved_settings.get(
+                    "vision_global_shortcut",
+                    self._file_value(dotenv_config, "VISION_GLOBAL_SHORTCUT")
+                    or DEFAULT_VISION_SHORTCUT,
+                ),
+                self._os_value("WATCH_GLOBAL_SHORTCUT")
+                or saved_settings.get(
+                    "watch_global_shortcut",
+                    self._file_value(dotenv_config, "WATCH_GLOBAL_SHORTCUT")
+                    or DEFAULT_WATCH_SHORTCUT,
+                ),
+                self._os_value("CONTEXT_WATCH_GLOBAL_SHORTCUT")
+                or saved_settings.get(
+                    "context_watch_global_shortcut",
+                    self._file_value(dotenv_config, "CONTEXT_WATCH_GLOBAL_SHORTCUT")
+                    or DEFAULT_CONTEXT_WATCH_SHORTCUT,
+                ),
+            )
+        )
+
         return AppConfig(
             api_key=api_key,
             model=(
@@ -148,22 +181,10 @@ class ConfigManager:
                     self._file_value(dotenv_config, "OCR_LANGUAGE") or "japan",
                 )
             ),
-            global_shortcut=self._normalized_shortcut(
-                self._os_value("GLOBAL_SHORTCUT")
-                or saved_settings.get(
-                    "global_shortcut",
-                    self._file_value(dotenv_config, "GLOBAL_SHORTCUT") or DEFAULT_SHORTCUT,
-                )
-            ),
-            vision_global_shortcut=self._normalized_shortcut(
-                self._os_value("VISION_GLOBAL_SHORTCUT")
-                or saved_settings.get(
-                    "vision_global_shortcut",
-                    self._file_value(dotenv_config, "VISION_GLOBAL_SHORTCUT")
-                    or DEFAULT_VISION_SHORTCUT,
-                ),
-                default=DEFAULT_VISION_SHORTCUT,
-            ),
+            global_shortcut=shortcuts[0],
+            vision_global_shortcut=shortcuts[1],
+            watch_global_shortcut=shortcuts[2],
+            context_watch_global_shortcut=shortcuts[3],
             ocr_provider=ocr_provider,
             google_vision_api_key=google_vision_api_key,
             online_ocr_timeout=online_ocr_timeout,
@@ -184,6 +205,24 @@ class ConfigManager:
             return HotkeySpec.parse(value).canonical
         except (HotkeySpecError, TypeError):
             return default
+
+    @classmethod
+    def _normalized_shortcuts(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        """Normalize startup values while keeping every native registration unique."""
+
+        defaults = (
+            DEFAULT_SHORTCUT,
+            DEFAULT_VISION_SHORTCUT,
+            DEFAULT_WATCH_SHORTCUT,
+            DEFAULT_CONTEXT_WATCH_SHORTCUT,
+        )
+        normalized: list[str] = []
+        for value, default in zip(values, defaults, strict=True):
+            candidate = cls._normalized_shortcut(value, default=default)
+            if candidate in normalized:
+                candidate = next(fallback for fallback in defaults if fallback not in normalized)
+            normalized.append(candidate)
+        return tuple(normalized)
 
     def _read_dotenv_values(self) -> dict[str, str]:
         try:
@@ -214,6 +253,8 @@ class ConfigManager:
         global_shortcut: str | None = None,
         *,
         vision_global_shortcut: str | None = None,
+        watch_global_shortcut: str | None = None,
+        context_watch_global_shortcut: str | None = None,
         ocr_provider: str | None = None,
         google_vision_api_key: str | None = None,
         online_ocr_timeout: float | None = None,
@@ -226,13 +267,37 @@ class ConfigManager:
             else:
                 self.secret_store.delete_api_key()
         settings = {"model": model, "request_timeout": request_timeout}
-        if global_shortcut is not None:
-            settings["global_shortcut"] = self._normalized_shortcut(global_shortcut)
-        if vision_global_shortcut is not None:
-            settings["vision_global_shortcut"] = self._normalized_shortcut(
+        current_config = self.load(require_api_key=False)
+        requested_shortcuts = (
+            self._normalized_shortcut(
+                global_shortcut,
+                default=current_config.global_shortcut,
+            ) if global_shortcut is not None else current_config.global_shortcut,
+            self._normalized_shortcut(
                 vision_global_shortcut,
-                default=DEFAULT_VISION_SHORTCUT,
-            )
+                default=current_config.vision_global_shortcut,
+            ) if vision_global_shortcut is not None else current_config.vision_global_shortcut,
+            self._normalized_shortcut(
+                watch_global_shortcut,
+                default=current_config.watch_global_shortcut,
+            ) if watch_global_shortcut is not None else current_config.watch_global_shortcut,
+            self._normalized_shortcut(
+                context_watch_global_shortcut,
+                default=current_config.context_watch_global_shortcut,
+            ) if context_watch_global_shortcut is not None else current_config.context_watch_global_shortcut,
+        )
+        try:
+            validate_unique_shortcuts(requested_shortcuts)
+        except HotkeySpecError as exc:
+            raise ConfigError("快捷键不能重复") from exc
+        if global_shortcut is not None:
+            settings["global_shortcut"] = requested_shortcuts[0]
+        if vision_global_shortcut is not None:
+            settings["vision_global_shortcut"] = requested_shortcuts[1]
+        if watch_global_shortcut is not None:
+            settings["watch_global_shortcut"] = requested_shortcuts[2]
+        if context_watch_global_shortcut is not None:
+            settings["context_watch_global_shortcut"] = requested_shortcuts[3]
         if ocr_provider is not None:
             normalized_provider = ocr_provider.strip().lower()
             if normalized_provider not in {"local", "google_vision"}:

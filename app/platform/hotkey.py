@@ -7,8 +7,12 @@ from dataclasses import dataclass
 SUPPORTED_MODIFIERS = ("Ctrl", "Alt", "Shift")
 DEFAULT_SHORTCUT = "Ctrl+Shift+A"
 DEFAULT_VISION_SHORTCUT = "Ctrl+Shift+S"
+DEFAULT_WATCH_SHORTCUT = "Ctrl+Shift+W"
+DEFAULT_CONTEXT_WATCH_SHORTCUT = "Ctrl+Shift+C"
 TEXT_HOTKEY_ID = 0x5341
 VISION_HOTKEY_ID = 0x5342
+WATCH_HOTKEY_ID = 0x5343
+CONTEXT_WATCH_HOTKEY_ID = 0x5344
 _SUPPORTED_KEYS = {
     *"ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     *"0123456789",
@@ -57,3 +61,12 @@ class HotkeySpec:
             modifier for modifier in SUPPORTED_MODIFIERS if modifier in self.modifiers
         ]
         return "+".join([*ordered_modifiers, self.key])
+
+
+def validate_unique_shortcuts(shortcuts: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    """Return canonical shortcuts and reject duplicate registrations."""
+
+    canonical = tuple(HotkeySpec.parse(shortcut).canonical for shortcut in shortcuts)
+    if len(set(canonical)) != len(canonical):
+        raise HotkeySpecError("快捷键不能重复")
+    return canonical

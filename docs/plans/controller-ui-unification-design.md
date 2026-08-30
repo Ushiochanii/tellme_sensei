@@ -1,7 +1,17 @@
 # Floating Controller UI Unification Design
 
-Status: **Draft for design review**  
+Status: **Accepted; follow-up scope approved by user (2026-08-30)**
 Related Issue: **#25 — 统一 Auto Watch 与现有模式的 UI 设计**
+
+### Follow-up scope change (2026-08-30)
+
+After the initial controller implementation, the user approved a small scope
+extension in the same PR: add configurable global shortcuts for **Watch** and
+**Context Watch**, and replace all four card footer shortcuts/labels with short
+feature descriptions. This supersedes the original non-goal that excluded
+Auto Watch global shortcuts. The follow-up is limited to the existing shortcut
+configuration, registration, Settings rows, controller routing, tests, and
+user documentation; it does not change Auto Watch core/session behavior.
 
 ## 1. Background / Current behavior
 
@@ -47,7 +57,7 @@ TellMeSensei 的浮动主控制器目前已经有一套较完整的视觉语言�
 - Watch mini controller 改版；
 - Auto Watch detector、Latest-Wins、OCR cache、session lifecycle 或分析 pipeline 重构；
 - 新增第三种 Watch 模式；
-- 新增 Auto Watch 全局快捷键；
+- 不新增第三种 Watch 模式或其他与本次入口无关的全局快捷键；四项入口快捷键属于已批准的 follow-up scope；
 - 保存 Watch ROI 或改变现有配置持久化；
 - 为未来可能出现的信息提前保留大型空白 panel。
 
@@ -126,10 +136,12 @@ ContextQuestionAutoWatchSession     # Context + Question
 
 为了消除 `Context Watch` 是否“只监控 Context”的歧义，卡片底部使用短说明：
 
+- Text / OCR → `Text extraction`
+- Vision → `Visual analysis`
 - Watch → `Single region`
 - Context Watch → `Context + question`
 
-因此用户不需要理解内部的 Region Mode 概念，也能在主页面直接选对入口。
+四张卡片 footer 都是固定的功能描述，不显示或刷新全局快捷键。用户不需要理解内部的 Region Mode 概念，也能在主页面直接选对入口；快捷键统一在 Settings → Shortcuts 中配置。
 
 ## 7. Card visual design
 
@@ -147,8 +159,8 @@ ContextQuestionAutoWatchSession     # Context + Question
 
 | Card | Title | Footer chip | Action |
 | --- | --- | --- | --- |
-| 1 | Text / OCR | 当前 Text shortcut | 直接框选并 OCR |
-| 2 | Vision | 当前 Vision shortcut | 直接框选并 Vision |
+| 1 | Text / OCR | `Text extraction` | 直接框选并 OCR |
+| 2 | Vision | `Visual analysis` | 直接框选并 Vision |
 | 3 | Watch | `Single region` | 进入 Single Region Watch setup |
 | 4 | Context Watch | `Context + question` | 进入 Context + Question Watch setup |
 
@@ -160,6 +172,7 @@ ContextQuestionAutoWatchSession     # Context + Question
 - 两张 Watch 卡片共享一种 Watch visual treatment，避免错误地用蓝/紫分别暗示它们固定绑定 Text 或 Vision。
 - 优先在现有蓝紫主题内增加一个低饱和的 `WATCH_ACCENT`，建议为偏青蓝 / teal 的色相；两张 Watch 卡片使用同一 accent，通过 icon 和 footer 区分。
 - 不为四张卡片设计四套完全不同的样式。
+- footer 只表达功能，不承担快捷键显示；四项全局快捷键在 Settings 中统一配置。
 
 建议 icon 语义：
 
@@ -262,6 +275,19 @@ Region Mode
 
 `Back` 始终返回四卡片主页面。
 
+### 10.4 Watch global shortcuts (follow-up scope)
+
+Settings exposes four independent global shortcuts using the existing
+`QKeySequenceEdit` and platform `GlobalHotkeyManager` interfaces. The default
+Watch combinations are `Ctrl+Shift+W` and `Ctrl+Shift+C` for Context Watch;
+they are distinct from the existing Text/OCR `Ctrl+Shift+A` and Vision
+`Ctrl+Shift+S` defaults and are supported by both native registrations.
+
+Triggering either Watch shortcut runs on the GUI path that shows, raises, and
+activates the controller, then enters the matching setup. It does not begin
+region selection or monitoring. Shortcut edits use one four-item uniqueness
+check and the existing atomic runtime rebind/rollback behavior.
+
 ## 11. State and lifecycle invariants
 
 本次 UI 改动必须保持：
@@ -329,13 +355,22 @@ app/ui/main_window.py
   # 2×2 entry grid、Watch / Context Watch 路由、setup 简化、compact status sizing
 
 app/ui/theme.py
-  # Watch card icon/accent、统一 card visual、compact status style
+  # Watch card icon/accent、统一 card visual、compact status style、固定 footer 描述
+
+app/platform/hotkey.py, app/config.py, app/settings/repository.py
+  # 四项快捷键默认值、规范化、冲突校验和持久化
+
+gui.py, app/ui/application_controller.py
+  # 四个 native hotkey manager 的启动注册、GUI 路由和 shutdown 注销
+
+app/ui/settings_window.py
+  # 四项快捷键编辑、load/save 和原子 runtime rebind/rollback
 
 tests/...
-  # 两个 Watch entry routing、Back / mode reset、status/layout regression
+  # 四项快捷键模型/注册/Settings 流程、两个 Watch entry routing、Back / mode reset、status/layout regression
 
 README.md
-  # 同步当前 controller 入口和 Auto Watch 使用说明 / 截图（若 README 有对应内容）
+  # 同步当前 controller 入口、四项快捷键和 Auto Watch 使用说明
 ```
 
 不要借此重构 Auto Watch core 或 AnswerWindow。
@@ -360,7 +395,10 @@ README.md
    因 `MainWindow` 是共享入口，完整 Core regression 有价值；失败则判断是否为本次共享 UI 修改引入。
 
 6. **Windows + macOS manual visual acceptance**  
-   检查正常系统字体下的 2×2 对齐、hover、文字裁切、status strip 高度。视觉验收是本次 UI 改动的必要证据，自动测试不能替代。
+   原始 2×2 controller UI scope 仍可按发布流程进行视觉检查；本次用户批准的 follow-up 只改固定 footer 文案与快捷键设置，不要求额外人工视觉验收。
+
+7. **Four-shortcut configuration and registration tests (follow-up scope)**
+   检测四项默认值与 round-trip、任意两项冲突、Settings load/save、runtime registration/rollback，以及 Watch / Context Watch shortcut 到 setup 的 GUI 路由；失败则说明快捷键扩展没有复用现有 contract。
 
 ## 16. Documentation
 
@@ -368,9 +406,10 @@ README.md
 
 - README 中若展示或描述当前 controller，应同步为四入口；
 - Auto Watch 使用说明应从“进入 Auto Watch 后选择 Region Mode”改为“直接选择 Watch 或 Context Watch”；
+- README 应列出 Text/OCR、Vision、Watch、Context Watch 四项全局快捷键及其设置入口；
 - Release Notes 之后负责说明版本变化，但不能代替 README 的当前使用说明。
 
-本 Design Doc 本身不改变产品行为，所以设计 PR 不需要为了形式修改 README。
+本 follow-up 的 Design Doc 更新记录了用户批准的 scope change；README 与实现同步更新，不以 Design Doc 代替用户文档。
 
 ## 17. Rollout / release
 
@@ -387,7 +426,7 @@ short-lived implementation branch
     ↓
 implementation + tests + README
     ↓
-PR + Windows/macOS visual acceptance
+PR + automated/core validation (no additional follow-up visual acceptance)
     ↓
 merge to main
     ↓
@@ -416,4 +455,9 @@ merge to main
 - controller 在 Windows / macOS 正常 DPI 与系统字体下无明显裁切或失衡；
 - 现有 capture / Auto Watch session 行为无 regression；
 - README 与新的用户入口一致；
-- 实现 PR 只包含本次 controller UI 范围，不顺手扩展到 AnswerWindow / Settings 重设计。
+- README 与四项快捷键及新的用户入口一致；
+- 四项快捷键使用统一的持久化、唯一性校验、runtime re-register/rollback；
+- Watch / Context Watch 快捷键只打开对应 setup，不直接开始框选或监控；
+- 本 follow-up 不修改 Auto Watch core/session、AnswerWindow、mini controller、OCR/DeepSeek logic；
+- 本 follow-up 的固定 footer 与快捷键变更无需额外人工视觉验收；
+- 实现 PR 只包含本次 controller UI 与批准的 shortcut follow-up 范围，不顺手扩展到 AnswerWindow 重设计。

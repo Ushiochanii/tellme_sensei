@@ -36,6 +36,18 @@ def test_controller_exposes_four_cards_in_visual_tab_order(qt_app) -> None:
         "Watch",
         "Context Watch",
     ]
+    assert [card.text().splitlines()[1] for card in cards] == [
+        "Text extraction",
+        "Visual analysis",
+        "Single region",
+        "Context + question",
+    ]
+    assert [card.accessibleDescription() for card in cards] == [
+        "Text / OCR: Text extraction",
+        "Vision: Visual analysis",
+        "Watch: Single region",
+        "Context Watch: Context + question",
+    ]
     assert window.findChildren(QPushButton, "autoWatchButton") == []
     assert cards[0].geometry().y() == cards[1].geometry().y()
     assert cards[2].geometry().y() > cards[0].geometry().y()
@@ -62,6 +74,29 @@ def test_watch_cards_route_directly_to_the_matching_setup(qt_app) -> None:
     window.context_watch_mode_button.click()
 
     assert calls == ["single", "context_question"]
+    window.close()
+    qt_app.processEvents()
+
+
+def test_watch_hotkeys_show_matching_setup_without_starting_selection(qt_app) -> None:
+    window = MainWindow(tray_mode=True)
+
+    assert window.start_watch() is True
+    assert window.isVisible()
+    assert window._auto_watch_region_mode == "single"
+    assert window._auto_watch_session is None
+    assert window._auto_watch_selection_overlay is None
+    assert window.auto_watch_setup.isVisible()
+
+    window.exit_auto_watch_setup()
+    window.hide()
+    assert window.start_context_watch() is True
+    assert window.isVisible()
+    assert window._auto_watch_region_mode == "context_question"
+    assert window._auto_watch_session is None
+    assert window._auto_watch_selection_overlay is None
+    assert window.auto_watch_setup.isVisible()
+
     window.close()
     qt_app.processEvents()
 

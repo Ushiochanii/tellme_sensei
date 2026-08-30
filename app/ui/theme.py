@@ -462,15 +462,15 @@ class ModeButton(QPushButton):
     surface and its interaction states.
     """
 
-    def __init__(self, title: str, shortcut: str, icon: QPixmap, accent: str, *, parent=None) -> None:
+    def __init__(self, title: str, footer: str, icon: QPixmap, accent: str, *, parent=None) -> None:
         super().__init__(parent)
         self._title = title
-        self._shortcut = shortcut
+        self._footer = footer
         self._icon = icon
         self._accent = QColor(accent)
-        self.setText(f"{title}\n{shortcut}")
+        self.setText(f"{title}\n{footer}")
         self.setAccessibleName(title)
-        self.setAccessibleDescription(f"{title}: {shortcut}")
+        self.setAccessibleDescription(f"{title}: {footer}")
         self.setProperty("fluentRole", "card")
         self.setProperty("fluentAppearance", "subtle")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -478,10 +478,10 @@ class ModeButton(QPushButton):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAutoDefault(False)
 
-    def set_shortcut(self, shortcut: str) -> None:
-        self._shortcut = shortcut
-        self.setText(f"{self._title}\n{shortcut}")
-        self.setAccessibleDescription(f"{self._title}: {shortcut}")
+    def set_footer(self, footer: str) -> None:
+        self._footer = footer
+        self.setText(f"{self._title}\n{footer}")
+        self.setAccessibleDescription(f"{self._title}: {footer}")
         self.update()
 
     def paintEvent(self, _event) -> None:  # noqa: N802 - Qt API name
@@ -548,12 +548,12 @@ class ModeButton(QPushButton):
         pill_border.setAlpha(80 if enabled else 35)
         painter.setPen(QPen(pill_border, 1))
         painter.drawRoundedRect(pill, 8, 8)
-        shortcut_font = QFont(self.font())
-        shortcut_font.setPointSize(9)
-        painter.setFont(shortcut_font)
+        footer_font = QFont(self.font())
+        footer_font.setPointSize(9)
+        painter.setFont(footer_font)
         painter.setPen(QColor(accent if enabled else "#9aa8c2"))
-        footer = QFontMetrics(shortcut_font).elidedText(
-            self._shortcut,
+        footer = QFontMetrics(footer_font).elidedText(
+            self._footer,
             Qt.TextElideMode.ElideRight,
             max(0, int(pill.width() - 8)),
         )

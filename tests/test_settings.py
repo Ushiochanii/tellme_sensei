@@ -4,6 +4,7 @@ import json
 import os
 import threading
 import time
+from itertools import combinations
 
 import pytest
 
@@ -208,13 +209,22 @@ def test_fresh_shortcut_defaults_and_saved_legacy_values_are_preserved(tmp_path,
     manager = make_manager(tmp_path)
     assert manager.load(False).global_shortcut == "Ctrl+Shift+A"
     assert manager.load(False).vision_global_shortcut == "Ctrl+Shift+S"
+    assert manager.load(False).watch_global_shortcut == "Ctrl+Shift+W"
+    assert manager.load(False).context_watch_global_shortcut == "Ctrl+Shift+C"
 
     manager.settings_repository.update(
-        {"global_shortcut": "Ctrl+Shift+Q", "vision_global_shortcut": "Ctrl+Shift+W"}
+        {
+            "global_shortcut": "Ctrl+Shift+Q",
+            "vision_global_shortcut": "Ctrl+Shift+E",
+            "watch_global_shortcut": "Ctrl+Shift+W",
+            "context_watch_global_shortcut": "Ctrl+Shift+C",
+        }
     )
     config = manager.load(False)
     assert config.global_shortcut == "Ctrl+Shift+Q"
-    assert config.vision_global_shortcut == "Ctrl+Shift+W"
+    assert config.vision_global_shortcut == "Ctrl+Shift+E"
+    assert config.watch_global_shortcut == "Ctrl+Shift+W"
+    assert config.context_watch_global_shortcut == "Ctrl+Shift+C"
 
 
 def test_vision_shortcut_uses_environment_saved_dotenv_default_precedence(tmp_path, monkeypatch) -> None:
@@ -241,6 +251,30 @@ def test_invalid_saved_shortcut_falls_back_to_default(tmp_path, monkeypatch) -> 
         {"global_shortcut": "Ctrl+Win+Q"}
     )
     assert make_manager(tmp_path).load(False).global_shortcut == "Ctrl+Shift+A"
+
+
+def test_duplicate_saved_shortcuts_are_normalized_to_unique_defaults(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GLOBAL_SHORTCUT", raising=False)
+    monkeypatch.delenv("VISION_GLOBAL_SHORTCUT", raising=False)
+    monkeypatch.delenv("WATCH_GLOBAL_SHORTCUT", raising=False)
+    monkeypatch.delenv("CONTEXT_WATCH_GLOBAL_SHORTCUT", raising=False)
+    SettingsRepository(tmp_path / "settings.json").update(
+        {
+            "global_shortcut": "Ctrl+Shift+A",
+            "vision_global_shortcut": "Ctrl+Shift+A",
+            "watch_global_shortcut": "Ctrl+Shift+A",
+            "context_watch_global_shortcut": "Ctrl+Shift+A",
+        }
+    )
+
+    config = make_manager(tmp_path).load(False)
+
+    assert len({
+        config.global_shortcut,
+        config.vision_global_shortcut,
+        config.watch_global_shortcut,
+        config.context_watch_global_shortcut,
+    }) == 4
 
 
 def test_saved_model_and_timeout_override_dotenv(tmp_path, monkeypatch) -> None:
@@ -359,6 +393,63 @@ def test_settings_save_applies_shortcut_immediately(qt_app, tmp_path) -> None:
     qt_app.processEvents()
 
 
+def test_four_shortcut_save_rebinds_and_persists_all_managers(qt_app, tmp_path) -> None:
+    manager = make_manager(tmp_path, FakeSecretStore("key"))
+    text_hotkey = FakeHotkeyManager("Ctrl+Shift+A")
+    vision_hotkey = FakeHotkeyManager("Ctrl+Shift+S")
+    watch_hotkey = FakeHotkeyManager("Ctrl+Shift+W")
+    context_watch_hotkey = FakeHotkeyManager("Ctrl+Shift+C")
+    window = SettingsWindow(
+        manager,
+        hotkey_manager=text_hotkey,
+        vision_hotkey_manager=vision_hotkey,
+        watch_hotkey_manager=watch_hotkey,
+        context_watch_hotkey_manager=context_watch_hotkey,
+    )
+    for field, shortcut in (
+        (window.shortcut_edit, "Ctrl+Alt+F1"),
+        (window.vision_shortcut_edit, "Ctrl+Alt+F2"),
+        (window.watch_shortcut_edit, "Ctrl+Alt+F3"),
+        (window.context_watch_shortcut_edit, "Ctrl+Alt+F4"),
+    ):
+        field.setKeySequence(QKeySequence(shortcut))
+
+    window.save()
+
+    assert text_hotkey.rebind_calls == ["Ctrl+Alt+F1"]
+    assert vision_hotkey.rebind_calls == ["Ctrl+Alt+F2"]
+    assert watch_hotkey.rebind_calls == ["Ctrl+Alt+F3"]
+    assert context_watch_hotkey.rebind_calls == ["Ctrl+Alt+F4"]
+    saved = manager.settings_repository.load()
+    assert saved["global_shortcut"] == "Ctrl+Alt+F1"
+    assert saved["vision_global_shortcut"] == "Ctrl+Alt+F2"
+    assert saved["watch_global_shortcut"] == "Ctrl+Alt+F3"
+    assert saved["context_watch_global_shortcut"] == "Ctrl+Alt+F4"
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_settings_loads_all_four_saved_shortcuts(qt_app, tmp_path) -> None:
+    manager = make_manager(tmp_path, FakeSecretStore("key"))
+    manager.settings_repository.update(
+        {
+            "global_shortcut": "Ctrl+Alt+F1",
+            "vision_global_shortcut": "Ctrl+Alt+F2",
+            "watch_global_shortcut": "Ctrl+Alt+F3",
+            "context_watch_global_shortcut": "Ctrl+Alt+F4",
+        }
+    )
+
+    window = SettingsWindow(manager)
+
+    assert window.shortcut_edit.keySequence().toString() == "Ctrl+Alt+F1"
+    assert window.vision_shortcut_edit.keySequence().toString() == "Ctrl+Alt+F2"
+    assert window.watch_shortcut_edit.keySequence().toString() == "Ctrl+Alt+F3"
+    assert window.context_watch_shortcut_edit.keySequence().toString() == "Ctrl+Alt+F4"
+    window.deleteLater()
+    qt_app.processEvents()
+
+
 def test_unchanged_deepseek_key_is_not_written_when_saving(qt_app, tmp_path) -> None:
     secrets = FakeSecretStore("stored-key")
     window = SettingsWindow(make_manager(tmp_path, secrets))
@@ -463,6 +554,34 @@ def test_identical_text_and_vision_shortcuts_are_rejected(qt_app, tmp_path) -> N
     qt_app.processEvents()
 
 
+@pytest.mark.parametrize(
+    ("first_field", "second_field"),
+    list(combinations(
+        (
+            "shortcut_edit",
+            "vision_shortcut_edit",
+            "watch_shortcut_edit",
+            "context_watch_shortcut_edit",
+        ),
+        2,
+    )),
+)
+def test_any_pair_of_four_shortcuts_is_rejected_when_identical(
+    qt_app, tmp_path, first_field, second_field
+) -> None:
+    window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
+    duplicate = QKeySequence("Ctrl+Alt+Z")
+    getattr(window, first_field).setKeySequence(duplicate)
+    getattr(window, second_field).setKeySequence(duplicate)
+
+    window.save()
+
+    assert "different" in window.status_label.text()
+    assert window.config_manager.settings_repository.load() == {}
+    window.deleteLater()
+    qt_app.processEvents()
+
+
 def test_two_shortcut_rebinds_roll_back_when_vision_registration_fails(qt_app, tmp_path) -> None:
     text_hotkey = FakeHotkeyManager()
     vision_hotkey = FakeHotkeyManager("Ctrl+Shift+W", rebind_result=False)
@@ -516,6 +635,8 @@ def test_two_shortcut_rebind_direct_swap_succeeds(qt_app, tmp_path) -> None:
     )
     window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
     window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+Q"))
+    window.watch_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+R"))
+    window.context_watch_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+T"))
     window.save()
 
     assert text_hotkey.shortcut == "Ctrl+Shift+W"
@@ -540,6 +661,8 @@ def test_two_shortcut_rebind_transfer_succeeds(qt_app, tmp_path) -> None:
     )
     window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
     window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+E"))
+    window.watch_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+R"))
+    window.context_watch_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+T"))
     window.save()
 
     assert text_hotkey.shortcut == "Ctrl+Shift+W"
@@ -562,6 +685,8 @@ def test_two_shortcut_rebind_preserves_unregistered_state(qt_app, tmp_path) -> N
     )
     window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
     window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+E"))
+    window.watch_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+R"))
+    window.context_watch_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+T"))
     window.save()
 
     assert text_hotkey.registered is False
@@ -581,6 +706,8 @@ def test_two_shortcut_rebind_restores_after_second_registration_fails(qt_app, tm
     )
     window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Shift+W"))
     window.vision_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+E"))
+    window.watch_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+R"))
+    window.context_watch_shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+T"))
     window.save()
 
     assert text_hotkey.shortcut == "Ctrl+Shift+Q"
@@ -682,6 +809,8 @@ def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
         "request_timeout": 33.0,
         "global_shortcut": "Ctrl+Shift+A",
         "vision_global_shortcut": "Ctrl+Shift+S",
+        "watch_global_shortcut": "Ctrl+Shift+W",
+        "context_watch_global_shortcut": "Ctrl+Shift+C",
         "ocr_provider": "local",
         "online_ocr_timeout": 15.0,
     }

@@ -44,7 +44,7 @@ from app.logging_config import (
 )
 from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
-from app.platform.hotkey import HotkeySpec, HotkeySpecError
+from app.platform.hotkey import HotkeySpec, HotkeySpecError, validate_unique_shortcuts
 from app.ocr.providers.google_vision import GoogleVisionOCRProvider
 from app.ocr.types import OCRCancelled, OCRError
 from app.platform.ocr import is_local_ocr_supported
@@ -238,6 +238,8 @@ class SettingsWindow(QWidget):
         config_manager: ConfigManager | None = None,
         hotkey_manager: GlobalHotkeyManager | None = None,
         vision_hotkey_manager: GlobalHotkeyManager | None = None,
+        watch_hotkey_manager: GlobalHotkeyManager | None = None,
+        context_watch_hotkey_manager: GlobalHotkeyManager | None = None,
         component_manager: LocalOCRComponentManager | None = None,
         local_ocr_session: LocalOCRSession | None = None,
         update_service: UpdateService | None = None,
@@ -249,6 +251,8 @@ class SettingsWindow(QWidget):
         self.config_manager = config_manager or ConfigManager()
         self.hotkey_manager = hotkey_manager
         self.vision_hotkey_manager = vision_hotkey_manager
+        self.watch_hotkey_manager = watch_hotkey_manager
+        self.context_watch_hotkey_manager = context_watch_hotkey_manager
         self.component_manager = component_manager or LocalOCRComponentManager()
         self.local_ocr_session = local_ocr_session
         self.update_service = update_service or UpdateService()
@@ -312,9 +316,17 @@ class SettingsWindow(QWidget):
         self.model_edit = QLineEdit()
         self.timeout_edit = QLineEdit()
         self.shortcut_edit = QKeySequenceEdit()
+        self.shortcut_edit.setObjectName("textShortcutEdit")
         self.shortcut_edit.setMaximumSequenceLength(1)
         self.vision_shortcut_edit = QKeySequenceEdit()
+        self.vision_shortcut_edit.setObjectName("visionShortcutEdit")
         self.vision_shortcut_edit.setMaximumSequenceLength(1)
+        self.watch_shortcut_edit = QKeySequenceEdit()
+        self.watch_shortcut_edit.setObjectName("watchShortcutEdit")
+        self.watch_shortcut_edit.setMaximumSequenceLength(1)
+        self.context_watch_shortcut_edit = QKeySequenceEdit()
+        self.context_watch_shortcut_edit.setObjectName("contextWatchShortcutEdit")
+        self.context_watch_shortcut_edit.setMaximumSequenceLength(1)
         mode_widget = QWidget()
         mode_layout = QHBoxLayout(mode_widget)
         mode_layout.setContentsMargins(0, 0, 0, 0)
@@ -484,7 +496,8 @@ class SettingsWindow(QWidget):
         deepseek_layout.addStretch(1)
 
         shortcuts_page, shortcuts_layout = make_page(
-            "Shortcuts", "Choose the global shortcuts for Text/OCR and Vision capture."
+            "Shortcuts",
+            "Choose the global shortcuts for Text/OCR, Vision, Watch, and Context Watch.",
         )
         shortcuts_card = QFrame()
         shortcuts_card.setObjectName("settingsCard")
@@ -493,6 +506,8 @@ class SettingsWindow(QWidget):
         shortcuts_form.setVerticalSpacing(14)
         shortcuts_form.addRow("Text / OCR", self.shortcut_edit)
         shortcuts_form.addRow("Vision", self.vision_shortcut_edit)
+        shortcuts_form.addRow("Watch", self.watch_shortcut_edit)
+        shortcuts_form.addRow("Context Watch", self.context_watch_shortcut_edit)
         shortcuts_layout.addWidget(shortcuts_card)
         shortcuts_layout.addStretch(1)
 
@@ -1021,6 +1036,10 @@ class SettingsWindow(QWidget):
         self.timeout_edit.setText(str(int(config.request_timeout) if config.request_timeout.is_integer() else config.request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
         self.vision_shortcut_edit.setKeySequence(QKeySequence(config.vision_global_shortcut))
+        self.watch_shortcut_edit.setKeySequence(QKeySequence(config.watch_global_shortcut))
+        self.context_watch_shortcut_edit.setKeySequence(
+            QKeySequence(config.context_watch_global_shortcut)
+        )
         is_online = config.ocr_provider == "google_vision" or not self._local_ocr_is_usable()
         provider_env_override = self.config_manager.has_explicit_ocr_provider()
         self.local_mode_radio.setChecked(not is_online)
@@ -1319,8 +1338,21 @@ class SettingsWindow(QWidget):
         sequence = self.shortcut_edit.keySequence()
         global_shortcut = self._parse_shortcut(sequence)
         vision_shortcut = self._parse_shortcut(self.vision_shortcut_edit.keySequence())
-        if global_shortcut == vision_shortcut:
-            raise ValueError("Text and Vision shortcuts must be different.")
+        watch_shortcut = self._parse_shortcut(self.watch_shortcut_edit.keySequence())
+        context_watch_shortcut = self._parse_shortcut(
+            self.context_watch_shortcut_edit.keySequence()
+        )
+        try:
+            validate_unique_shortcuts(
+                (
+                    global_shortcut,
+                    vision_shortcut,
+                    watch_shortcut,
+                    context_watch_shortcut,
+                )
+            )
+        except HotkeySpecError as exc:
+            raise ValueError("All shortcuts must be different.") from exc
         current = self.config_manager.load(require_api_key=False)
         return AppConfig(
             api_key=self.api_key_edit.text().strip(),
@@ -1330,6 +1362,8 @@ class SettingsWindow(QWidget):
             ocr_language=current.ocr_language,
             global_shortcut=global_shortcut,
             vision_global_shortcut=vision_shortcut,
+            watch_global_shortcut=watch_shortcut,
+            context_watch_global_shortcut=context_watch_shortcut,
             ocr_provider=self._current_provider_from_ui(),
             google_vision_api_key=self.google_vision_api_key_edit.text().strip(),
             online_ocr_timeout=current.online_ocr_timeout,
@@ -1483,6 +1517,8 @@ class SettingsWindow(QWidget):
             requested = (
                 (self.hotkey_manager, config.global_shortcut),
                 (self.vision_hotkey_manager, config.vision_global_shortcut),
+                (self.watch_hotkey_manager, config.watch_global_shortcut),
+                (self.context_watch_hotkey_manager, config.context_watch_global_shortcut),
             )
             for manager, shortcut in requested:
                 if manager is None or manager.shortcut == shortcut:
@@ -1514,6 +1550,8 @@ class SettingsWindow(QWidget):
                 config.request_timeout,
                 config.global_shortcut,
                 vision_global_shortcut=config.vision_global_shortcut,
+                watch_global_shortcut=config.watch_global_shortcut,
+                context_watch_global_shortcut=config.context_watch_global_shortcut,
                 ocr_provider=provider_to_save,
                 google_vision_api_key=google_key_to_save,
                 online_ocr_timeout=config.online_ocr_timeout,

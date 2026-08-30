@@ -34,7 +34,6 @@ from app.local_ocr.component_manager import LocalOCRComponentManager
 from app.ocr.factory import create_ocr_provider
 from app.ocr.local_session import LocalOCRSession
 from app.platform.base import GlobalHotkeyManager
-from app.platform.hotkey import DEFAULT_SHORTCUT, DEFAULT_VISION_SHORTCUT
 from app.platform import screen_permissions
 from app.services.deepseek_service import DeepSeekService
 from app.state import AppState
@@ -129,6 +128,8 @@ class MainWindow(QWidget):
         config_manager: ConfigManager | None = None,
         hotkey_manager: GlobalHotkeyManager | None = None,
         vision_hotkey_manager: GlobalHotkeyManager | None = None,
+        watch_hotkey_manager: GlobalHotkeyManager | None = None,
+        context_watch_hotkey_manager: GlobalHotkeyManager | None = None,
         local_ocr_session: LocalOCRSession | None = None,
         component_manager: LocalOCRComponentManager | None = None,
         auto_watch_fake: bool = False,
@@ -139,6 +140,8 @@ class MainWindow(QWidget):
         self.config_manager = config_manager or ConfigManager()
         self.hotkey_manager = hotkey_manager
         self.vision_hotkey_manager = vision_hotkey_manager
+        self.watch_hotkey_manager = watch_hotkey_manager
+        self.context_watch_hotkey_manager = context_watch_hotkey_manager
         self._local_ocr_session = local_ocr_session or LocalOCRSession()
         self._component_manager = component_manager or LocalOCRComponentManager()
         self.state = AppState.IDLE
@@ -208,10 +211,9 @@ class MainWindow(QWidget):
         mode_layout.setVerticalSpacing(10)
         mode_layout.setColumnStretch(0, 1)
         mode_layout.setColumnStretch(1, 1)
-        text_shortcut, vision_shortcut = self._configured_shortcuts()
         self.text_mode_button = ModeButton(
             "Text / OCR",
-            text_shortcut,
+            "Text extraction",
             mode_icon("text", TEXT_ACCENT),
             TEXT_ACCENT,
         )
@@ -220,7 +222,7 @@ class MainWindow(QWidget):
         self.text_mode_button.clicked.connect(self.start_text_capture)
         self.vision_mode_button = ModeButton(
             "Vision",
-            vision_shortcut,
+            "Visual analysis",
             mode_icon("vision", VISION_ACCENT),
             VISION_ACCENT,
         )
@@ -255,8 +257,8 @@ class MainWindow(QWidget):
             button.setMinimumHeight(88)
             button.setMaximumHeight(92)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.text_mode_button.setToolTip("Capture a Text / OCR question")
-        self.vision_mode_button.setToolTip("Capture a Vision question")
+        self.text_mode_button.setToolTip("Capture a question for text extraction")
+        self.vision_mode_button.setToolTip("Capture a question for visual analysis")
         self.watch_mode_button.setToolTip("Watch one screen region for new questions")
         self.context_watch_mode_button.setToolTip(
             "Watch a context region and a question region"
@@ -895,35 +897,8 @@ class MainWindow(QWidget):
         self.vision_mode_button.style().unpolish(self.vision_mode_button)
         self.vision_mode_button.style().polish(self.vision_mode_button)
 
-    def _configured_shortcuts(self) -> tuple[str, str]:
-        """Use registered hotkeys first, then config/default values for display."""
-
-        try:
-            config = self.config_manager.load(require_api_key=False)
-        except ConfigError:
-            config = None
-        try:
-            text = self.hotkey_manager.shortcut if self.hotkey_manager is not None else None
-        except (AttributeError, NotImplementedError):
-            text = None
-        try:
-            vision = (
-                self.vision_hotkey_manager.shortcut
-                if self.vision_hotkey_manager is not None
-                else None
-            )
-        except (AttributeError, NotImplementedError):
-            vision = None
-        text = text or getattr(config, "global_shortcut", DEFAULT_SHORTCUT)
-        vision = vision or getattr(config, "vision_global_shortcut", DEFAULT_VISION_SHORTCUT)
-        return text, vision
-
     def refresh_shortcut_labels(self) -> None:
-        """Refresh the two visible shortcut pills after settings are saved."""
-
-        text, vision = self._configured_shortcuts()
-        self.text_mode_button.set_shortcut(text)
-        self.vision_mode_button.set_shortcut(vision)
+        """Compatibility hook; card footers are stable feature descriptions."""
 
     @Slot()
     def start_capture(self) -> bool:
@@ -1427,6 +1402,33 @@ class MainWindow(QWidget):
         self.raise_()
         self.activateWindow()
 
+    def _start_watch_from_hotkey(self, region_mode: str) -> bool:
+        """Open the controller setup without starting selection or monitoring."""
+
+        if (
+            self._shutting_down
+            or self._auto_watch_active
+            or self._auto_watch_in_setup
+            or self._auto_watch_selection_overlay is not None
+            or self._overlay is not None
+            or self._busy
+        ):
+            return False
+        self.show_launcher()
+        return self.enter_auto_watch_setup(region_mode)
+
+    @Slot()
+    def start_watch(self) -> bool:
+        """Route the Watch global shortcut to the matching setup screen."""
+
+        return self._start_watch_from_hotkey("single")
+
+    @Slot()
+    def start_context_watch(self) -> bool:
+        """Route the Context Watch shortcut to the matching setup screen."""
+
+        return self._start_watch_from_hotkey("context_question")
+
     def show_settings(self) -> None:
         """Show one reusable SettingsWindow from the system tray."""
 
@@ -1435,6 +1437,8 @@ class MainWindow(QWidget):
                 config_manager=self.config_manager,
                 hotkey_manager=self.hotkey_manager,
                 vision_hotkey_manager=self.vision_hotkey_manager,
+                watch_hotkey_manager=self.watch_hotkey_manager,
+                context_watch_hotkey_manager=self.context_watch_hotkey_manager,
                 component_manager=self._component_manager,
                 local_ocr_session=self._local_ocr_session,
             )
@@ -1455,7 +1459,6 @@ class MainWindow(QWidget):
 
     @Slot()
     def _on_settings_saved(self) -> None:
-        self.refresh_shortcut_labels()
         self._schedule_or_stop_local_ocr()
 
     @Slot()
