@@ -53,7 +53,6 @@ def test_release_workflow_assets_follow_each_job_version_output() -> None:
     )
 
     assert workflow.count("id: version") == 3
-    assert workflow.count("from app.version import __version__") == 3
     assert 'Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"' in workflow
     assert workflow.count('echo "version=$version" >> "$GITHUB_OUTPUT"') == 2
     assert "0.7.1" not in workflow
@@ -63,17 +62,24 @@ def test_release_workflow_assets_follow_each_job_version_output() -> None:
         "build-macos-x64": "TellMeSensei-${{ steps.version.outputs.version }}-macos-x64.dmg",
         "build-macos-arm64": "TellMeSensei-${{ steps.version.outputs.version }}-macos-arm64.dmg",
     }
+    publish_position = workflow.index("  publish-stable-release:")
     job_positions = [workflow.index(f"  {job}:") for job in job_contracts]
-    job_positions.append(len(workflow))
+    job_positions.append(publish_position)
     for (job, asset), start, end in zip(
         job_contracts.items(), job_positions, job_positions[1:]
     ):
         job_text = workflow[start:end]
         assert "id: version" in job_text
+        assert job_text.count("from app.version import __version__") == 1
         assert "steps.version.outputs.version" in job_text
         assert f"name: {asset}" in job_text
         assert f"path: " in job_text and asset in job_text
         assert "0.7.1" not in job_text
+
+    publish_text = workflow[publish_position:]
+    assert "from app.version import __version__" in publish_text
+    assert "actions/download-artifact@v4" in publish_text
+    assert "gh release create" in publish_text
 
 
 def test_local_ocr_distribution_metadata_is_versioned_and_public() -> None:

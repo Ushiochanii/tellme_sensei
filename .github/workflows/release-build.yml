@@ -2,6 +2,10 @@ name: Release build
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+      - "!v*-*"
 
 permissions:
   contents: read
@@ -201,3 +205,78 @@ jobs:
           name: TellMeSensei-${{ steps.version.outputs.version }}-macos-arm64.dmg
           path: dist/release/TellMeSensei-${{ steps.version.outputs.version }}-macos-arm64.dmg
           if-no-files-found: error
+
+  publish-stable-release:
+    name: Publish stable GitHub Release
+    if: github.event_name == 'push'
+    needs:
+      - build-windows-x64
+      - build-macos-x64
+      - build-macos-arm64
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Not a stable application tag: $tag" >&2
+            exit 1
+          fi
+          version="${tag#v}"
+          app_version="$(python3 -c 'from app.version import __version__; print(__version__)')"
+          if [[ "$app_version" != "$version" ]]; then
+            echo "Tag $tag does not match app.version $app_version" >&2
+            exit 1
+          fi
+          notes="docs/releases/${tag}.md"
+          if [[ ! -f "$notes" ]]; then
+            echo "Missing release notes: $notes" >&2
+            exit 1
+          fi
+
+      - name: Download validated build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: TellMeSensei-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release asset names
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          expected=(
+            "TellMeSensei-Setup-${version}.exe"
+            "TellMeSensei-${version}-macos-x64.dmg"
+            "TellMeSensei-${version}-macos-arm64.dmg"
+          )
+          for name in "${expected[@]}"; do
+            if [[ ! -f "release-assets/$name" ]]; then
+              echo "Missing expected release asset: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Create stable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "release-assets/TellMeSensei-Setup-${version}.exe" \
+            "release-assets/TellMeSensei-${version}-macos-x64.dmg" \
+            "release-assets/TellMeSensei-${version}-macos-arm64.dmg" \
+            --verify-tag \
+            --title "TellMeSensei $GITHUB_REF_NAME" \
+            --notes-file "docs/releases/${GITHUB_REF_NAME}.md" \
+            --latest
