@@ -244,7 +244,7 @@ class AnswerWindow(QWidget):
         self.context_ocr_edit.setPlaceholderText(
             tr("answer.recognized_context_placeholder", self._interface_language)
         )
-        context_ocr_layout.addWidget(self.context_ocr_edit)
+        context_ocr_layout.addWidget(self.context_ocr_edit, 1)
         body_layout.addWidget(context_ocr_card, 3)
 
         question_ocr_card = QFrame()
@@ -264,7 +264,7 @@ class AnswerWindow(QWidget):
         self.question_ocr_edit.setPlaceholderText(
             tr("answer.recognized_question_placeholder", self._interface_language)
         )
-        question_ocr_layout.addWidget(self.question_ocr_edit)
+        question_ocr_layout.addWidget(self.question_ocr_edit, 1)
         body_layout.addWidget(question_ocr_card, 2)
 
         answer_card = QFrame()
@@ -286,16 +286,10 @@ class AnswerWindow(QWidget):
         answer_layout.addWidget(self.answer_edit, 1)
         body_layout.addWidget(answer_card, 5)
 
-        pair_card_policy = QSizePolicy(
-            QSizePolicy.Policy.Preferred,
-            QSizePolicy.Policy.Ignored,
-        )
         pair_edit_policy = QSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Ignored,
         )
-        for card in (context_ocr_card, question_ocr_card, answer_card):
-            card.setSizePolicy(pair_card_policy)
         for edit in (self.context_ocr_edit, self.question_ocr_edit, self.answer_edit):
             edit.setSizePolicy(pair_edit_policy)
 
@@ -536,7 +530,6 @@ class AnswerWindow(QWidget):
             self.show()
             return
         self.show()
-        self.adjustSize()
         current = self.geometry()
         available = screen.availableGeometry()
         if not self._auto_watch_user_moved or not current.intersects(available):
