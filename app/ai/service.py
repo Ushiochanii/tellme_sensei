@@ -8,7 +8,7 @@ from typing import Any
 
 from app.ai.errors import AIProviderError, AIRequestCancelled
 from app.ai.models import AIRequest
-from app.ai.providers.deepseek import DeepSeekProvider
+from app.ai.providers.factory import create_ai_provider
 from app.ai.prompts import AnalysisPromptBuilder
 from app.config import AppConfig
 from app.localization import (
@@ -63,7 +63,7 @@ class AnalysisService:
 
         text = ocr_text.strip()
         if not text:
-            raise AIProviderError(tr("error.deepseek_empty_ocr", self.interface_language))
+            raise AIProviderError(tr("error.ai_empty_ocr", self.interface_language))
         self._raise_if_cancelled(cancel_event)
         backend = self.config.text_ai
         request = AIRequest(
@@ -85,7 +85,7 @@ class AnalysisService:
         question = question_text.strip()
         if not question:
             raise AIProviderError(
-                tr("error.deepseek_empty_question_ocr", self.interface_language)
+                tr("error.ai_empty_question_ocr", self.interface_language)
             )
         self._raise_if_cancelled(cancel_event)
         backend = self.config.text_ai
@@ -105,10 +105,10 @@ class AnalysisService:
         """Send one in-memory screenshot through the resolved Vision AI config."""
 
         if not isinstance(image_bytes, (bytes, bytearray)) or not image_bytes:
-            raise AIProviderError(tr("error.deepseek_empty_image", self.interface_language))
+            raise AIProviderError(tr("error.ai_empty_image", self.interface_language))
         mime_type = mime_type.strip().lower()
         if mime_type != "image/png":
-            raise AIProviderError(tr("error.deepseek_png_only", self.interface_language))
+            raise AIProviderError(tr("error.ai_png_only", self.interface_language))
         self._raise_if_cancelled(cancel_event)
         encoded = base64.b64encode(bytes(image_bytes)).decode("ascii")
         data_url = f"data:{mime_type};base64,{encoded}"
@@ -147,15 +147,13 @@ class AnalysisService:
         if cached is not None:
             return cached
         backend = self.config.text_ai if capability == "text" else self.config.vision_ai
-        if backend.provider_id == "deepseek":
-            provider = DeepSeekProvider(
-                backend,
-                client=self._client,
-                interface_language=self.interface_language,
-            )
-            self._provider_cache[capability] = provider
-            return provider
-        raise AIProviderError(f"Unsupported AI provider: {backend.provider_id}")
+        provider = create_ai_provider(
+            backend,
+            client=self._client,
+            interface_language=self.interface_language,
+        )
+        self._provider_cache[capability] = provider
+        return provider
 
     @staticmethod
     def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:

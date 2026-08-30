@@ -20,7 +20,7 @@
 - Watch 框选快捷键（默认 `Ctrl+Shift+W`）
 - Context Watch 框选快捷键（默认 `Ctrl+Shift+C`）
 - 鼠标拖拽框选屏幕区域，支持 macOS 全屏应用和多桌面
-- 悬浮窗口流式显示 DeepSeek 回答
+- 悬浮窗口流式显示 DeepSeek、Qwen 或 Z.AI（GLM）回答
 - 统一的悬浮控制器入口：**Text / OCR**、**Vision**、**Watch** 和 **Context Watch**
 - **Watch** 监控一个选定区域；**Context Watch** 同时监控共享的上下文区域和题目区域
 - **Local OCR**：PaddleOCR，本机处理
@@ -42,7 +42,7 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
 ## 快速开始
 
 1. 安装 TellMeSensei。
-2. 打开 **Settings**，填写 DeepSeek API Key。
+2. 打开 **Settings → AI Models**，分别选择 Text AI 和 Vision AI；再为使用的服务商填写 API Key 与 Endpoint。TellMeSensei 支持 DeepSeek、Qwen（Alibaba Cloud Model Studio）和 Z.AI（GLM）。
 3. 选择 OCR 模式：
    - **Local OCR：** 在 Settings 中点击 **Download Local OCR**。
    - **Google Cloud Vision：** 填写自己的 Google Vision API Key 并测试连接。
@@ -54,7 +54,7 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
 
 打开 **Settings → Language**，可以分别设置两种语言：
 
-- **Interface language：** 支持 English（`en`）和简体中文（`zh-CN`）。为了保持产品结构一致，**TellMeSensei**、**Text / OCR**、**Vision**、**Watch**、**Context Watch**、**Ready**、**Context**、**Question**、**Answer**、**Local OCR**、**PaddleOCR**、**Google Cloud Vision**、**DeepSeek** 和 **API Key** 等既定术语在两种界面语言中都保留英文。
+- **Interface language：** 支持 English（`en`）和简体中文（`zh-CN`）。为了保持产品结构一致，**TellMeSensei**、**Text / OCR**、**Vision**、**Watch**、**Context Watch**、**Ready**、**Context**、**Question**、**Answer**、**Local OCR**、**PaddleOCR**、**Google Cloud Vision**、**DeepSeek**、**Qwen**、**Z.AI** 和 **API Key** 等既定术语在两种界面语言中都保留英文。
 - **Answer language：** 独立控制下一次 Text / OCR、Vision、Watch 或 Context Watch 回答的语言和标题，不会改变 OCR 识别配置。
 
 修改 Interface language 后需要重启 TellMeSensei 才会生效；修改 Answer language 后会应用于后续分析。初始默认值为 English 界面和简体中文回答；OCR 语言仍是单独的设置概念。
@@ -63,12 +63,12 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
 
 | 模式 | 快捷键 | 流程 | 适用场景 |
 |---|---|---|---|
-| 文字模式 | `Ctrl+Shift+A` | 截图 → 配置的 OCR → DeepSeek 文本分析 | 文字为主的题目 |
-| 视觉模式 | `Ctrl+Shift+S` | 截图 → DeepSeek Vision | 图表、几何图形、流程图、网络拓扑等图形题 |
+| 文字模式 | `Ctrl+Shift+A` | 截图 → 配置的 OCR → 选定的 Text AI | 文字为主的题目 |
+| 视觉模式 | `Ctrl+Shift+S` | 截图 → 选定的 Vision AI | 图表、几何图形、流程图、网络拓扑等图形题 |
 | Watch | `Ctrl+Shift+W` | 框选一个区域后自动开始监控 | 反复出现在同一区域的题目 |
 | Context Watch | `Ctrl+Shift+C` | 依次框选上下文和题目后自动开始监控 | 带共享上下文区域的连续题目 |
 
-视觉模式固定使用 `deepseek-v4-flash-vision-exp`，会把截图直接发送给 DeepSeek。模式由用户明确选择；TellMeSensei 不会在文字模式和视觉模式之间自动切换或回退。
+Text AI 和 Vision AI 在 **Settings → AI Models** 中分别选择服务商和模型。内置模型列表会按能力过滤；列表外的模型可以使用**自定义模型 ID…**，并会原样保存。选定的 Vision 模型会直接接收题目截图。模式由用户明确选择；TellMeSensei 不会在文字模式和视觉模式之间自动切换或回退。
 
 Watch 快捷键会直接开始对应的框选流程，不再经过单独设置界面或手动 Start 操作；Text / OCR 与 Vision 请在 **Settings → Auto Watch** 中统一配置。
 
@@ -88,9 +88,23 @@ Local OCR 按平台作为独立组件分发。TellMeSensei **不会静默切换 
 
 - 使用 **Local OCR** 时，截图只在本机进行 OCR。
 - 使用 **Google Cloud Vision** 时，只有显式选择该模式后截图才会上传到 Google。
-- 使用 **视觉模式** 时，截图会直接发送给 DeepSeek Vision 进行图像分析。
-- OCR 得到的题目文字会发送给 **DeepSeek** 用于生成回答。
+- 使用 **视觉模式** 时，截图会直接发送给选定的 Vision AI 进行图像分析。
+- OCR 得到的题目文字会发送给选定的 Text AI 用于生成回答。
 - 日志不会记录 API Key、完整题目文本或截图。
+
+## AI 服务商与配置
+
+TellMeSensei 为每个服务商提供一组精简的内置模型列表。Text 和 Vision 选择器只显示具备对应能力的模型；列表外的服务商模型可以使用**自定义模型 ID…**，并在设置往返保存。若 Text 和 Vision 选择同一服务商，两者会复用同一个服务商凭据。
+
+服务商 Key 与 Endpoint 可在 **Settings → AI Models** 中编辑，也可以通过 `.env` 设置：
+
+| 服务商 | API Key | Endpoint 覆盖 |
+|---|---|---|
+| DeepSeek | `DEEPSEEK_API_KEY` | `DEEPSEEK_BASE_URL` |
+| Qwen / Model Studio | `QWEN_API_KEY` | `QWEN_BASE_URL` |
+| Z.AI / GLM | `ZAI_API_KEY` | `ZAI_BASE_URL` |
+
+可使用 `TEXT_AI_PROVIDER`、`TEXT_AI_MODEL`、`VISION_AI_PROVIDER` 和 `VISION_AI_MODEL` 分别指定启动时的两个选择。`AI_REQUEST_TIMEOUT` 是服务商无关的超时设置；已有的 `DEEPSEEK_TIMEOUT`、`DEEPSEEK_MODEL` 以及已保存的 DeepSeek 设置仍作为升级回退保持有效。
 
 ## 开发
 

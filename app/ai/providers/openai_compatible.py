@@ -11,6 +11,13 @@ from app.ai.models import AIRequest, AIStreamResult
 
 logger = logging.getLogger(__name__)
 
+# A deterministic 1x1 PNG keeps Vision connection diagnostics independent of
+# Qt, screen capture, and filesystem state while still exercising image_url.
+MINIMAL_TEST_IMAGE_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
+
 
 class OpenAICompatibleProvider:
     """Implement the common chat-completions and streaming lifecycle."""
@@ -101,15 +108,27 @@ class OpenAICompatibleProvider:
     ) -> bool:
         """Make a minimal non-streaming request for Settings diagnostics."""
 
+        if capability not in {"text", "vision"}:
+            raise ValueError("capability must be 'text' or 'vision'")
         self._raise_if_cancelled(cancel_event)
         if not self.config.api_key:
             raise AIProviderError(self._missing_api_key_message())
         client = self._get_client()
         response = None
+        if capability == "vision":
+            content: Any = [
+                {"type": "text", "text": "Reply with OK."},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": MINIMAL_TEST_IMAGE_DATA_URL},
+                },
+            ]
+        else:
+            content = "ping"
         try:
             response = client.chat.completions.create(
                 model=model_id or self.config.model_id,
-                messages=[{"role": "user", "content": "ping"}],
+                messages=[{"role": "user", "content": content}],
                 temperature=0,
                 max_tokens=1,
                 timeout=self.config.request_timeout,
@@ -242,4 +261,4 @@ class OpenAICompatibleProvider:
                 logger.debug("AI stream close failed", exc_info=True)
 
 
-__all__ = ["OpenAICompatibleProvider"]
+__all__ = ["MINIMAL_TEST_IMAGE_DATA_URL", "OpenAICompatibleProvider"]

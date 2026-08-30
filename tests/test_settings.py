@@ -464,7 +464,7 @@ def test_unchanged_deepseek_key_is_not_written_when_saving(qt_app, tmp_path) -> 
 def test_changed_deepseek_key_is_written_once(qt_app, tmp_path) -> None:
     secrets = FakeSecretStore("stored-key")
     window = SettingsWindow(make_manager(tmp_path, secrets))
-    window.api_key_edit.setText("new-key")
+    window.provider_api_key_edit.setText("new-key")
     window.save()
     assert secrets.set_values == ["new-key"]
     assert secrets.delete_count == 0
@@ -475,7 +475,7 @@ def test_changed_deepseek_key_is_written_once(qt_app, tmp_path) -> None:
 def test_cleared_deepseek_key_is_deleted_once(qt_app, tmp_path) -> None:
     secrets = FakeSecretStore("stored-key")
     window = SettingsWindow(make_manager(tmp_path, secrets))
-    window.api_key_edit.clear()
+    window.provider_api_key_edit.clear()
     window.save()
     assert secrets.set_values == []
     assert secrets.delete_count == 1
@@ -727,10 +727,10 @@ def test_settings_cancel_discards_edits_and_reopen_reloads_saved_values(qt_app, 
     window = MainWindow(tray_mode=True, config_manager=manager)
     window.show_settings()
     settings = window._settings_window
-    settings.model_edit.setText("unsaved-model")
+    settings.text_model_combo.setEditText("unsaved-model")
     settings.close()
     window.show_settings()
-    assert window._settings_window.model_edit.text() == "deepseek-chat"
+    assert window._settings_window.text_model_combo.currentText() == "deepseek-chat"
     window.shutdown()
     window.close()
     qt_app.processEvents()
@@ -798,15 +798,19 @@ def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
     manager = make_manager(tmp_path, secret_store)
     window = SettingsWindow(manager)
 
-    assert window.api_key_edit.text() == "stored-key"
-    window.api_key_edit.setText("new-key")
-    window.model_edit.setText("new-model")
+    assert window.provider_api_key_edit.text() == "stored-key"
+    window.provider_api_key_edit.setText("new-key")
+    window.text_model_combo.setCurrentIndex(window.text_model_combo.findData("__custom__"))
+    window.text_model_combo.setEditText("new-model")
     window.timeout_edit.setText("33")
     window.save()
 
     assert secret_store.set_values == ["new-key"]
     assert manager.settings_repository.load() == {
-        "model": "new-model",
+        "text_ai_provider": "deepseek",
+        "text_ai_model": "new-model",
+        "vision_ai_provider": "deepseek",
+        "vision_ai_model": "deepseek-v4-flash-vision-exp",
         "request_timeout": 33.0,
         "global_shortcut": "Ctrl+Shift+A",
         "vision_global_shortcut": "Ctrl+Shift+S",
@@ -826,10 +830,10 @@ def test_settings_warns_when_os_api_key_overrides_saved_key(qt_app, tmp_path, mo
 
     assert "DEEPSEEK_API_KEY" in window.api_key_override_label.text()
     assert not window.api_key_override_label.isHidden()
-    window.api_key_edit.setText("new-saved-key")
+    window.provider_api_key_edit.setText("new-saved-key")
     window.save()
 
-    assert secret_store.set_values == ["new-saved-key"]
+    assert secret_store.set_values == []
     assert "will not change the key currently in use" in window.api_key_override_label.text()
     window.deleteLater()
     qt_app.processEvents()
@@ -850,7 +854,7 @@ def test_connection_success_runs_off_gui_thread(qt_app, tmp_path, monkeypatch) -
 
     monkeypatch.setattr(settings_window_module, "AnalysisService", FakeService)
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
-    window.test_connection()
+    window.test_text_connection()
     assert window.is_connection_running()
     assert "Testing connection" in window.status_label.text()
     wait_for_connection(window, qt_app)
@@ -873,9 +877,9 @@ def test_connection_uses_current_input_key_and_bounded_timeout(qt_app, tmp_path,
 
     monkeypatch.setattr(settings_window_module, "AnalysisService", FakeService)
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("stored-key")))
-    window.api_key_edit.setText("input-key")
+    window.provider_api_key_edit.setText("input-key")
     window.timeout_edit.setText("60")
-    window.test_connection()
+    window.test_text_connection()
     wait_for_connection(window, qt_app)
 
     assert received and received[0].text_ai.api_key == "input-key"
@@ -894,7 +898,7 @@ def test_connection_401_is_shown_in_window(qt_app, tmp_path, monkeypatch) -> Non
 
     monkeypatch.setattr(settings_window_module, "AnalysisService", FakeService)
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("bad-key")))
-    window.test_connection()
+    window.test_text_connection()
     wait_for_connection(window, qt_app)
     assert "401" in window.status_label.text()
     window.deleteLater()
@@ -912,7 +916,7 @@ def test_closing_connection_test_cleans_up_thread(qt_app, tmp_path, monkeypatch)
 
     monkeypatch.setattr(settings_window_module, "AnalysisService", FakeService)
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
-    window.test_connection()
+    window.test_text_connection()
     window.close()
     wait_for_connection(window, qt_app)
     assert not window.is_connection_running()

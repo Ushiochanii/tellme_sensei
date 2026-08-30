@@ -58,6 +58,13 @@ from app.ocr.providers.google_vision import GoogleVisionOCRProvider
 from app.ocr.types import OCRCancelled, OCRError
 from app.platform.ocr import is_local_ocr_supported
 from app.ai.errors import AIProviderError, AIRequestCancelled
+from app.ai.catalog import (
+    AI_PROVIDER_CATALOG,
+    CUSTOM_MODEL_ID,
+    CUSTOM_MODEL_LABEL,
+    get_provider_descriptor,
+    models_for_provider,
+)
 from app.ai.models import AIBackendConfig
 from app.ai.service import AnalysisService
 from app.settings.secret_store import SecretStoreError
@@ -74,15 +81,15 @@ from app.version import __version__
 
 logger = logging.getLogger(__name__)
 CONNECTION_TEST_TIMEOUT = 10.0
-API_KEY_ENV_OVERRIDE_MESSAGE = (
-    "当前 API Key 由环境变量 DEEPSEEK_API_KEY 覆盖。"
-    "在设置中保存新的 API Key 不会改变当前实际使用的 Key。"
-)
 GOOGLE_VISION_ENV_OVERRIDE_MESSAGE = (
     "Google Vision API Key is currently overridden by the environment variable "
     "GOOGLE_VISION_API_KEY. "
     "Saving a different key will not change the key currently in use."
 )
+
+
+class ModelSelector(QComboBox):
+    """Editable model selector backed by the curated catalog."""
 
 
 class ConnectionTestWorker(QObject):
@@ -92,15 +99,25 @@ class ConnectionTestWorker(QObject):
     failed = Signal(str)
     finished = Signal()
 
-    def __init__(self, config: AppConfig, cancel_event: threading.Event | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        cancel_event: threading.Event | None = None,
+        capability: str = "text",
+    ) -> None:
         super().__init__()
         self.config = config
         self.cancel_event = cancel_event or threading.Event()
+        self.capability = capability
 
     @Slot()
     def run(self) -> None:
         try:
-            AnalysisService(self.config).test_connection(self.cancel_event)
+            service = AnalysisService(self.config)
+            if self.capability == "text":
+                service.test_connection(self.cancel_event)
+            else:
+                service.test_connection(self.cancel_event, capability=self.capability)
             if not self.cancel_event.is_set():
                 self.succeeded.emit()
         except AIRequestCancelled:
@@ -326,6 +343,9 @@ class SettingsWindow(QWidget):
         self._connection_thread: QThread | None = None
         self._connection_worker: ConnectionTestWorker | None = None
         self._connection_cancel_event: threading.Event | None = None
+        self._vision_connection_thread: QThread | None = None
+        self._vision_connection_worker: ConnectionTestWorker | None = None
+        self._vision_connection_cancel_event: threading.Event | None = None
         self._close_requested = False
         self._shutdown_requested = False
         self._shutdown_ready_emitted = False
@@ -342,7 +362,10 @@ class SettingsWindow(QWidget):
         self._update_download_worker: UpdateDownloadWorker | None = None
         self._update_download_cancel_event: threading.Event | None = None
         self._pending_update: UpdateCheckResult | None = None
-        self._loaded_api_key = ""
+        self._loaded_provider_keys: dict[str, str] = {}
+        self._loaded_provider_endpoints: dict[str, str] = {}
+        self._provider_key_values: dict[str, str] = {}
+        self._provider_endpoint_values: dict[str, str] = {}
         self._loaded_google_vision_api_key = ""
         self._loaded_auto_watch_values: dict[str, int | float] = {}
         self._loaded_auto_watch_analysis_mode = AnalysisMode.TEXT
@@ -374,10 +397,53 @@ class SettingsWindow(QWidget):
         header.addWidget(title)
         header.addWidget(subtitle)
         surface_layout.addLayout(header)
-        self.api_key_edit = QLineEdit()
-        self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.api_key_edit.setPlaceholderText(self._tr("settings.api_key_placeholder"))
-        self.model_edit = QLineEdit()
+        self.text_provider_combo = QComboBox()
+        self.text_provider_combo.setObjectName("textAIProviderCombo")
+        self.text_ai_provider_combo = self.text_provider_combo
+        self.vision_provider_combo = QComboBox()
+        self.vision_provider_combo.setObjectName("visionAIProviderCombo")
+        self.vision_ai_provider_combo = self.vision_provider_combo
+        for descriptor in AI_PROVIDER_CATALOG:
+            self.text_provider_combo.addItem(descriptor.display_name, descriptor.provider_id)
+            self.vision_provider_combo.addItem(descriptor.display_name, descriptor.provider_id)
+        self.text_model_combo = ModelSelector()
+        self.text_model_combo.setObjectName("textAIModelCombo")
+        self.text_model_combo.setEditable(True)
+        self.text_ai_model_combo = self.text_model_combo
+        self.text_model_combo.currentIndexChanged.connect(
+            lambda _index: self._clear_custom_placeholder(self.text_model_combo)
+        )
+        self.vision_model_combo = ModelSelector()
+        self.vision_model_combo.setObjectName("visionAIModelCombo")
+        self.vision_model_combo.setEditable(True)
+        self.vision_ai_model_combo = self.vision_model_combo
+        self.vision_model_combo.currentIndexChanged.connect(
+            lambda _index: self._clear_custom_placeholder(self.vision_model_combo)
+        )
+        self.provider_credentials_combo = QComboBox()
+        self.provider_credentials_combo.setObjectName("providerCredentialsCombo")
+        self.provider_combo = self.provider_credentials_combo
+        for descriptor in AI_PROVIDER_CATALOG:
+            self.provider_credentials_combo.addItem(
+                descriptor.display_name,
+                descriptor.provider_id,
+            )
+        self.text_provider_combo.currentIndexChanged.connect(
+            self._on_text_provider_changed
+        )
+        self.vision_provider_combo.currentIndexChanged.connect(
+            self._on_vision_provider_changed
+        )
+        self.provider_credentials_combo.currentIndexChanged.connect(
+            self._on_credentials_provider_changed
+        )
+        self.provider_api_key_edit = QLineEdit()
+        self.provider_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.provider_api_key_edit.setPlaceholderText(
+            self._tr("settings.provider_api_key_placeholder")
+        )
+        self.provider_endpoint_edit = QLineEdit()
+        self.provider_endpoint_edit.setPlaceholderText("https://…/v1")
         self.timeout_edit = QLineEdit()
         self.shortcut_edit = QKeySequenceEdit()
         self.shortcut_edit.setObjectName("textShortcutEdit")
@@ -503,9 +569,24 @@ class SettingsWindow(QWidget):
         google_layout.addWidget(self.google_vision_override_label)
         google_layout.addWidget(self.google_vision_test_button)
         google_layout.addWidget(self.google_vision_status_label)
-        self.test_button = QPushButton(self._tr("settings.test_connection"))
-        self.test_button.setObjectName("testConnectionButton")
-        self.test_button.clicked.connect(self.test_connection)
+        self.text_test_button = QPushButton(self._tr("settings.test_text_ai"))
+        self.text_test_button.setObjectName("testTextAIButton")
+        self.text_test_button.clicked.connect(self.test_text_connection)
+        self.text_cancel_button = QPushButton(self._tr("settings.cancel"))
+        self.text_cancel_button.setObjectName("cancelTextAIButton")
+        self.text_cancel_button.clicked.connect(self.cancel_text_connection)
+        self.text_cancel_button.setVisible(False)
+        self.vision_test_button = QPushButton(self._tr("settings.test_vision_ai"))
+        self.vision_test_button.setObjectName("testVisionAIButton")
+        self.vision_test_button.clicked.connect(self.test_vision_connection)
+        self.vision_cancel_button = QPushButton(self._tr("settings.cancel"))
+        self.vision_cancel_button.setObjectName("cancelVisionAIButton")
+        self.vision_cancel_button.clicked.connect(self.cancel_vision_connection)
+        self.vision_cancel_button.setVisible(False)
+        self.text_ai_status_label = QLabel()
+        self.text_ai_status_label.setWordWrap(True)
+        self.vision_ai_status_label = QLabel()
+        self.vision_ai_status_label.setWordWrap(True)
 
         self.interface_language_combo = QComboBox()
         self.interface_language_combo.setObjectName("interfaceLanguageCombo")
@@ -572,25 +653,77 @@ class SettingsWindow(QWidget):
 
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("settingsPages")
-        deepseek_page, deepseek_layout = make_page(
-            "DeepSeek", self._tr("settings.deepseek_description")
+        ai_page, ai_layout = make_page(
+            self._tr("settings.ai_title"), self._tr("settings.ai_description")
         )
-        deepseek_card = QFrame()
-        deepseek_card.setObjectName("settingsCard")
-        deepseek_card_layout = QVBoxLayout(deepseek_card)
-        deepseek_card_layout.setContentsMargins(16, 14, 16, 16)
-        deepseek_card_layout.setSpacing(10)
-        deepseek_form = QFormLayout()
-        deepseek_form.addRow(self._tr("settings.api_key"), self.api_key_edit)
-        deepseek_form.addRow(self._tr("settings.text_model"), self.model_edit)
-        deepseek_form.addRow(
-            self._tr("settings.request_timeout"), self.timeout_edit
-        )
-        deepseek_card_layout.addLayout(deepseek_form)
-        deepseek_card_layout.addWidget(self.api_key_override_label)
-        deepseek_card_layout.addWidget(self.test_button, 0, Qt.AlignmentFlag.AlignLeft)
-        deepseek_layout.addWidget(deepseek_card)
-        deepseek_layout.addStretch(1)
+
+        text_card = QFrame()
+        text_card.setObjectName("settingsCard")
+        text_card_layout = QVBoxLayout(text_card)
+        text_card_layout.setContentsMargins(16, 14, 16, 16)
+        text_card_layout.setSpacing(8)
+        text_heading = QLabel(self._tr("settings.text_ai_title"))
+        text_heading.setObjectName("cardTitle")
+        text_description = QLabel(self._tr("settings.text_ai_description"))
+        text_description.setWordWrap(True)
+        text_form = QFormLayout()
+        text_form.addRow(self._tr("settings.provider"), self.text_provider_combo)
+        text_form.addRow(self._tr("settings.model"), self.text_model_combo)
+        text_card_layout.addWidget(text_heading)
+        text_card_layout.addWidget(text_description)
+        text_card_layout.addLayout(text_form)
+        text_buttons = QHBoxLayout()
+        text_buttons.addWidget(self.text_test_button)
+        text_buttons.addWidget(self.text_cancel_button)
+        text_buttons.addStretch(1)
+        text_card_layout.addLayout(text_buttons)
+        text_card_layout.addWidget(self.text_ai_status_label)
+
+        vision_card = QFrame()
+        vision_card.setObjectName("settingsCard")
+        vision_card_layout = QVBoxLayout(vision_card)
+        vision_card_layout.setContentsMargins(16, 14, 16, 16)
+        vision_card_layout.setSpacing(8)
+        vision_heading = QLabel(self._tr("settings.vision_ai_title"))
+        vision_heading.setObjectName("cardTitle")
+        vision_description = QLabel(self._tr("settings.vision_ai_description"))
+        vision_description.setWordWrap(True)
+        vision_form = QFormLayout()
+        vision_form.addRow(self._tr("settings.provider"), self.vision_provider_combo)
+        vision_form.addRow(self._tr("settings.model"), self.vision_model_combo)
+        vision_card_layout.addWidget(vision_heading)
+        vision_card_layout.addWidget(vision_description)
+        vision_card_layout.addLayout(vision_form)
+        vision_buttons = QHBoxLayout()
+        vision_buttons.addWidget(self.vision_test_button)
+        vision_buttons.addWidget(self.vision_cancel_button)
+        vision_buttons.addStretch(1)
+        vision_card_layout.addLayout(vision_buttons)
+        vision_card_layout.addWidget(self.vision_ai_status_label)
+
+        credentials_card = QFrame()
+        credentials_card.setObjectName("settingsCard")
+        credentials_layout = QVBoxLayout(credentials_card)
+        credentials_layout.setContentsMargins(16, 14, 16, 16)
+        credentials_layout.setSpacing(8)
+        credentials_layout.addWidget(QLabel(self._tr("settings.provider_credentials")))
+        credentials_form = QFormLayout()
+        credentials_form.addRow(self._tr("settings.provider"), self.provider_credentials_combo)
+        credentials_form.addRow(self._tr("settings.api_key"), self.provider_api_key_edit)
+        credentials_form.addRow(self._tr("settings.endpoint"), self.provider_endpoint_edit)
+        credentials_form.addRow(self._tr("settings.request_timeout"), self.timeout_edit)
+        credentials_layout.addLayout(credentials_form)
+        credentials_layout.addWidget(self.api_key_override_label)
+        self.provider_endpoint_override_label = QLabel()
+        self.provider_endpoint_override_label.setObjectName("settingsWarningLabel")
+        self.provider_endpoint_override_label.setWordWrap(True)
+        self.provider_endpoint_override_label.setVisible(False)
+        credentials_layout.addWidget(self.provider_endpoint_override_label)
+
+        ai_layout.addWidget(text_card)
+        ai_layout.addWidget(vision_card)
+        ai_layout.addWidget(credentials_card)
+        ai_layout.addStretch(1)
 
         shortcuts_page, shortcuts_layout = make_page(
             self._tr("settings.shortcuts_title"),
@@ -787,7 +920,7 @@ class SettingsWindow(QWidget):
         language_layout.addStretch(1)
 
         for page in (
-            deepseek_page,
+            ai_page,
             shortcuts_page,
             ocr_page,
             local_page,
@@ -818,7 +951,7 @@ class SettingsWindow(QWidget):
         self._navigation_buttons: list[QPushButton] = []
         for index, label in enumerate(
             (
-                "DeepSeek",
+                self._tr("settings.ai_title"),
                 self._tr("settings.shortcuts_title"),
                 "OCR",
                 "Local OCR",
@@ -1207,17 +1340,69 @@ class SettingsWindow(QWidget):
             combo.blockSignals(True)
             combo.setCurrentIndex(max(0, combo.findData(value)))
             combo.blockSignals(False)
-        self._loaded_api_key = config.text_ai.api_key
+        self._loaded_provider_keys = {}
+        self._loaded_provider_endpoints = {}
+        for descriptor in AI_PROVIDER_CATALOG:
+            key_getter = getattr(self.config_manager, "get_provider_api_key", None)
+            endpoint_getter = getattr(self.config_manager, "get_provider_base_url", None)
+            self._loaded_provider_keys[descriptor.provider_id] = (
+                key_getter(descriptor.provider_id)
+                if callable(key_getter)
+                else (
+                    config.text_ai.api_key
+                    if descriptor.provider_id == config.text_ai.provider_id
+                    else ""
+                )
+            )
+            self._loaded_provider_endpoints[descriptor.provider_id] = (
+                endpoint_getter(descriptor.provider_id)
+                if callable(endpoint_getter)
+                else (
+                    config.text_ai.base_url
+                    if descriptor.provider_id == config.text_ai.provider_id
+                    else descriptor.default_base_url
+                )
+            )
+        self._provider_key_values = dict(self._loaded_provider_keys)
+        self._provider_endpoint_values = dict(self._loaded_provider_endpoints)
         self._loaded_google_vision_api_key = config.google_vision_api_key
-        self.api_key_edit.setText(config.text_ai.api_key)
+        self.text_provider_combo.blockSignals(True)
+        self.text_provider_combo.setCurrentIndex(
+            max(0, self.text_provider_combo.findData(config.text_ai.provider_id))
+        )
+        self.text_provider_combo.blockSignals(False)
+        self.vision_provider_combo.blockSignals(True)
+        self.vision_provider_combo.setCurrentIndex(
+            max(0, self.vision_provider_combo.findData(config.vision_ai.provider_id))
+        )
+        self.vision_provider_combo.blockSignals(False)
+        self._populate_model_selector(
+            self.text_model_combo,
+            config.text_ai.provider_id,
+            "text",
+            config.text_ai.model_id,
+        )
+        self._populate_model_selector(
+            self.vision_model_combo,
+            config.vision_ai.provider_id,
+            "vision",
+            config.vision_ai.model_id,
+        )
+        self.provider_credentials_combo.blockSignals(True)
+        self.provider_credentials_combo.setCurrentIndex(
+            max(0, self.provider_credentials_combo.findData(config.text_ai.provider_id))
+        )
+        self.provider_credentials_combo.blockSignals(False)
+        self._on_credentials_provider_changed()
         self.google_vision_api_key_edit.setText(config.google_vision_api_key)
         google_env_override = self.config_manager.has_explicit_google_vision_api_key()
         self.google_vision_api_key_edit.setReadOnly(google_env_override)
         self.google_vision_api_key_edit.setEnabled(not google_env_override)
         self.google_vision_override_label.setVisible(google_env_override)
-        api_env_override = self.config_manager.has_explicit_api_key()
+        api_env_override = self.config_manager.has_explicit_provider_api_key(
+            config.text_ai.provider_id
+        )
         self.api_key_override_label.setVisible(api_env_override)
-        self.model_edit.setText(config.text_ai.model_id)
         request_timeout = config.text_ai.request_timeout
         self.timeout_edit.setText(str(int(request_timeout) if request_timeout.is_integer() else request_timeout))
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
@@ -1252,6 +1437,127 @@ class SettingsWindow(QWidget):
             self._tr("settings.restart_required")
         )
 
+    def _populate_model_selector(
+        self,
+        selector: ModelSelector,
+        provider_id: str,
+        capability: str,
+        selected_model: str,
+    ) -> None:
+        """Render known models plus a lossless Custom entry for saved IDs."""
+
+        selector.blockSignals(True)
+        selector.clear()
+        try:
+            models = models_for_provider(provider_id, capability)  # type: ignore[arg-type]
+        except ValueError:
+            models = ()
+        for model in models:
+            selector.addItem(model.display_name, model.model_id)
+        selector.addItem(self._tr("settings.custom_model_id"), CUSTOM_MODEL_ID)
+        known_index = selector.findData(selected_model)
+        if known_index >= 0:
+            selector.setCurrentIndex(known_index)
+        else:
+            custom_index = selector.findData(CUSTOM_MODEL_ID)
+            selector.setCurrentIndex(max(0, custom_index))
+            selector.setEditText(selected_model)
+        selector.blockSignals(False)
+
+    @staticmethod
+    def _selected_model(selector: ModelSelector) -> str:
+        value = selector.currentData()
+        text = selector.currentText().strip()
+        if value == CUSTOM_MODEL_ID or value is None:
+            return text
+        # QComboBox keeps the selected item's userData when a user edits the
+        # line edit directly. Treat a changed display value as a custom model
+        # so typing an unlisted ID does not silently save the old selection.
+        if selector.isEditable() and selector.currentIndex() >= 0:
+            if text != selector.itemText(selector.currentIndex()).strip():
+                return text
+        return str(value).strip()
+
+    @staticmethod
+    def _clear_custom_placeholder(selector: ModelSelector) -> None:
+        if selector.currentData() == CUSTOM_MODEL_ID and selector.currentText() in {
+            CUSTOM_MODEL_LABEL,
+            "自定义模型 ID…",
+        }:
+            selector.setEditText("")
+
+    def _provider_id(self, combo: QComboBox) -> str:
+        return str(combo.currentData() or "deepseek").strip().lower()
+
+    @Slot(int)
+    def _on_text_provider_changed(self, _index: int) -> None:
+        provider_id = self._provider_id(self.text_provider_combo)
+        current_model = self._selected_model(self.text_model_combo)
+        known = {model.model_id for model in models_for_provider(provider_id, "text")}
+        selected = current_model if current_model in known else get_provider_descriptor(provider_id).default_model("text")
+        self._populate_model_selector(
+            self.text_model_combo,
+            provider_id,
+            "text",
+            selected,
+        )
+
+    @Slot(int)
+    def _on_vision_provider_changed(self, _index: int) -> None:
+        provider_id = self._provider_id(self.vision_provider_combo)
+        current_model = self._selected_model(self.vision_model_combo)
+        known = {model.model_id for model in models_for_provider(provider_id, "vision")}
+        selected = current_model if current_model in known else get_provider_descriptor(provider_id).default_model("vision")
+        self._populate_model_selector(
+            self.vision_model_combo,
+            provider_id,
+            "vision",
+            selected,
+        )
+
+    def _capture_provider_editor(self) -> None:
+        provider_id = self._provider_id(self.provider_credentials_combo)
+        self._provider_key_values[provider_id] = self.provider_api_key_edit.text().strip()
+        self._provider_endpoint_values[provider_id] = self.provider_endpoint_edit.text().strip()
+
+    @Slot(int)
+    def _on_credentials_provider_changed(self, _index: int = -1) -> None:
+        previous_provider = getattr(self, "_active_credentials_provider", None)
+        if previous_provider is not None:
+            self._provider_key_values[previous_provider] = self.provider_api_key_edit.text().strip()
+            self._provider_endpoint_values[previous_provider] = self.provider_endpoint_edit.text().strip()
+        provider_id = self._provider_id(self.provider_credentials_combo)
+        self._active_credentials_provider = provider_id
+        self.provider_api_key_edit.setText(self._provider_key_values.get(provider_id, ""))
+        self.provider_endpoint_edit.setText(
+            self._provider_endpoint_values.get(
+                provider_id,
+                get_provider_descriptor(provider_id).default_base_url,
+            )
+        )
+        explicit_key = self.config_manager.has_explicit_provider_api_key(provider_id)
+        self.provider_api_key_edit.setReadOnly(explicit_key)
+        self.provider_api_key_edit.setEnabled(not explicit_key)
+        self.api_key_override_label.setText(
+            self._tr(
+                "settings.provider_api_key_env_override",
+                provider=get_provider_descriptor(provider_id).display_name,
+                environment_name=get_provider_descriptor(provider_id).api_key_env,
+            )
+        )
+        self.api_key_override_label.setVisible(explicit_key)
+        explicit_endpoint = self.config_manager.has_explicit_provider_base_url(provider_id)
+        self.provider_endpoint_edit.setReadOnly(explicit_endpoint)
+        self.provider_endpoint_edit.setEnabled(not explicit_endpoint)
+        self.provider_endpoint_override_label.setText(
+            self._tr(
+                "settings.provider_endpoint_env_override",
+                provider=get_provider_descriptor(provider_id).display_name,
+                environment_name=f"{provider_id.upper()}_BASE_URL",
+            )
+        )
+        self.provider_endpoint_override_label.setVisible(explicit_endpoint)
+
     def reload_values(self) -> None:
         """Reload persisted values when the window is shown again."""
 
@@ -1272,7 +1578,7 @@ class SettingsWindow(QWidget):
         return str(self.online_service_combo.currentData() or "google_vision")
 
     def _show_environment_override_warnings(self) -> None:
-        self.api_key_override_label.setVisible(self.config_manager.has_explicit_api_key())
+        self._on_credentials_provider_changed()
         self.google_vision_override_label.setVisible(
             self.config_manager.has_explicit_google_vision_api_key()
         )
@@ -1315,11 +1621,17 @@ class SettingsWindow(QWidget):
         self,
         *,
         connection_running: bool | None = None,
+        vision_connection_running: bool | None = None,
         download_running: bool | None = None,
         google_running: bool | None = None,
     ) -> None:
         connection_running = (
             self.is_connection_running() if connection_running is None else connection_running
+        )
+        vision_connection_running = (
+            self.is_vision_connection_running()
+            if vision_connection_running is None
+            else vision_connection_running
         )
         download_running = (
             self.is_download_running() if download_running is None else download_running
@@ -1327,7 +1639,7 @@ class SettingsWindow(QWidget):
         google_running = (
             self.is_google_test_running() if google_running is None else google_running
         )
-        busy = connection_running or download_running or google_running
+        busy = connection_running or vision_connection_running or download_running or google_running
         self.download_ocr_button.setEnabled(self._local_ocr_supported and not busy)
         self.verify_ocr_button.setEnabled(
             self._local_ocr_supported and not busy and self.component_manager.is_installed()
@@ -1335,7 +1647,12 @@ class SettingsWindow(QWidget):
         self.remove_ocr_button.setEnabled(
             self._local_ocr_supported and not busy and self.component_manager.is_installed()
         )
-        self.test_button.setEnabled(not busy)
+        self.text_test_button.setEnabled(not busy)
+        self.vision_test_button.setEnabled(not busy)
+        self.text_cancel_button.setVisible(connection_running)
+        self.text_cancel_button.setEnabled(connection_running)
+        self.vision_cancel_button.setVisible(vision_connection_running)
+        self.vision_cancel_button.setEnabled(vision_connection_running)
         self.google_vision_test_button.setEnabled(not busy)
         provider_editable = not busy and not self.config_manager.has_explicit_ocr_provider()
         self.local_mode_radio.setEnabled(provider_editable)
@@ -1546,8 +1863,11 @@ class SettingsWindow(QWidget):
             self.local_ocr_component_changed.emit()
 
     def _read_config_from_fields(self) -> AppConfig:
-        model = self.model_edit.text().strip()
-        if not model:
+        text_provider = self._provider_id(self.text_provider_combo)
+        vision_provider = self._provider_id(self.vision_provider_combo)
+        text_model = self._selected_model(self.text_model_combo)
+        vision_model = self._selected_model(self.vision_model_combo)
+        if not text_model or not vision_model:
             raise ValueError(self._tr("settings.validation_model_empty"))
         try:
             request_timeout = float(self.timeout_edit.text().strip())
@@ -1573,21 +1893,30 @@ class SettingsWindow(QWidget):
             )
         except HotkeySpecError as exc:
             raise ValueError(self._tr("settings.validation_shortcuts")) from exc
+        self._capture_provider_editor()
         current = self.config_manager.load()
-        api_key = self.api_key_edit.text().strip()
+        for provider_id in {text_provider, vision_provider}:
+            if not self._provider_endpoint_values.get(provider_id, "").strip():
+                raise ValueError(self._tr("settings.validation_endpoint_empty"))
         return AppConfig(
             text_ai=AIBackendConfig(
-                provider_id=current.text_ai.provider_id,
-                model_id=model,
-                api_key=api_key,
-                base_url=current.text_ai.base_url,
+                provider_id=text_provider,
+                model_id=text_model,
+                api_key=self._provider_key_values.get(text_provider, ""),
+                base_url=self._provider_endpoint_values.get(
+                    text_provider,
+                    current.text_ai.base_url,
+                ),
                 request_timeout=request_timeout,
             ),
             vision_ai=AIBackendConfig(
-                provider_id=current.vision_ai.provider_id,
-                model_id=current.vision_ai.model_id,
-                api_key=api_key,
-                base_url=current.vision_ai.base_url,
+                provider_id=vision_provider,
+                model_id=vision_model,
+                api_key=self._provider_key_values.get(vision_provider, ""),
+                base_url=self._provider_endpoint_values.get(
+                    vision_provider,
+                    current.vision_ai.base_url,
+                ),
                 request_timeout=request_timeout,
             ),
             ocr_language=current.ocr_language,
@@ -1612,20 +1941,25 @@ class SettingsWindow(QWidget):
         except HotkeySpecError as exc:
             raise ValueError(str(exc)) from exc
 
-    @Slot()
-    def test_connection(self) -> None:
-        if self._connection_thread is not None and self._connection_thread.isRunning():
+    def _start_ai_connection(self, capability: str) -> None:
+        if capability not in {"text", "vision"}:
+            raise ValueError("capability must be 'text' or 'vision'")
+        if (
+            self.is_connection_running()
+            or self.is_vision_connection_running()
+        ):
             return
         if self.is_download_running() or self.is_google_test_running():
-            self._set_status(self._tr("settings.wait_ocr_before_connection"))
+            self._set_status(self._tr("settings.wait_operation_before_ai"))
             return
         try:
             config = self._read_config_from_fields()
         except (ConfigError, ValueError) as exc:
             self._set_status(str(exc))
             return
-        if not config.text_ai.api_key:
-            self._set_status(self._tr("settings.enter_api_key"))
+        backend = config.text_ai if capability == "text" else config.vision_ai
+        if not backend.api_key:
+            self._set_status(self._tr("settings.enter_provider_api_key"))
             return
 
         config = replace(
@@ -1640,49 +1974,117 @@ class SettingsWindow(QWidget):
             ),
         )
         self._close_requested = False
-        self._connection_cancel_event = threading.Event()
-        worker = ConnectionTestWorker(config, self._connection_cancel_event)
+        cancel_event = threading.Event()
+        worker = ConnectionTestWorker(config, cancel_event, capability)
         thread = QThread(self)
-        thread.setObjectName("SettingsConnectionTestThread")
+        thread.setObjectName(
+            "SettingsVisionConnectionTestThread"
+            if capability == "vision"
+            else "SettingsConnectionTestThread"
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.succeeded.connect(self._on_connection_success)
-        worker.failed.connect(self._on_connection_failed)
+        if capability == "vision":
+            worker.succeeded.connect(self._on_vision_connection_success)
+            worker.failed.connect(self._on_vision_connection_failed)
+            thread.finished.connect(self._on_vision_connection_finished)
+            self._vision_connection_worker = worker
+            self._vision_connection_thread = thread
+            self._vision_connection_cancel_event = cancel_event
+        else:
+            worker.succeeded.connect(self._on_connection_success)
+            worker.failed.connect(self._on_connection_failed)
+            thread.finished.connect(self._on_connection_finished)
+            self._connection_worker = worker
+            self._connection_thread = thread
+            self._connection_cancel_event = cancel_event
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_connection_finished)
-        self._connection_worker = worker
-        self._connection_thread = thread
-        self._refresh_operation_controls(connection_running=True)
-        self._set_status(self._tr("settings.connection_testing"))
+        self._refresh_operation_controls(
+            connection_running=capability == "text",
+            vision_connection_running=capability == "vision",
+        )
+        if capability == "vision":
+            self.vision_test_button.setText(self._tr("settings.testing"))
+            self.vision_ai_status_label.setText(self._tr("settings.connection_testing"))
+        else:
+            self._set_status(self._tr("settings.connection_testing"))
+            self.text_test_button.setText(self._tr("settings.testing"))
         thread.start()
+
+    @Slot()
+    def test_text_connection(self) -> None:
+        self._start_ai_connection("text")
+
+    @Slot()
+    def test_vision_connection(self) -> None:
+        self._start_ai_connection("vision")
 
     @Slot()
     def _on_connection_success(self) -> None:
         if not self._close_requested and not self._shutdown_requested:
             self._set_status(self._tr("settings.connection_success"))
+            self.text_ai_status_label.setText(self._tr("settings.text_ai_connection_success"))
 
     @Slot(str)
     def _on_connection_failed(self, message: str) -> None:
         if not self._close_requested and not self._shutdown_requested:
             self._set_status(message)
+            self.text_ai_status_label.setText(message)
 
     @Slot()
     def _on_connection_finished(self) -> None:
         self._connection_thread = None
         self._connection_worker = None
         self._connection_cancel_event = None
+        self.text_test_button.setText(self._tr("settings.test_text_ai"))
         if self._close_requested or self._shutdown_requested:
             self.hide()
         self._refresh_operation_controls()
         self._maybe_emit_shutdown_ready()
 
     @Slot()
+    def _on_vision_connection_success(self) -> None:
+        if not self._close_requested and not self._shutdown_requested:
+            message = self._tr("settings.vision_ai_connection_success")
+            self.vision_ai_status_label.setText(message)
+            self._set_status(message)
+
+    @Slot(str)
+    def _on_vision_connection_failed(self, message: str) -> None:
+        if not self._close_requested and not self._shutdown_requested:
+            self.vision_ai_status_label.setText(message)
+            self._set_status(message)
+
+    @Slot()
+    def _on_vision_connection_finished(self) -> None:
+        self._vision_connection_thread = None
+        self._vision_connection_worker = None
+        self._vision_connection_cancel_event = None
+        self.vision_test_button.setText(self._tr("settings.test_vision_ai"))
+        if self._close_requested or self._shutdown_requested:
+            self.hide()
+        self._refresh_operation_controls()
+        self._maybe_emit_shutdown_ready()
+
+    @Slot()
+    def cancel_text_connection(self) -> None:
+        if self._connection_worker is not None:
+            self._connection_worker.request_cancel()
+            self._set_status(self._tr("settings.cancelling"))
+
+    @Slot()
+    def cancel_vision_connection(self) -> None:
+        if self._vision_connection_worker is not None:
+            self._vision_connection_worker.request_cancel()
+            self.vision_ai_status_label.setText(self._tr("settings.cancelling"))
+
+    @Slot()
     def test_google_vision(self) -> None:
         if self.is_google_test_running():
             return
-        if self.is_connection_running() or self.is_download_running():
+        if self.is_connection_running() or self.is_vision_connection_running() or self.is_download_running():
             self._set_status(self._tr("settings.wait_operation_before_google"))
             return
         try:
@@ -1784,20 +2186,37 @@ class SettingsWindow(QWidget):
             provider_to_save = None
             if not self.config_manager.has_explicit_ocr_provider():
                 provider_to_save = config.ocr_provider
-            api_key_to_save = (
-                config.text_ai.api_key
-                if config.text_ai.api_key != self._loaded_api_key
-                else None
-            )
+            self._capture_provider_editor()
+            provider_keys_to_save: dict[str, str] = {}
+            provider_endpoints_to_save: dict[str, str] = {}
+            for descriptor in AI_PROVIDER_CATALOG:
+                provider_id = descriptor.provider_id
+                if not self.config_manager.has_explicit_provider_api_key(provider_id):
+                    current_key = self._provider_key_values.get(provider_id, "")
+                    if current_key != self._loaded_provider_keys.get(provider_id, ""):
+                        provider_keys_to_save[provider_id] = current_key
+                endpoint_override = getattr(
+                    self.config_manager,
+                    "has_explicit_provider_base_url",
+                    lambda _provider_id: False,
+                )
+                if not endpoint_override(provider_id):
+                    current_endpoint = self._provider_endpoint_values.get(provider_id, "")
+                    if current_endpoint != self._loaded_provider_endpoints.get(provider_id, ""):
+                        provider_endpoints_to_save[provider_id] = current_endpoint
             google_key_to_save = None
             if not self.config_manager.has_explicit_google_vision_api_key():
                 if config.google_vision_api_key != self._loaded_google_vision_api_key:
                     google_key_to_save = config.google_vision_api_key
             self.config_manager.save_settings(
-                api_key_to_save,
-                config.text_ai.model_id,
-                config.text_ai.request_timeout,
-                config.global_shortcut,
+                text_ai_provider=config.text_ai.provider_id,
+                text_ai_model=config.text_ai.model_id,
+                vision_ai_provider=config.vision_ai.provider_id,
+                vision_ai_model=config.vision_ai.model_id,
+                request_timeout=config.text_ai.request_timeout,
+                provider_api_keys=provider_keys_to_save,
+                provider_base_urls=provider_endpoints_to_save,
+                global_shortcut=config.global_shortcut,
                 vision_global_shortcut=config.vision_global_shortcut,
                 watch_global_shortcut=config.watch_global_shortcut,
                 context_watch_global_shortcut=config.context_watch_global_shortcut,
@@ -1890,6 +2309,15 @@ class SettingsWindow(QWidget):
     def is_connection_running(self) -> bool:
         return self._connection_thread is not None and self._connection_thread.isRunning()
 
+    def is_text_connection_running(self) -> bool:
+        return self.is_connection_running()
+
+    def is_vision_connection_running(self) -> bool:
+        return (
+            self._vision_connection_thread is not None
+            and self._vision_connection_thread.isRunning()
+        )
+
     def is_download_running(self) -> bool:
         return self._download_thread is not None and self._download_thread.isRunning()
 
@@ -1905,6 +2333,7 @@ class SettingsWindow(QWidget):
     def has_running_background_operations(self) -> bool:
         return (
             self.is_connection_running()
+            or self.is_vision_connection_running()
             or self.is_download_running()
             or self.is_google_test_running()
             or self.is_update_check_running()
@@ -1920,6 +2349,9 @@ class SettingsWindow(QWidget):
         if self.is_connection_running():
             if self._connection_worker is not None:
                 self._connection_worker.request_cancel()
+        if self.is_vision_connection_running():
+            if self._vision_connection_worker is not None:
+                self._vision_connection_worker.request_cancel()
         if self.is_google_test_running():
             self.cancel_google_vision_test()
         if self.is_update_check_running() and self._update_check_worker is not None:
@@ -1946,6 +2378,9 @@ class SettingsWindow(QWidget):
         if self.is_connection_running():
             if self._connection_worker is not None:
                 self._connection_worker.request_cancel()
+        if self.is_vision_connection_running():
+            if self._vision_connection_worker is not None:
+                self._vision_connection_worker.request_cancel()
         if self.is_google_test_running():
             self.cancel_google_vision_test()
         if self.is_update_check_running() and self._update_check_worker is not None:
