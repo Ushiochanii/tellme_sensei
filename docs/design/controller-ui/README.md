@@ -1,25 +1,26 @@
-# Controller UI design assets
+# Controller UI design references and reusable assets
 
-These files support the floating-controller redesign tracked by Issue #25 and Design PR #51.
+This directory supports Issue #25 / Design PR #51.
 
-## Reference images
+## `reference/`
 
-- `reference/current-controller.webp` — current UI screenshot supplied during design review.
-- `reference/controller-redesign-preview.webp` — GPT Image concept preview for the proposed 2×2 controller.
-- `reference/controller-redesign-asset-board.webp` — GPT Image asset/style board used during design discussion.
+Visual references only; they are not runtime assets.
 
-The reference copies are WebP exports sized for repository review. The original conversation images remain the visual source used to prepare them.
+- `current-controller.webp` — current controller screenshot supplied during review.
+- `controller-redesign-preview.webp` — GPT Image concept preview for the proposed 2×2 controller.
+- `controller-redesign-asset-board.webp` — GPT Image style / asset-board reference.
 
-## Extracted concept assets
+## `assets/`
 
-- `assets/icon-text-ocr.png`
-- `assets/icon-vision.png`
-- `assets/icon-watch.png`
-- `assets/icon-context-watch.png`
-- `assets/status-strip-ready.webp`
+Reusable **vector source assets**. These are clean standalone SVGs with a common 64×64 viewBox, consistent stroke treatment, and no card/background/text baked into the file.
 
-These are **design references**, not an instruction to rasterize the production UI. Cards, labels, shortcut/footer chips, status text, borders, hover states, and layout should remain native Qt UI built from the existing theme primitives so they scale correctly across Windows/macOS and DPI settings.
+- `icon-text-ocr.svg`
+- `icon-vision.svg`
+- `icon-watch.svg`
+- `icon-context-watch.svg`
 
-The standalone icon PNGs are extracted concept assets for reuse/reference. Prefer the existing `app/ui/theme.py` drawing/icon path when it can reproduce the approved shapes cleanly rather than adding unnecessary bitmap runtime dependencies.
+Cards, shortcut/footer chips, borders, hover/pressed states and the compact status strip are **not image assets**. They should be implemented natively in Qt using `app/ui/theme.py` so layout and DPI scaling remain correct on Windows and macOS.
 
-The GPT Image asset board is exploratory and contains shortcut labels for Watch modes that are **not** part of the accepted design. The implementation source of truth remains `docs/plans/controller-ui-unification-design.md`.
+The previous cropped bitmap exports were intentionally removed: they were board fragments, not reusable source assets.
+
+The GPT Image boards are exploratory references. Any invented shortcuts, labels or colors on those boards are not implementation requirements. The source of truth remains `docs/plans/controller-ui-unification-design.md`.
