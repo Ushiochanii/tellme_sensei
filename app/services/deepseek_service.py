@@ -8,50 +8,61 @@ import threading
 from typing import Any
 
 from app.config import AppConfig
+from app.localization import (
+    DEFAULT_ANSWER_LANGUAGE,
+    DEFAULT_INTERFACE_LANGUAGE,
+    answer_language_instruction,
+    tr,
+)
 
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """你是一个考试学习助手。
-用户会提供通过 OCR 识别得到的考试题目。
-请判断题目含义；选择题先明确指出正确选项；给出简洁完整的解析；说明核心知识点。
-如果 OCR 内容明显有错误，请根据上下文合理推断并指出可能存在 OCR 错误。
-如果信息不足以判断答案，不要编造答案。
-请使用以下格式回答：
-
-【答案】...
-
-【解析】...
-
-【知识点】...
-"""
-
 VISION_MODEL = "deepseek-v4-flash-vision-exp"
-VISION_SYSTEM_PROMPT = """你是一个考试学习助手。
-用户会提供一张题目截图，截图本身是主要信息来源，不要假设已经完成 OCR。
-请识别题目、相关文字/标签/坐标轴/选项，并在存在图表、表格、几何图形、网络拓扑、流程图或其他视觉结构时结合图形进行推理。
-对于选择题，请明确指出所选选项并解释理由；不要猜测无法读清或无法判断的信息。
-请使用以下格式回答：
 
-【答案】...
 
-【解析】...
+def _answer_contract(language: str) -> str:
+    return answer_language_instruction(language)
 
-【知识点】...
-"""
-CONTEXT_QUESTION_SYSTEM_PROMPT = """你是一个考试学习助手。
-用户会提供分别从公共题干和当前问题区域 OCR 得到的文字。
-请使用公共题干作为当前问题的共享背景，并只回答当前问题；如果是选择题，请明确指出正确选项并解释理由。
-如果 OCR 内容明显有错误，请根据上下文合理推断并指出可能存在 OCR 错误。
-如果信息不足以判断答案，不要编造答案。
-请使用以下格式回答：
 
-【答案】...
+def _text_system_prompt(language: str) -> str:
+    return """You are an exam study assistant.
+The user will provide an exam question recognized through OCR.
+Understand the question, identify the answer, explain the reasoning, and summarize the key concepts.
+For multiple-choice questions, clearly identify the correct option and explain why.
+If OCR contains an obvious error, infer from context and mention the possible OCR error.
+If the information is insufficient, do not invent an answer.
 
-【解析】...
+""" + _answer_contract(language)
 
-【知识点】...
-"""
+
+def _vision_system_prompt(language: str) -> str:
+    return """You are an exam study assistant.
+The user will provide a question screenshot; the screenshot is the primary source and OCR must not be assumed.
+Read the question, text, labels, axes, options, tables, diagrams, geometry, network topology, and flow structures.
+For multiple-choice questions, clearly identify the selected option and explain why.
+Do not guess information that cannot be read or determined.
+
+""" + _answer_contract(language)
+
+
+def _context_question_system_prompt(language: str) -> str:
+    return """You are an exam study assistant.
+The user will provide text recognized separately from a shared Context region and a current Question region.
+Use the shared Context as background and answer only the current Question.
+For multiple-choice questions, clearly identify the correct option and explain why.
+If OCR contains an obvious error, infer from context and mention the possible OCR error.
+If the information is insufficient, do not invent an answer.
+
+""" + _answer_contract(language)
+
+
+# Keep the public constants for integrations that imported them before answer
+# language preferences existed.  Runtime requests use the config-aware helpers
+# above so all three analysis paths share one language contract.
+SYSTEM_PROMPT = _text_system_prompt(DEFAULT_ANSWER_LANGUAGE)
+VISION_SYSTEM_PROMPT = _vision_system_prompt(DEFAULT_ANSWER_LANGUAGE)
+CONTEXT_QUESTION_SYSTEM_PROMPT = _context_question_system_prompt(DEFAULT_ANSWER_LANGUAGE)
 
 
 class DeepSeekError(RuntimeError):
@@ -69,6 +80,14 @@ class DeepSeekService:
         self.config = config
         self._client = client
 
+    @property
+    def interface_language(self) -> str:
+        return getattr(self.config, "interface_language", DEFAULT_INTERFACE_LANGUAGE)
+
+    @property
+    def answer_language(self) -> str:
+        return getattr(self.config, "answer_language", DEFAULT_ANSWER_LANGUAGE)
+
     def analyze(
         self,
         ocr_text: str,
@@ -78,13 +97,13 @@ class DeepSeekService:
 
         text = ocr_text.strip()
         if not text:
-            raise DeepSeekError("OCR 没有识别到有效文字，无法请求 DeepSeek。")
+            raise DeepSeekError(tr("error.deepseek_empty_ocr", self.interface_language))
         self._raise_if_cancelled(cancel_event)
 
         return self._stream_completion(
             model=self.config.model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": _text_system_prompt(self.answer_language)},
                 {"role": "user", "content": f"下面是 OCR 识别到的题目：\n\n{text}"},
             ],
             cancel_event=cancel_event,
@@ -102,12 +121,17 @@ class DeepSeekService:
         context = context_text.strip()
         question = question_text.strip()
         if not question:
-            raise DeepSeekError("Question OCR 没有识别到有效文字，无法请求 DeepSeek。")
+            raise DeepSeekError(
+                tr("error.deepseek_empty_question_ocr", self.interface_language)
+            )
         self._raise_if_cancelled(cancel_event)
         return self._stream_completion(
             model=self.config.model,
             messages=[
-                {"role": "system", "content": CONTEXT_QUESTION_SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": _context_question_system_prompt(self.answer_language),
+                },
                 {
                     "role": "user",
                     "content": (
@@ -132,23 +156,26 @@ class DeepSeekService:
         """Send one in-memory screenshot directly to the fixed Vision model."""
 
         if not isinstance(image_bytes, (bytes, bytearray)) or not image_bytes:
-            raise DeepSeekError("截图内容为空，无法请求 DeepSeek Vision。")
+            raise DeepSeekError(tr("error.deepseek_empty_image", self.interface_language))
         mime_type = mime_type.strip().lower()
         if mime_type != "image/png":
-            raise DeepSeekError("Vision Mode 当前只支持 PNG 截图。")
+            raise DeepSeekError(tr("error.deepseek_png_only", self.interface_language))
         self._raise_if_cancelled(cancel_event)
         encoded = base64.b64encode(bytes(image_bytes)).decode("ascii")
         data_url = f"data:{mime_type};base64,{encoded}"
         return self._stream_completion(
             model=VISION_MODEL,
             messages=[
-                {"role": "system", "content": VISION_SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": _vision_system_prompt(self.answer_language),
+                },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": "请直接分析这张题目截图，并按指定格式给出答案、解析和知识点。",
+                            "text": "Analyze this question screenshot directly and follow the specified answer format.",
                         },
                         {
                             "type": "image_url",
@@ -222,7 +249,7 @@ class DeepSeekService:
                 reasoning_content_chars,
                 sorted(finish_reasons),
             )
-            raise DeepSeekError("DeepSeek 返回了空答案。")
+            raise DeepSeekError(tr("error.deepseek_empty_answer", self.interface_language))
         logger.info(
             "DeepSeek API request completed model=%s visible_content_chars=%d "
             "reasoning_content_present=%s reasoning_content_chars=%d finish_reasons=%s",
@@ -239,7 +266,7 @@ class DeepSeekService:
 
         self._raise_if_cancelled(cancel_event)
         if not self.config.api_key:
-            raise DeepSeekError("未配置 DeepSeek API Key，请在设置中保存 API Key。")
+            raise DeepSeekError(tr("error.deepseek_missing_api_key", self.interface_language))
 
         client = self._get_client()
         response = None
@@ -318,15 +345,11 @@ class DeepSeekService:
         if self._client is not None:
             return self._client
         if not self.config.api_key:
-            raise DeepSeekError(
-                "未配置 DeepSeek API Key，请在设置中保存 API Key，或检查 .env 配置。"
-            )
+            raise DeepSeekError(tr("error.deepseek_missing_api_key_env", self.interface_language))
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise DeepSeekError(
-                "未安装 openai 依赖，请先执行 python -m pip install -r requirements.txt。"
-            ) from exc
+            raise DeepSeekError(tr("error.deepseek_missing_openai", self.interface_language)) from exc
         self._client = OpenAI(
             api_key=self.config.api_key,
             base_url=self.config.base_url,
@@ -335,20 +358,19 @@ class DeepSeekService:
         )
         return self._client
 
-    @staticmethod
-    def _format_error(exc: Exception) -> str:
+    def _format_error(self, exc: Exception) -> str:
         status_code = getattr(exc, "status_code", None)
         if status_code == 401:
-            return "DeepSeek API Key 无效（401）。请前往设置检查 API Key。"
+            return tr("error.deepseek_401", self.interface_language)
         if status_code == 403:
-            return "DeepSeek API 访问被拒绝（403）。请检查账户权限或 API Key。"
+            return tr("error.deepseek_403", self.interface_language)
         if status_code == 429:
-            return "DeepSeek API 请求过于频繁（429），请稍后重试。"
+            return tr("error.deepseek_429", self.interface_language)
         if isinstance(status_code, int) and status_code >= 500:
-            return f"DeepSeek 服务暂时不可用（{status_code}），请稍后重试。"
+            return tr("error.deepseek_5xx", self.interface_language, status_code=status_code)
         name = type(exc).__name__.lower()
         if "timeout" in name:
-            return "DeepSeek API 请求超时，请检查网络后重试。"
+            return tr("error.deepseek_timeout", self.interface_language)
         if "connection" in name:
-            return "连接 DeepSeek API 失败，请检查网络连接。"
-        return "DeepSeek API 请求失败，请检查网络、API Key 和模型配置。"
+            return tr("error.deepseek_connection", self.interface_language)
+        return tr("error.deepseek_generic", self.interface_language)

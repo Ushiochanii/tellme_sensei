@@ -29,6 +29,11 @@ from app.ocr.types import OCRLine, OCRResult
 from app.pipeline import ContextQuestionPipelineResult, PipelineResult
 from app.capture.overlay import CaptureOverlay
 from app.config import ConfigError, ConfigManager
+from app.localization import (
+    DEFAULT_INTERFACE_LANGUAGE,
+    normalize_language,
+    tr,
+)
 from app.local_ocr.component_manager import LocalOCRComponentManager
 from app.ocr.factory import create_ocr_provider
 from app.ocr.local_session import LocalOCRSession
@@ -129,6 +134,9 @@ class MainWindow(QWidget):
     processing_finished = Signal()
     shutdown_ready = Signal()
 
+    def _tr(self, key: str, **values: object) -> str:
+        return tr(key, self._interface_language, **values)
+
     def __init__(
         self,
         debug_capture_path: Path | None = None,
@@ -141,11 +149,25 @@ class MainWindow(QWidget):
         local_ocr_session: LocalOCRSession | None = None,
         component_manager: LocalOCRComponentManager | None = None,
         auto_watch_fake: bool = False,
+        interface_language: str | None = None,
     ) -> None:
         super().__init__()
         self.debug_capture_path = debug_capture_path
         self.tray_mode = tray_mode
         self.config_manager = config_manager or ConfigManager()
+        settings_repository = getattr(self.config_manager, "settings_repository", None)
+        repository_language_getter = getattr(
+            settings_repository, "interface_language", None
+        )
+        repository_language = (
+            repository_language_getter()
+            if callable(repository_language_getter)
+            else DEFAULT_INTERFACE_LANGUAGE
+        )
+        self._interface_language = normalize_language(
+            interface_language if interface_language is not None else repository_language,
+            default=DEFAULT_INTERFACE_LANGUAGE,
+        )
         self.hotkey_manager = hotkey_manager
         self.vision_hotkey_manager = vision_hotkey_manager
         self.watch_hotkey_manager = watch_hotkey_manager
@@ -203,8 +225,8 @@ class MainWindow(QWidget):
         title.setObjectName("titleLabel")
         settings_button = QPushButton()
         settings_button.setObjectName("settingsButton")
-        settings_button.setToolTip("Settings")
-        settings_button.setAccessibleName("Settings")
+        settings_button.setToolTip(self._tr("controller.settings_tooltip"))
+        settings_button.setAccessibleName(self._tr("controller.settings_tooltip"))
         settings_button.setIcon(QIcon(settings_icon()))
         settings_button.clicked.connect(self.show_settings)
         header.addWidget(title)
@@ -220,7 +242,7 @@ class MainWindow(QWidget):
         mode_layout.setColumnStretch(1, 1)
         self.text_mode_button = ModeButton(
             "Text / OCR",
-            "Text extraction",
+            self._tr("controller.text_description"),
             mode_icon("text", TEXT_ACCENT),
             TEXT_ACCENT,
         )
@@ -229,7 +251,7 @@ class MainWindow(QWidget):
         self.text_mode_button.clicked.connect(self.start_text_capture)
         self.vision_mode_button = ModeButton(
             "Vision",
-            "Visual analysis",
+            self._tr("controller.vision_description"),
             mode_icon("vision", VISION_ACCENT),
             VISION_ACCENT,
         )
@@ -238,7 +260,7 @@ class MainWindow(QWidget):
         self.vision_mode_button.clicked.connect(self.start_vision_capture)
         self.watch_mode_button = ModeButton(
             "Watch",
-            "Single region",
+            self._tr("controller.watch_description"),
             mode_icon("watch", WATCH_ACCENT),
             WATCH_ACCENT,
         )
@@ -246,7 +268,7 @@ class MainWindow(QWidget):
         self.watch_mode_button.setProperty("mode", "watch")
         self.context_watch_mode_button = ModeButton(
             "Context Watch",
-            "Context + question",
+            self._tr("controller.context_watch_description"),
             mode_icon("context_watch", WATCH_ACCENT),
             WATCH_ACCENT,
         )
@@ -264,11 +286,11 @@ class MainWindow(QWidget):
             button.setMinimumHeight(88)
             button.setMaximumHeight(92)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.text_mode_button.setToolTip("Capture a question for text extraction")
-        self.vision_mode_button.setToolTip("Capture a question for visual analysis")
-        self.watch_mode_button.setToolTip("Watch one screen region for new questions")
+        self.text_mode_button.setToolTip(self._tr("controller.text_tooltip"))
+        self.vision_mode_button.setToolTip(self._tr("controller.vision_tooltip"))
+        self.watch_mode_button.setToolTip(self._tr("controller.watch_tooltip"))
         self.context_watch_mode_button.setToolTip(
-            "Watch a context region and a question region"
+            self._tr("controller.context_watch_tooltip")
         )
         mode_layout.addWidget(self.text_mode_button, 0, 0)
         mode_layout.addWidget(self.vision_mode_button, 0, 1)
@@ -345,7 +367,9 @@ class MainWindow(QWidget):
     def _set_auto_watch_status(self, message: str) -> None:
         """Expose a concise selection error through the controller status strip."""
 
-        self.status_label.setText(f"●  {message}")
+        self.status_label.setText(
+            self._tr("controller.status_auto_watch_error", message=message)
+        )
         self.status_label.setProperty("state", "error")
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
@@ -378,7 +402,7 @@ class MainWindow(QWidget):
         ):
             return False
         if phase is AutoWatchSelectionPhase.SELECTING_QUESTION and self._auto_watch_context_region is None:
-            self._abort_auto_watch_workflow("Context selection is no longer available.")
+            self._abort_auto_watch_workflow(self._tr("watch.error_invalid_context"))
             return False
         if self._shutting_down or self._auto_watch_active or self._overlay is not None or self._busy:
             return False
@@ -387,7 +411,7 @@ class MainWindow(QWidget):
             return False
 
         try:
-            overlay = CaptureOverlay()
+            overlay = self._create_capture_overlay()
         except Exception as exc:
             logger.exception("failed to create Auto Watch selection overlay")
             self._abort_auto_watch_workflow(str(exc))
@@ -412,6 +436,23 @@ class MainWindow(QWidget):
             self._abort_auto_watch_workflow(str(exc))
             return False
         return True
+
+    def _create_capture_overlay(self, *, debug_path: Path | None = None):
+        """Create the localized capture surface while keeping test doubles compatible."""
+
+        try:
+            return CaptureOverlay(
+                debug_path=debug_path,
+                interface_language=self._interface_language,
+            )
+        except TypeError as exc:
+            # A few integrations inject the pre-language CaptureOverlay
+            # constructor.  Only retry when the injected type explicitly
+            # rejects the new optional keyword; constructor failures unrelated
+            # to that compatibility path must still propagate to the caller.
+            if "interface_language" not in str(exc):
+                raise
+            return CaptureOverlay(debug_path=debug_path)
 
     def _is_current_auto_watch_selection(
         self,
@@ -570,7 +611,9 @@ class MainWindow(QWidget):
             self._cleanup_failed_auto_watch_session(session, str(exc))
             return False
         if not started:
-            self._cleanup_failed_auto_watch_session(session, "Unable to start Auto Watch.")
+            self._cleanup_failed_auto_watch_session(
+                session, self._tr("watch.error_start")
+            )
             return False
 
         self._auto_watch_selection_overlay = None
@@ -638,12 +681,9 @@ class MainWindow(QWidget):
             context = self._auto_watch_context_region
             try:
                 if context is None:
-                    raise ValueError("Please select the Context region first.")
+                    raise ValueError(self._tr("watch.error_select_context"))
                 if not self._same_auto_watch_screen(context.screen, screen):
-                    raise ValueError(
-                        "Context and Question must be on the same display. "
-                        "Please select the Question region again."
-                    )
+                    raise ValueError(self._tr("watch.error_same_screen"))
                 question = WatchRegion.create(screen, roi, context.session_id)
                 regions = ContextQuestionRegions.create(context, question)
                 self._auto_watch_question_region = question
@@ -661,7 +701,7 @@ class MainWindow(QWidget):
                 return False
             return self._start_context_question_session(regions)
 
-        self._abort_auto_watch_workflow("Auto Watch selection is no longer active.")
+        self._abort_auto_watch_workflow(self._tr("watch.error_start"))
         return False
 
     def _on_auto_watch_stopped(self):
@@ -816,12 +856,12 @@ class MainWindow(QWidget):
 
     def _set_status(self, state: AppState) -> None:
         labels = {
-            AppState.IDLE: "●  Ready",
-            AppState.CAPTURING: "●  Capturing…",
-            AppState.OCR_PROCESSING: "●  Processing…",
-            AppState.AI_PROCESSING: "●  Processing…",
-            AppState.CANCELLING: "●  Cancelling…",
-            AppState.ERROR: "●  Ready",
+            AppState.IDLE: self._tr("answer.status_ready"),
+            AppState.CAPTURING: self._tr("controller.status_capturing"),
+            AppState.OCR_PROCESSING: self._tr("controller.status_processing"),
+            AppState.AI_PROCESSING: self._tr("controller.status_processing"),
+            AppState.CANCELLING: self._tr("controller.status_cancelling"),
+            AppState.ERROR: self._tr("answer.status_ready"),
         }
         self.status_label.setText(labels[state])
         self.status_label.setProperty("state", "ready" if state is AppState.IDLE else "busy")
@@ -886,7 +926,9 @@ class MainWindow(QWidget):
         if not self.tray_mode:
             self.hide()
         try:
-            self._overlay = CaptureOverlay(debug_path=self.debug_capture_path)
+            self._overlay = self._create_capture_overlay(
+                debug_path=self.debug_capture_path
+            )
         except Exception as exc:
             logger.exception("创建截图 Overlay 失败")
             self._restore_idle()
@@ -895,7 +937,9 @@ class MainWindow(QWidget):
             self._show_or_create_answer()
             self._answer_window.set_mode(mode)
             self._answer_window.show_at_current_screen()
-            self._answer_window.show_error(f"无法开始截图：{exc}")
+            self._answer_window.show_error(
+                self._tr("controller.capture_overlay_error", detail=exc)
+            )
             return False
 
         self._overlay.captured.connect(self._on_capture)
@@ -924,13 +968,8 @@ class MainWindow(QWidget):
     def _show_screen_recording_permission_error(self) -> None:
         QMessageBox.warning(
             None,
-            "Screen Recording Permission Required",
-            "TellMeSensei needs Screen Recording permission to capture the screen.\n\n"
-            "Please enable TellMeSensei in:\n"
-            "System Settings / System Preferences\n"
-            "→ Privacy & Security\n"
-            "→ Screen Recording\n\n"
-            "Then restart TellMeSensei.",
+            self._tr("controller.screen_permission_title"),
+            self._tr("controller.screen_permission_body"),
             QMessageBox.StandardButton.Ok,
         )
 
@@ -1041,7 +1080,8 @@ class MainWindow(QWidget):
         if self._answer_window is not None:
             return
         self._answer_window = AnswerWindow(
-            settings_repository=self.config_manager.settings_repository
+            settings_repository=getattr(self.config_manager, "settings_repository", None),
+            interface_language=self._interface_language,
         )
         self._answer_window.closed.connect(self._on_answer_closed)
         self._answer_window.reanalyze_requested.connect(self._retry_analysis)
@@ -1373,6 +1413,7 @@ class MainWindow(QWidget):
                 context_watch_hotkey_manager=self.context_watch_hotkey_manager,
                 component_manager=self._component_manager,
                 local_ocr_session=self._local_ocr_session,
+                interface_language=self._interface_language,
             )
             self._settings_window.shutdown_ready.connect(self._on_settings_shutdown_ready)
             self._settings_window.settings_saved.connect(self._on_settings_saved)

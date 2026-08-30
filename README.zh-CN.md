@@ -50,6 +50,15 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
 5. 需要自动监控时，在悬浮控制器中选择 **Watch**（单个区域）或 **Context Watch**（上下文区域加题目区域）。Watch 会立即开始框选；Context Watch 在上下文框选完成后自动进入题目框选，第二次框选完成后自动开始监控。请在 **Settings → Auto Watch** 中统一选择 **Text / OCR** 或 **Vision**。`Ctrl+Shift+W` 和 `Ctrl+Shift+C` 会直接开始对应的框选流程。
 6. 如需修改全局快捷键，打开 **Settings → Shortcuts**，一次保存四项配置。
 
+## 语言偏好
+
+打开 **Settings → Language**，可以分别设置两种语言：
+
+- **Interface language：** 支持 English（`en`）和简体中文（`zh-CN`）。为了保持产品结构一致，**TellMeSensei**、**Text / OCR**、**Vision**、**Watch**、**Context Watch**、**Ready**、**Context**、**Question**、**Answer**、**Local OCR**、**PaddleOCR**、**Google Cloud Vision**、**DeepSeek** 和 **API Key** 等既定术语在两种界面语言中都保留英文。
+- **Answer language：** 独立控制下一次 Text / OCR、Vision、Watch 或 Context Watch 回答的语言和标题，不会改变 OCR 识别配置。
+
+修改 Interface language 后需要重启 TellMeSensei 才会生效；修改 Answer language 后会应用于后续分析。初始默认值为 English 界面和简体中文回答；OCR 语言仍是单独的设置概念。
+
 ## 分析模式
 
 | 模式 | 快捷键 | 流程 | 适用场景 |

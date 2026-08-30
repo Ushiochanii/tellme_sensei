@@ -14,6 +14,7 @@ from app.auto_watch.dispatcher import AnalysisDispatcher, AutoWatchDispatcherBri
 from app.auto_watch.models import MonitorState, WatchRegion
 from app.auto_watch.sampler import ScreenSampler
 from app.config import ConfigManager
+from app.localization import DEFAULT_INTERFACE_LANGUAGE, normalize_language, tr
 from app.ocr.local_session import LocalOCRSession
 from .watch_overlay import WatchOverlay
 from .watch_mini_controller import WatchMiniController
@@ -49,6 +50,10 @@ class AutoWatchSession(QObject):
             context_ocr_cache = getattr(dispatcher, "context_ocr_cache", None)
         self.context_ocr_cache = context_ocr_cache or ContextOCRCache()
         config = self.config_manager.load(require_api_key=False)
+        self._interface_language = normalize_language(
+            getattr(config, "interface_language", DEFAULT_INTERFACE_LANGUAGE),
+            default=DEFAULT_INTERFACE_LANGUAGE,
+        )
         self._dispatcher_injected = dispatcher is not None
         self.dispatcher = dispatcher or AnalysisDispatcher(
             settings=self.settings, config=config, local_ocr_session=self.local_ocr_session,
@@ -78,7 +83,7 @@ class AutoWatchSession(QObject):
 
     def start(self) -> bool:
         if not self.region.is_valid():
-            self._fault("屏幕不可用或显示器配置已改变")
+            self._fault(tr("watch.error_screen_changed", self._interface_language))
             return False
         self._stopped = False; self._faulted = False; self._stop_emitted = False; self._cleanup_started = False
         self.sampler = self.sampler_factory(self.region.screen, self.region.logical_roi, self.settings)
@@ -87,7 +92,9 @@ class AutoWatchSession(QObject):
         if self.timer_factory is not None:
             self.timer.setInterval(self.settings.poll_interval_ms); self.timer.timeout.connect(self.tick)
         self.overlay = self.overlay or WatchOverlay(self.region.screen, self.region.logical_roi)
-        self.mini = self.mini or WatchMiniController()
+        self.mini = self.mini or WatchMiniController(
+            interface_language=self._interface_language
+        )
         self.mini.set_mode(self.mode); self.mini.show_for(self.region.screen, self.region.global_roi)
         self.mini.analyze_now_requested.connect(self.analyze_now)
         self.mini.pause_requested.connect(self.pause)
@@ -101,10 +108,13 @@ class AutoWatchSession(QObject):
     def tick(self) -> None:
         if self._stopped or self._faulted: return
         if not self.region.is_valid():
-            self._fault("屏幕不可用或显示器配置已改变"); return
+            self._fault(tr("watch.error_screen_changed", self._interface_language)); return
         try:
             image = self.sampler.sample()
-            if image.isNull() or image.width() <= 0 or image.height() <= 0: raise RuntimeError("屏幕截图为空")
+            if image.isNull() or image.width() <= 0 or image.height() <= 0:
+                raise RuntimeError(
+                    tr("watch.error_empty_capture", self._interface_language)
+                )
             self.latest_image = image.copy()
             event = self.coordinator.tick(preprocess_qimage(self.latest_image, self.settings.max_side))
             self._emit_monitor()

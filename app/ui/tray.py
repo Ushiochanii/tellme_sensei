@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
+from app.localization import DEFAULT_INTERFACE_LANGUAGE, normalize_language, tr
 from app.ui.theme import tray_menu_stylesheet
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,16 @@ class SystemTrayController(QObject):
     settings_requested = Signal()
     exit_requested = Signal()
 
-    def __init__(self, parent: QObject | None = None, tray_icon=None) -> None:
+    def __init__(
+        self,
+        parent: QObject | None = None,
+        tray_icon=None,
+        interface_language: str = DEFAULT_INTERFACE_LANGUAGE,
+    ) -> None:
         super().__init__(parent)
+        self._interface_language = normalize_language(
+            interface_language, default=DEFAULT_INTERFACE_LANGUAGE
+        )
         self.tray = tray_icon or QSystemTrayIcon(self._create_icon(), self)
         self.menu = QMenu()
         self.menu.setObjectName("trayMenu")
@@ -33,13 +42,19 @@ class SystemTrayController(QObject):
         title = self.menu.addAction("TellMeSensei")
         title.setEnabled(False)
         self.menu.addSeparator()
-        text_capture = self.menu.addAction("Text / OCR Capture")
-        vision_capture = self.menu.addAction("Vision Capture")
-        show_controller = self.menu.addAction("Show Controller")
+        text_capture = self.menu.addAction(
+            tr("tray.text_capture", self._interface_language)
+        )
+        vision_capture = self.menu.addAction(
+            tr("tray.vision_capture", self._interface_language)
+        )
+        show_controller = self.menu.addAction(
+            tr("tray.show_controller", self._interface_language)
+        )
         self.menu.addSeparator()
-        settings = self.menu.addAction("Settings")
+        settings = self.menu.addAction(tr("tray.settings", self._interface_language))
         self.menu.addSeparator()
-        exit_action = self.menu.addAction("Quit")
+        exit_action = self.menu.addAction(tr("tray.quit", self._interface_language))
         text_capture.triggered.connect(self.trigger_text_capture)
         vision_capture.triggered.connect(self.trigger_vision_capture)
         show_controller.triggered.connect(self.trigger_show_controller)

@@ -12,6 +12,12 @@ from typing import Any, Mapping
 from PySide6.QtCore import QStandardPaths
 
 from app.analysis import AnalysisMode
+from app.localization import (
+    DEFAULT_ANSWER_LANGUAGE,
+    DEFAULT_INTERFACE_LANGUAGE,
+    SUPPORTED_LANGUAGES,
+    normalize_language,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,10 @@ class SettingsRepository:
             value = raw.get(key)
             if isinstance(value, str) and value.strip():
                 settings[key] = value.strip()
+        for key in ("interface_language", "answer_language"):
+            value = raw.get(key)
+            if isinstance(value, str) and value.strip() in SUPPORTED_LANGUAGES:
+                settings[key] = value.strip()
         provider = raw.get("ocr_provider")
         if isinstance(provider, str) and provider.strip():
             settings["ocr_provider"] = provider.strip().lower()
@@ -84,6 +94,22 @@ class SettingsRepository:
             settings["answer_window_geometry"] = geometry
         settings.update(self._load_auto_watch(raw))
         return settings
+
+    def interface_language(self) -> str:
+        """Return the persisted interface language or the upgrade default."""
+
+        return normalize_language(
+            self.load().get("interface_language"),
+            default=DEFAULT_INTERFACE_LANGUAGE,
+        )
+
+    def answer_language(self) -> str:
+        """Return the persisted answer language or the upgrade default."""
+
+        return normalize_language(
+            self.load().get("answer_language"),
+            default=DEFAULT_ANSWER_LANGUAGE,
+        )
 
     def auto_watch_analysis_mode(self) -> AnalysisMode:
         """Return the persisted Auto Watch mode, defaulting safely to Text."""
@@ -168,6 +194,16 @@ class SettingsRepository:
             if not shortcut:
                 raise ValueError(f"{key} 不能为空")
             payload[key] = shortcut
+        for key, default in (
+            ("interface_language", DEFAULT_INTERFACE_LANGUAGE),
+            ("answer_language", DEFAULT_ANSWER_LANGUAGE),
+        ):
+            if key not in settings:
+                continue
+            candidate = settings[key]
+            if not isinstance(candidate, str) or candidate.strip() not in SUPPORTED_LANGUAGES:
+                raise ValueError(f"{key} must be one of: {', '.join(SUPPORTED_LANGUAGES)}")
+            payload[key] = normalize_language(candidate, default=default)
         if "auto_watch_analysis_mode" in settings:
             candidate = settings["auto_watch_analysis_mode"]
             if isinstance(candidate, AnalysisMode):

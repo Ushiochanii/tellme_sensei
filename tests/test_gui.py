@@ -206,7 +206,7 @@ def test_answer_window_error_replaces_processing_placeholder(qt_app) -> None:
     window.show_error("DeepSeek API Key 无效（401）")
 
     answer_text = window.answer_edit.toPlainText()
-    assert "AI 解析失败" in answer_text
+    assert "AI analysis failed" in answer_text
     assert "401" in answer_text
     assert "旧答案" not in answer_text
     assert window.copy_button.isEnabled() is False
@@ -220,7 +220,7 @@ def test_answer_window_cancelled_replaces_processing_placeholder(qt_app) -> None
     window.set_result("旧答案")
     window.show_cancelled()
 
-    assert "已取消" in window.answer_edit.toPlainText()
+    assert "Cancelled" in window.answer_edit.toPlainText()
     assert "旧答案" not in window.answer_edit.toPlainText()
     assert window.copy_button.isEnabled() is False
     assert window.stop_button.isVisible() is False
@@ -780,7 +780,7 @@ def test_main_window_ai_error_renders_terminal_answer_state(qt_app, monkeypatch)
     assert window.state is AppState.IDLE
     assert window._answer_window is not None
     assert window._answer_window.status_label.text() == "!  Analysis failed"
-    assert "AI 解析失败" in window._answer_window.answer_edit.toPlainText()
+    assert "AI analysis failed" in window._answer_window.answer_edit.toPlainText()
     assert window._answer_window.copy_button.isEnabled() is False
     window._answer_window.close()
     window.close()

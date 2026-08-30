@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     from app.config import ConfigError, ConfigManager
+    from app.localization import DEFAULT_INTERFACE_LANGUAGE
     from app.logging_config import configure_logging
     from app.platform.factory import create_global_hotkey_manager
     from app.platform.hotkey import (
@@ -74,13 +75,18 @@ def main(argv: list[str] | None = None) -> int:
         startup_vision_shortcut = startup_config.vision_global_shortcut
         startup_watch_shortcut = startup_config.watch_global_shortcut
         startup_context_watch_shortcut = startup_config.context_watch_global_shortcut
+        startup_interface_language = startup_config.interface_language
     except ConfigError as exc:
         logger.warning("invalid startup settings; using default shortcut: %s", exc)
         startup_shortcut = DEFAULT_SHORTCUT
         startup_vision_shortcut = DEFAULT_VISION_SHORTCUT
         startup_watch_shortcut = DEFAULT_WATCH_SHORTCUT
         startup_context_watch_shortcut = DEFAULT_CONTEXT_WATCH_SHORTCUT
-    tray = SystemTrayController(parent=app)
+        startup_interface_language = DEFAULT_INTERFACE_LANGUAGE
+    tray = SystemTrayController(
+        parent=app,
+        interface_language=startup_interface_language,
+    )
     text_hotkey = create_global_hotkey_manager(
         parent=app,
         shortcut=startup_shortcut,
@@ -109,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         vision_hotkey_manager=vision_hotkey,
         watch_hotkey_manager=watch_hotkey,
         context_watch_hotkey_manager=context_watch_hotkey,
+        interface_language=startup_interface_language,
     )
     controller = ApplicationController(
         app,
