@@ -118,7 +118,7 @@ def test_vision_reasoning_without_final_content_is_empty_answer_error() -> None:
     stream = _Stream([_reasoning_chunk("内部推理，不是最终答案"), _finish_chunk()])
     service = DeepSeekService(AppConfig(api_key="test"), client=_Client(stream))
 
-    with pytest.raises(DeepSeekError, match="空答案"):
+    with pytest.raises(DeepSeekError, match="empty answer"):
         service.analyze_image(VisionProcessingWorker.encode_png(_image()))
 
 
@@ -145,7 +145,7 @@ def test_vision_request_cancellation_and_empty_response() -> None:
         AppConfig(api_key="test"),
         client=_Client(_Stream([])),
     )
-    with pytest.raises(DeepSeekError, match="空答案"):
+    with pytest.raises(DeepSeekError, match="empty answer"):
         empty.analyze_image(VisionProcessingWorker.encode_png(_image()))
 
 

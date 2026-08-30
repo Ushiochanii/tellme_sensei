@@ -34,6 +34,14 @@ from PySide6.QtWidgets import (
 
 from app.config import AppConfig, ConfigError, ConfigManager
 from app.analysis import AnalysisMode
+from app.localization import (
+    DEFAULT_ANSWER_LANGUAGE,
+    DEFAULT_INTERFACE_LANGUAGE,
+    LANGUAGE_DISPLAY_NAMES,
+    SUPPORTED_LANGUAGES,
+    normalize_language,
+    tr,
+)
 from app.local_ocr.component_manager import ComponentError, LocalOCRComponentManager
 from app.local_ocr.download import LocalOCRDownloadWorker
 from app.local_ocr.manifest import manifest_url_available, resolve_manifest_url
@@ -99,7 +107,12 @@ class ConnectionTestWorker(QObject):
             self.failed.emit(str(exc))
         except Exception:
             logger.exception("settings connection test failed")
-            self.failed.emit("连接测试过程中发生内部错误")
+            self.failed.emit(
+                tr(
+                    "settings.connection_internal_error",
+                    getattr(self.config, "interface_language", DEFAULT_INTERFACE_LANGUAGE),
+                )
+            )
         finally:
             self.finished.emit()
 
@@ -121,12 +134,14 @@ class GoogleVisionTestWorker(QObject):
         language: str,
         timeout: float,
         cancel_event: threading.Event | None = None,
+        interface_language: str = DEFAULT_INTERFACE_LANGUAGE,
     ) -> None:
         super().__init__()
         self.api_key = api_key
         self.language = language
         self.timeout = timeout
         self.cancel_event = cancel_event or threading.Event()
+        self.interface_language = interface_language
 
     @Slot()
     def run(self) -> None:
@@ -144,7 +159,7 @@ class GoogleVisionTestWorker(QObject):
             self.failed.emit(str(exc))
         except Exception:
             logger.exception("Google Vision connection test failed")
-            self.failed.emit("Google Vision connection test failed.")
+            self.failed.emit(tr("settings.google_connection_failed", self.interface_language))
         finally:
             self.finished.emit()
 
@@ -161,10 +176,16 @@ class UpdateCheckWorker(QObject):
     cancelled = Signal()
     finished = Signal()
 
-    def __init__(self, service: UpdateService, cancel_event: threading.Event) -> None:
+    def __init__(
+        self,
+        service: UpdateService,
+        cancel_event: threading.Event,
+        interface_language: str = DEFAULT_INTERFACE_LANGUAGE,
+    ) -> None:
         super().__init__()
         self.service = service
         self.cancel_event = cancel_event
+        self.interface_language = interface_language
 
     @Slot()
     def run(self) -> None:
@@ -175,10 +196,18 @@ class UpdateCheckWorker(QObject):
         except UpdateCancelled:
             self.cancelled.emit()
         except UpdateError as exc:
-            self.failed.emit(str(exc))
+            self.failed.emit(
+                tr(
+                    "settings.update_error",
+                    self.interface_language,
+                    detail=exc,
+                )
+            )
         except Exception:
             logger.exception("application update check failed")
-            self.failed.emit("Unable to check for application updates.")
+            self.failed.emit(
+                tr("settings.update_check_failed", self.interface_language)
+            )
         finally:
             self.finished.emit()
 
@@ -200,11 +229,13 @@ class UpdateDownloadWorker(QObject):
         service: UpdateService,
         asset: ReleaseAsset,
         cancel_event: threading.Event,
+        interface_language: str = DEFAULT_INTERFACE_LANGUAGE,
     ) -> None:
         super().__init__()
         self.service = service
         self.asset = asset
         self.cancel_event = cancel_event
+        self.interface_language = interface_language
 
     @Slot()
     def run(self) -> None:
@@ -215,10 +246,18 @@ class UpdateDownloadWorker(QObject):
         except UpdateCancelled:
             self.cancelled.emit()
         except UpdateError as exc:
-            self.failed.emit(str(exc))
+            self.failed.emit(
+                tr(
+                    "settings.update_error",
+                    self.interface_language,
+                    detail=exc,
+                )
+            )
         except Exception:
             logger.exception("application update download failed")
-            self.failed.emit("Unable to download or open the application update.")
+            self.failed.emit(
+                tr("settings.update_download_failed", self.interface_language)
+            )
         finally:
             self.finished.emit()
 
@@ -234,6 +273,9 @@ class SettingsWindow(QWidget):
     local_ocr_component_changed = Signal()
     shutdown_ready = Signal()
 
+    def _tr(self, key: str, **values: object) -> str:
+        return tr(key, self._interface_language, **values)
+
     def __init__(
         self,
         config_manager: ConfigManager | None = None,
@@ -247,6 +289,7 @@ class SettingsWindow(QWidget):
         parent: QWidget | None = None,
         local_ocr_supported: bool | None = None,
         log_path: Path | str | None = None,
+        interface_language: str | None = None,
     ) -> None:
         super().__init__(parent)
         self.config_manager = config_manager or ConfigManager()
@@ -261,6 +304,23 @@ class SettingsWindow(QWidget):
             is_local_ocr_supported() if local_ocr_supported is None else local_ocr_supported
         )
         self._log_path = log_path
+        settings_repository = getattr(self.config_manager, "settings_repository", None)
+        repository_language_getter = getattr(
+            settings_repository, "interface_language", None
+        )
+        repository_interface_language = (
+            repository_language_getter()
+            if callable(repository_language_getter)
+            else DEFAULT_INTERFACE_LANGUAGE
+        )
+        self._interface_language = normalize_language(
+            interface_language
+            if interface_language is not None
+            else repository_interface_language,
+            default=DEFAULT_INTERFACE_LANGUAGE,
+        )
+        self._loaded_interface_language = DEFAULT_INTERFACE_LANGUAGE
+        self._loaded_answer_language = DEFAULT_ANSWER_LANGUAGE
         self._connection_thread: QThread | None = None
         self._connection_worker: ConnectionTestWorker | None = None
         self._connection_cancel_event: threading.Event | None = None
@@ -286,7 +346,7 @@ class SettingsWindow(QWidget):
         self._loaded_auto_watch_analysis_mode = AnalysisMode.TEXT
         self._local_ocr_download_terminal_status: str | None = None
 
-        self.setWindowTitle("TellMeSensei Settings")
+        self.setWindowTitle(self._tr("settings.window_title"))
         self.setMinimumSize(760, 540)
         self.resize(860, 680)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
@@ -305,16 +365,16 @@ class SettingsWindow(QWidget):
 
         header = QVBoxLayout()
         header.setSpacing(2)
-        title = QLabel("Settings")
+        title = QLabel(self._tr("settings.title"))
         title.setObjectName("settingsTitle")
-        subtitle = QLabel("Configure TellMeSensei for your workflow.")
+        subtitle = QLabel(self._tr("settings.subtitle"))
         subtitle.setObjectName("settingsSubtitle")
         header.addWidget(title)
         header.addWidget(subtitle)
         surface_layout.addLayout(header)
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.api_key_edit.setPlaceholderText("Enter DeepSeek API Key")
+        self.api_key_edit.setPlaceholderText(self._tr("settings.api_key_placeholder"))
         self.model_edit = QLineEdit()
         self.timeout_edit = QLineEdit()
         self.shortcut_edit = QKeySequenceEdit()
@@ -332,8 +392,8 @@ class SettingsWindow(QWidget):
         mode_widget = QWidget()
         mode_layout = QHBoxLayout(mode_widget)
         mode_layout.setContentsMargins(0, 0, 0, 0)
-        self.local_mode_radio = QRadioButton("Local")
-        self.online_mode_radio = QRadioButton("Online")
+        self.local_mode_radio = QRadioButton(self._tr("settings.local"))
+        self.online_mode_radio = QRadioButton(self._tr("settings.online"))
         self.ocr_mode_group = QButtonGroup(self)
         self.ocr_mode_group.setExclusive(True)
         self.ocr_mode_group.addButton(self.local_mode_radio)
@@ -348,17 +408,17 @@ class SettingsWindow(QWidget):
         self.online_service_combo = QComboBox()
         self.online_service_combo.addItem("Google Cloud Vision", "google_vision")
         self.ocr_provider_override_label = QLabel(
-            "OCR Provider is controlled by the OCR_PROVIDER environment variable."
+            self._tr("settings.ocr_provider_env_override")
         )
         self.ocr_provider_override_label.setObjectName("settingsWarningLabel")
         self.ocr_provider_override_label.setWordWrap(True)
         self.ocr_provider_override_label.setVisible(False)
         self.local_ocr_unsupported_label = QLabel(
-            "Local OCR for macOS is not installed/supported in this build."
+            self._tr("settings.local_ocr_unsupported")
         )
         self.local_ocr_unsupported_label.setWordWrap(True)
         self.local_ocr_unsupported_label.setVisible(False)
-        self.api_key_override_label = QLabel(API_KEY_ENV_OVERRIDE_MESSAGE)
+        self.api_key_override_label = QLabel(self._tr("settings.api_key_env_override"))
         self.api_key_override_label.setObjectName("settingsWarningLabel")
         self.api_key_override_label.setWordWrap(True)
         self.api_key_override_label.setVisible(False)
@@ -368,10 +428,10 @@ class SettingsWindow(QWidget):
         ocr_layout.setContentsMargins(16, 14, 16, 16)
         ocr_layout.setSpacing(10)
         local_engine_form = QFormLayout()
-        local_engine_form.addRow("Engine", self.local_engine_combo)
+        local_engine_form.addRow(self._tr("settings.engine"), self.local_engine_combo)
         ocr_layout.addLayout(local_engine_form)
         self.local_ocr_privacy_label = QLabel(
-            "Screenshots are processed on this device."
+            self._tr("settings.local_ocr_privacy")
         )
         self.local_ocr_privacy_label.setWordWrap(True)
         self.local_ocr_status_label = QLabel()
@@ -380,13 +440,13 @@ class SettingsWindow(QWidget):
         self.local_ocr_progress.setRange(0, 100)
         self.local_ocr_progress.setVisible(False)
         ocr_buttons = QHBoxLayout()
-        self.download_ocr_button = QPushButton("Download")
+        self.download_ocr_button = QPushButton(self._tr("settings.download"))
         self.download_ocr_button.setObjectName("downloadOcrButton")
-        self.cancel_download_button = QPushButton("Cancel")
+        self.cancel_download_button = QPushButton(self._tr("settings.cancel"))
         self.cancel_download_button.setObjectName("cancelDownloadButton")
-        self.verify_ocr_button = QPushButton("Verify")
+        self.verify_ocr_button = QPushButton(self._tr("settings.verify"))
         self.verify_ocr_button.setObjectName("verifyOcrButton")
-        self.remove_ocr_button = QPushButton("Remove Local OCR")
+        self.remove_ocr_button = QPushButton(self._tr("settings.remove_local_ocr"))
         self.remove_ocr_button.setObjectName("removeOcrButton")
         self.cancel_download_button.setVisible(False)
         self.download_ocr_button.clicked.connect(self.download_local_ocr)
@@ -408,24 +468,30 @@ class SettingsWindow(QWidget):
         google_layout.setContentsMargins(16, 14, 16, 16)
         google_layout.setSpacing(10)
         online_service_form = QFormLayout()
-        online_service_form.addRow("Service", self.online_service_combo)
+        online_service_form.addRow(self._tr("settings.service"), self.online_service_combo)
         google_layout.addLayout(online_service_form)
         self.google_vision_privacy_label = QLabel(
-            "Online OCR. Screenshots will be uploaded to Google Cloud Vision for OCR."
+            self._tr("settings.online_ocr_privacy")
         )
         self.google_vision_privacy_label.setWordWrap(True)
         self.google_vision_api_key_edit = QLineEdit()
         self.google_vision_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.google_vision_api_key_edit.setPlaceholderText("Enter Google Vision API Key")
+        self.google_vision_api_key_edit.setPlaceholderText(
+            self._tr("settings.google_api_key_placeholder")
+        )
         google_key_form = QFormLayout()
-        google_key_form.addRow("Google Vision API Key", self.google_vision_api_key_edit)
+        google_key_form.addRow(
+            "Google Vision API Key", self.google_vision_api_key_edit
+        )
         self.google_vision_override_label = QLabel(
-            "Google Vision API Key is controlled by GOOGLE_VISION_API_KEY."
+            self._tr("settings.google_api_key_env_override")
         )
         self.google_vision_override_label.setObjectName("settingsWarningLabel")
         self.google_vision_override_label.setWordWrap(True)
         self.google_vision_override_label.setVisible(False)
-        self.google_vision_test_button = QPushButton("Test Google Vision")
+        self.google_vision_test_button = QPushButton(
+            self._tr("settings.test_google_vision")
+        )
         self.google_vision_test_button.setObjectName("googleVisionTestButton")
         self.google_vision_test_button.clicked.connect(self.test_google_vision)
         self.google_vision_status_label = QLabel()
@@ -435,9 +501,20 @@ class SettingsWindow(QWidget):
         google_layout.addWidget(self.google_vision_override_label)
         google_layout.addWidget(self.google_vision_test_button)
         google_layout.addWidget(self.google_vision_status_label)
-        self.test_button = QPushButton("Test Connection")
+        self.test_button = QPushButton(self._tr("settings.test_connection"))
         self.test_button.setObjectName("testConnectionButton")
         self.test_button.clicked.connect(self.test_connection)
+
+        self.interface_language_combo = QComboBox()
+        self.interface_language_combo.setObjectName("interfaceLanguageCombo")
+        self.answer_language_combo = QComboBox()
+        self.answer_language_combo.setObjectName("answerLanguageCombo")
+        for combo in (self.interface_language_combo, self.answer_language_combo):
+            for code in SUPPORTED_LANGUAGES:
+                combo.addItem(LANGUAGE_DISPLAY_NAMES[code], code)
+        self.interface_language_combo.currentIndexChanged.connect(
+            self._on_interface_language_changed
+        )
 
         self.poll_interval_ms_spin = QSpinBox()
         self.poll_interval_ms_spin.setRange(1, 60000)
@@ -472,7 +549,7 @@ class SettingsWindow(QWidget):
         auto_watch_mode_layout.addStretch(1)
         self.expected_stability_label = QLabel()
         self.expected_stability_label.setWordWrap(True)
-        self.restore_auto_watch_button = QPushButton("Restore Defaults")
+        self.restore_auto_watch_button = QPushButton(self._tr("settings.restore_defaults"))
         self.restore_auto_watch_button.clicked.connect(self._restore_auto_watch_defaults)
         self.poll_interval_ms_spin.valueChanged.connect(self._refresh_expected_stability)
         self.stable_samples_required_spin.valueChanged.connect(self._refresh_expected_stability)
@@ -494,7 +571,7 @@ class SettingsWindow(QWidget):
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("settingsPages")
         deepseek_page, deepseek_layout = make_page(
-            "DeepSeek", "Configure the AI service used for analysis."
+            "DeepSeek", self._tr("settings.deepseek_description")
         )
         deepseek_card = QFrame()
         deepseek_card.setObjectName("settingsCard")
@@ -502,9 +579,11 @@ class SettingsWindow(QWidget):
         deepseek_card_layout.setContentsMargins(16, 14, 16, 16)
         deepseek_card_layout.setSpacing(10)
         deepseek_form = QFormLayout()
-        deepseek_form.addRow("API Key", self.api_key_edit)
-        deepseek_form.addRow("Text Model", self.model_edit)
-        deepseek_form.addRow("Request Timeout", self.timeout_edit)
+        deepseek_form.addRow(self._tr("settings.api_key"), self.api_key_edit)
+        deepseek_form.addRow(self._tr("settings.text_model"), self.model_edit)
+        deepseek_form.addRow(
+            self._tr("settings.request_timeout"), self.timeout_edit
+        )
         deepseek_card_layout.addLayout(deepseek_form)
         deepseek_card_layout.addWidget(self.api_key_override_label)
         deepseek_card_layout.addWidget(self.test_button, 0, Qt.AlignmentFlag.AlignLeft)
@@ -512,8 +591,8 @@ class SettingsWindow(QWidget):
         deepseek_layout.addStretch(1)
 
         shortcuts_page, shortcuts_layout = make_page(
-            "Shortcuts",
-            "Choose the global shortcuts for Text/OCR, Vision, Watch, and Context Watch.",
+            self._tr("settings.shortcuts_title"),
+            self._tr("settings.shortcuts_description"),
         )
         shortcuts_card = QFrame()
         shortcuts_card.setObjectName("settingsCard")
@@ -528,14 +607,14 @@ class SettingsWindow(QWidget):
         shortcuts_layout.addStretch(1)
 
         ocr_page, ocr_page_layout = make_page(
-            "OCR", "Select the OCR provider used by Text mode."
+            "OCR", self._tr("settings.ocr_description")
         )
         ocr_card = QFrame()
         ocr_card.setObjectName("settingsCard")
         ocr_card_layout = QVBoxLayout(ocr_card)
         ocr_card_layout.setContentsMargins(16, 14, 16, 16)
         ocr_card_layout.setSpacing(10)
-        ocr_card_layout.addWidget(QLabel("OCR Provider"))
+        ocr_card_layout.addWidget(QLabel(self._tr("settings.ocr_provider")))
         ocr_card_layout.addWidget(mode_widget)
         ocr_card_layout.addWidget(self.ocr_provider_override_label)
 
@@ -554,17 +633,17 @@ class SettingsWindow(QWidget):
             text.addWidget(name)
             text.addWidget(detail)
             row.addLayout(text, 1)
-            manage = QPushButton("Manage")
+            manage = QPushButton(self._tr("settings.manage"))
             manage.setObjectName("manageButton")
             manage.clicked.connect(lambda: self._select_page(page_index))
             row.addWidget(manage)
             return card
 
         self.ocr_local_summary = provider_summary(
-            "Local OCR", "On-device text recognition component.", 3
+            "Local OCR", self._tr("settings.local_ocr_summary"), 3
         )
         self.ocr_google_summary = provider_summary(
-            "Google Cloud Vision", "Online OCR service configuration.", 4
+            "Google Cloud Vision", self._tr("settings.google_vision_summary"), 4
         )
         ocr_card_layout.addWidget(self.ocr_local_summary)
         ocr_card_layout.addWidget(self.ocr_google_summary)
@@ -572,36 +651,36 @@ class SettingsWindow(QWidget):
         ocr_page_layout.addStretch(1)
 
         local_page, local_page_layout = make_page(
-            "Local OCR", "Manage the on-device OCR component and its native engine."
+            "Local OCR", self._tr("settings.local_ocr_description")
         )
         local_page_layout.addWidget(self.local_ocr_group)
         local_page_layout.addWidget(self.local_ocr_unsupported_label)
         local_page_layout.addStretch(1)
 
         google_page, google_page_layout = make_page(
-            "Google Vision", "Configure online OCR through Google Cloud Vision."
+            "Google Vision", self._tr("settings.google_vision_description")
         )
         google_page_layout.addWidget(self.google_vision_group)
         google_page_layout.addStretch(1)
 
         auto_watch_page, auto_watch_layout = make_page(
-            "Auto Watch", "Tune automatic change detection and analysis timing."
+            "Auto Watch", self._tr("settings.auto_watch_description")
         )
         auto_watch_card = QFrame()
         auto_watch_card.setObjectName("settingsCard")
         auto_watch_card_layout = QVBoxLayout(auto_watch_card)
         auto_watch_card_layout.setContentsMargins(16, 14, 16, 16)
         auto_watch_form = QFormLayout()
-        auto_watch_form.addRow("Analysis mode", auto_watch_mode_widget)
-        auto_watch_form.addRow("Detection interval", self.poll_interval_ms_spin)
-        auto_watch_form.addRow("Pixel delta threshold", self.pixel_delta_threshold_spin)
-        auto_watch_form.addRow("New-question ratio", self.novelty_ratio_spin)
-        auto_watch_form.addRow("Stability ratio", self.stability_ratio_spin)
-        auto_watch_form.addRow("Stable samples required", self.stable_samples_required_spin)
-        auto_watch_form.addRow("Analysis delay", self.analysis_delay_ms_spin)
+        auto_watch_form.addRow(self._tr("settings.analysis_mode"), auto_watch_mode_widget)
+        auto_watch_form.addRow(self._tr("settings.detection_interval"), self.poll_interval_ms_spin)
+        auto_watch_form.addRow(self._tr("settings.pixel_delta_threshold"), self.pixel_delta_threshold_spin)
+        auto_watch_form.addRow(self._tr("settings.new_question_ratio"), self.novelty_ratio_spin)
+        auto_watch_form.addRow(self._tr("settings.stability_ratio"), self.stability_ratio_spin)
+        auto_watch_form.addRow(self._tr("settings.stable_samples_required"), self.stable_samples_required_spin)
+        auto_watch_form.addRow(self._tr("settings.analysis_delay"), self.analysis_delay_ms_spin)
         auto_watch_card_layout.addLayout(auto_watch_form)
         auto_watch_card_layout.addWidget(QLabel(
-            "Ratios are stored as 0–1 values. Lower thresholds detect smaller changes."
+            self._tr("settings.auto_watch_ratios_help")
         ))
         auto_watch_card_layout.addWidget(self.expected_stability_label)
         auto_watch_buttons = QHBoxLayout()
@@ -612,7 +691,7 @@ class SettingsWindow(QWidget):
         auto_watch_layout.addStretch(1)
 
         updates_page, updates_layout = make_page(
-            "Updates", "Check GitHub Releases and open the newest installer for this device."
+            self._tr("settings.updates_title"), self._tr("settings.updates_description")
         )
         updates_card = QFrame()
         updates_card.setObjectName("settingsCard")
@@ -622,22 +701,22 @@ class SettingsWindow(QWidget):
         updates_form = QFormLayout()
         self.current_version_label = QLabel(__version__)
         self.current_version_label.setObjectName("currentVersionLabel")
-        self.latest_version_label = QLabel("Not checked")
+        self.latest_version_label = QLabel(self._tr("settings.not_checked"))
         self.latest_version_label.setObjectName("latestVersionLabel")
-        updates_form.addRow("Current version", self.current_version_label)
-        updates_form.addRow("Latest version", self.latest_version_label)
+        updates_form.addRow(self._tr("settings.current_version"), self.current_version_label)
+        updates_form.addRow(self._tr("settings.latest_version"), self.latest_version_label)
         updates_card_layout.addLayout(updates_form)
         self.update_status_label = QLabel(
-            "Check for the newest stable TellMeSensei application release."
+            self._tr("settings.update_status")
         )
         self.update_status_label.setObjectName("updateStatusLabel")
         self.update_status_label.setWordWrap(True)
         updates_card_layout.addWidget(self.update_status_label)
         update_buttons = QHBoxLayout()
-        self.check_update_button = QPushButton("Check for Updates")
+        self.check_update_button = QPushButton(self._tr("settings.check_updates"))
         self.check_update_button.setObjectName("checkUpdateButton")
         self.check_update_button.clicked.connect(self.check_for_updates)
-        self.update_button = QPushButton("Update")
+        self.update_button = QPushButton(self._tr("settings.update"))
         self.update_button.setObjectName("updateButton")
         self.update_button.setEnabled(False)
         self.update_button.clicked.connect(self.install_update)
@@ -649,7 +728,7 @@ class SettingsWindow(QWidget):
         updates_layout.addStretch(1)
 
         debug_page, debug_layout = make_page(
-            "Debug", "Inspect the latest TellMeSensei runtime log for troubleshooting."
+            self._tr("settings.debug_title"), self._tr("settings.debug_description")
         )
         debug_card = QFrame()
         debug_card.setObjectName("settingsCard")
@@ -668,7 +747,7 @@ class SettingsWindow(QWidget):
         self.debug_log_status_label.setObjectName("debugLogStatusLabel")
         self.debug_log_status_label.setWordWrap(True)
         self.debug_log_status = self.debug_log_status_label
-        self.debug_log_refresh_button = QPushButton("Refresh")
+        self.debug_log_refresh_button = QPushButton(self._tr("settings.refresh"))
         self.debug_log_refresh_button.setObjectName("debugLogRefreshButton")
         self.debug_log_refresh_button.clicked.connect(self.refresh_debug_log)
         self.refresh_log_button = self.debug_log_refresh_button
@@ -679,6 +758,32 @@ class SettingsWindow(QWidget):
         )
         debug_layout.addWidget(debug_card, 1)
 
+        language_page, language_layout = make_page(
+            self._tr("settings.language_title"),
+            self._tr("settings.language_description"),
+        )
+        language_card = QFrame()
+        language_card.setObjectName("settingsCard")
+        language_card_layout = QVBoxLayout(language_card)
+        language_card_layout.setContentsMargins(16, 14, 16, 16)
+        language_card_layout.setSpacing(10)
+        language_form = QFormLayout()
+        language_form.addRow(
+            self._tr("settings.interface_language"), self.interface_language_combo
+        )
+        language_form.addRow(
+            self._tr("settings.answer_language"), self.answer_language_combo
+        )
+        language_card_layout.addLayout(language_form)
+        self.interface_language_restart_label = QLabel(
+            self._tr("settings.restart_required")
+        )
+        self.interface_language_restart_label.setObjectName("settingsWarningLabel")
+        self.interface_language_restart_label.setWordWrap(True)
+        language_card_layout.addWidget(self.interface_language_restart_label)
+        language_layout.addWidget(language_card)
+        language_layout.addStretch(1)
+
         for page in (
             deepseek_page,
             shortcuts_page,
@@ -688,6 +793,7 @@ class SettingsWindow(QWidget):
             auto_watch_page,
             updates_page,
             debug_page,
+            language_page,
         ):
             self.page_stack.addWidget(page)
 
@@ -709,7 +815,17 @@ class SettingsWindow(QWidget):
         sidebar_layout.setSpacing(4)
         self._navigation_buttons: list[QPushButton] = []
         for index, label in enumerate(
-            ("DeepSeek", "Shortcuts", "OCR", "Local OCR", "Google Vision", "Auto Watch", "Updates", "Debug")
+            (
+                "DeepSeek",
+                self._tr("settings.shortcuts_title"),
+                "OCR",
+                "Local OCR",
+                "Google Vision",
+                "Auto Watch",
+                self._tr("settings.updates_title"),
+                self._tr("settings.debug_title"),
+                self._tr("settings.language_title"),
+            )
         ):
             nav_button = QPushButton(label)
             nav_button.setObjectName("navigationButton")
@@ -731,9 +847,9 @@ class SettingsWindow(QWidget):
         self.status_label.setVisible(False)
         surface_layout.addWidget(self.status_label)
 
-        self.save_button = QPushButton("Save")
+        self.save_button = QPushButton(self._tr("settings.save"))
         self.save_button.setObjectName("saveButton")
-        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button = QPushButton(self._tr("settings.close"))
         self.cancel_button.setObjectName("cancelButton")
         self.save_button.clicked.connect(self.save)
         self.cancel_button.clicked.connect(self.close)
@@ -753,8 +869,7 @@ class SettingsWindow(QWidget):
     def _refresh_expected_stability(self) -> None:
         milliseconds = self.poll_interval_ms_spin.value() * self.stable_samples_required_spin.value()
         self.expected_stability_label.setText(
-            f"Expected stable confirmation: {milliseconds} ms "
-            "(actual timing also depends on page changes)."
+            self._tr("settings.expected_stability", milliseconds=milliseconds)
         )
 
     def _load_auto_watch_values(self) -> None:
@@ -849,7 +964,11 @@ class SettingsWindow(QWidget):
         self._close_requested = False
         self._pending_update = None
         self._update_check_cancel_event = threading.Event()
-        worker = UpdateCheckWorker(self.update_service, self._update_check_cancel_event)
+        worker = UpdateCheckWorker(
+            self.update_service,
+            self._update_check_cancel_event,
+            self._interface_language,
+        )
         thread = QThread(self)
         thread.setObjectName("SettingsUpdateCheckThread")
         worker.moveToThread(thread)
@@ -863,8 +982,8 @@ class SettingsWindow(QWidget):
         thread.finished.connect(self._on_update_check_finished)
         self._update_check_worker = worker
         self._update_check_thread = thread
-        self.latest_version_label.setText("Checking...")
-        self.update_status_label.setText("Checking GitHub Releases...")
+        self.latest_version_label.setText(self._tr("settings.checking"))
+        self.update_status_label.setText(self._tr("settings.checking_releases"))
         self._refresh_update_controls()
         thread.start()
 
@@ -879,25 +998,25 @@ class SettingsWindow(QWidget):
         if result.update_available:
             self._pending_update = result
             self.update_status_label.setText(
-                f"TellMeSensei {result.latest_version} is available."
+                self._tr("settings.update_available", version=result.latest_version)
             )
         else:
             self._pending_update = None
-            self.update_status_label.setText("TellMeSensei is up to date.")
+            self.update_status_label.setText(self._tr("settings.up_to_date"))
         self._refresh_update_controls()
 
     @Slot(str)
     def _on_update_check_failed(self, message: str) -> None:
         self._pending_update = None
         if not self._close_requested and not self._shutdown_requested:
-            self.latest_version_label.setText("Unavailable")
+            self.latest_version_label.setText(self._tr("settings.unavailable"))
             self.update_status_label.setText(message)
         self._refresh_update_controls()
 
     @Slot()
     def _on_update_check_cancelled(self) -> None:
         if not self._close_requested and not self._shutdown_requested:
-            self.update_status_label.setText("Update check cancelled.")
+            self.update_status_label.setText(self._tr("settings.update_check_cancelled"))
 
     @Slot()
     def _on_update_check_finished(self) -> None:
@@ -925,6 +1044,7 @@ class SettingsWindow(QWidget):
             self.update_service,
             result.asset,
             self._update_download_cancel_event,
+            self._interface_language,
         )
         thread = QThread(self)
         thread.setObjectName("SettingsUpdateDownloadThread")
@@ -940,7 +1060,7 @@ class SettingsWindow(QWidget):
         self._update_download_worker = worker
         self._update_download_thread = thread
         self.update_status_label.setText(
-            f"Downloading TellMeSensei {result.latest_version}..."
+            self._tr("settings.downloading_version", version=result.latest_version)
         )
         self._refresh_update_controls()
         thread.start()
@@ -949,7 +1069,7 @@ class SettingsWindow(QWidget):
     def _on_update_download_success(self, _path: str) -> None:
         if not self._close_requested and not self._shutdown_requested:
             self.update_status_label.setText(
-                "Update package opened. Complete the installer to finish updating."
+                self._tr("settings.update_package_opened")
             )
         self._pending_update = None
 
@@ -961,7 +1081,7 @@ class SettingsWindow(QWidget):
     @Slot()
     def _on_update_download_cancelled(self) -> None:
         if not self._close_requested and not self._shutdown_requested:
-            self.update_status_label.setText("Update download cancelled.")
+            self.update_status_label.setText(self._tr("settings.update_download_cancelled"))
 
     @Slot()
     def _on_update_download_finished(self) -> None:
@@ -981,11 +1101,13 @@ class SettingsWindow(QWidget):
             not busy and result is not None and result.update_available
         )
         if self.is_update_download_running():
-            self.update_button.setText("Downloading...")
+            self.update_button.setText(self._tr("settings.downloading"))
         elif result is not None and result.update_available:
-            self.update_button.setText(f"Update to {result.latest_version}")
+            self.update_button.setText(
+                self._tr("settings.update_to", version=result.latest_version)
+            )
         else:
-            self.update_button.setText("Update")
+            self.update_button.setText(self._tr("settings.update"))
 
     @Slot()
     def refresh_debug_log(self) -> None:
@@ -1000,27 +1122,26 @@ class SettingsWindow(QWidget):
             )
         except FileNotFoundError:
             self.debug_log_view.clear()
-            self.debug_log_status_label.setText(
-                "No runtime log has been written yet."
-            )
+            self.debug_log_status_label.setText(self._tr("settings.ready_log"))
             return
         except (OSError, RuntimeError) as exc:
             logger.warning("debug log read failed: %s", type(exc).__name__)
             self.debug_log_view.clear()
-            self.debug_log_status_label.setText(
-                "Unable to read the runtime log."
-            )
+            self.debug_log_status_label.setText(self._tr("settings.log_read_error"))
             return
 
         self.debug_log_view.setPlainText(text)
         line_count = len(text.splitlines())
         if line_count:
             self.debug_log_status_label.setText(
-                f"Showing the latest {line_count} log lines (bounded to "
-                f"{DEFAULT_LOG_TAIL_BYTES // 1024} KB)."
+                self._tr(
+                    "settings.log_lines",
+                    count=line_count,
+                    size=DEFAULT_LOG_TAIL_BYTES // 1024,
+                )
             )
         else:
-            self.debug_log_status_label.setText("Runtime log is empty.")
+            self.debug_log_status_label.setText(self._tr("settings.log_empty"))
 
     def _apply_local_ocr_capability(self) -> None:
         """Apply separate platform-capability and distribution-availability states."""
@@ -1033,11 +1154,11 @@ class SettingsWindow(QWidget):
             return
         if self._local_ocr_supported:
             self.local_ocr_unsupported_label.setText(
-                "Local OCR is supported on this Mac, but no component distribution is configured yet."
+                self._tr("settings.local_ocr_no_distribution")
             )
         else:
             self.local_ocr_unsupported_label.setText(
-                "Local OCR for macOS is not installed/supported in this build."
+                self._tr("settings.local_ocr_unsupported")
             )
         self.online_mode_radio.setChecked(True)
         self.local_mode_radio.setEnabled(False)
@@ -1069,6 +1190,21 @@ class SettingsWindow(QWidget):
             config = self.config_manager.load(require_api_key=False)
         except ConfigError:
             config = AppConfig(api_key="")
+        self._loaded_interface_language = normalize_language(
+            getattr(config, "interface_language", DEFAULT_INTERFACE_LANGUAGE),
+            default=DEFAULT_INTERFACE_LANGUAGE,
+        )
+        self._loaded_answer_language = normalize_language(
+            getattr(config, "answer_language", DEFAULT_ANSWER_LANGUAGE),
+            default=DEFAULT_ANSWER_LANGUAGE,
+        )
+        for combo, value in (
+            (self.interface_language_combo, self._loaded_interface_language),
+            (self.answer_language_combo, self._loaded_answer_language),
+        ):
+            combo.blockSignals(True)
+            combo.setCurrentIndex(max(0, combo.findData(value)))
+            combo.blockSignals(False)
         self._loaded_api_key = config.api_key
         self._loaded_google_vision_api_key = config.google_vision_api_key
         self.api_key_edit.setText(config.api_key)
@@ -1106,6 +1242,13 @@ class SettingsWindow(QWidget):
         self._show_environment_override_warnings()
         self._load_auto_watch_values()
 
+    def _on_interface_language_changed(self, _index: int) -> None:
+        """Keep the restart contract explicit without retranslating live widgets."""
+
+        self.interface_language_restart_label.setText(
+            self._tr("settings.restart_required")
+        )
+
     def reload_values(self) -> None:
         """Reload persisted values when the window is shown again."""
 
@@ -1135,21 +1278,35 @@ class SettingsWindow(QWidget):
         if not self._local_ocr_supported:
             self._apply_local_ocr_capability()
             self.local_ocr_status_label.setText(
-                "Local OCR for macOS is not installed/supported in this build."
+                self._tr("settings.local_ocr_unsupported")
             )
             return
         if self.component_manager.is_installed():
-            self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version}")
+            self.local_ocr_status_label.setText(
+                self._tr("settings.local_ocr_installed", version=self.component_manager.version)
+            )
             self.download_ocr_button.setVisible(False)
         elif not self._local_ocr_distribution_available():
             self.local_ocr_status_label.setText(
-                "Local OCR is supported on this Mac, but no component distribution is configured yet."
+                self._tr("settings.local_ocr_no_distribution")
             )
         else:
-            self.local_ocr_status_label.setText("Not installed")
+            self.local_ocr_status_label.setText(self._tr("settings.local_ocr_not_installed"))
             self.download_ocr_button.setVisible(True)
         self._apply_local_ocr_capability()
         self._refresh_operation_controls()
+
+    def _set_local_ocr_worker_status(self, status: str) -> None:
+        """Translate the bounded status vocabulary emitted by the download worker."""
+
+        status_key = {
+            "Downloading...": "settings.downloading",
+            "Verifying...": "settings.verifying",
+            "Installing...": "settings.installing",
+        }.get(status)
+        self.local_ocr_status_label.setText(
+            self._tr(status_key) if status_key is not None else status
+        )
 
     def _refresh_operation_controls(
         self,
@@ -1208,12 +1365,12 @@ class SettingsWindow(QWidget):
     @Slot()
     def download_local_ocr(self) -> None:
         if not self._local_ocr_supported:
-            self._set_status("Local OCR for macOS is not installed/supported in this build.")
+            self._set_status(self._tr("settings.download_local_ocr_unavailable"))
             return
         manifest_url = resolve_manifest_url(self.config_manager.project_root)
         if not manifest_url:
             self._set_status(
-                "Local OCR is supported on this Mac, but no component distribution is configured yet."
+                self._tr("settings.download_local_ocr_no_distribution")
             )
             self._refresh_local_ocr_state()
             return
@@ -1223,17 +1380,17 @@ class SettingsWindow(QWidget):
             self.local_ocr_session is not None
             and getattr(self.local_ocr_session, "is_preparing", lambda: False)()
         ):
-            self._set_status("Local OCR is preparing. Please try again in a moment.")
+            self._set_status(self._tr("settings.local_ocr_preparing"))
             return
         if self.is_connection_running() or self.is_google_test_running():
-            self._set_status("Wait for the active OCR or connection test to finish before downloading Local OCR.")
+            self._set_status(self._tr("settings.download_wait_test"))
             return
         session_preparing = bool(
             self.local_ocr_session is not None
             and getattr(self.local_ocr_session, "is_preparing", lambda: False)()
         )
         if self.local_ocr_session is not None and self.local_ocr_session.is_busy() and not session_preparing:
-            self._set_status("Local OCR is currently in use. Please wait for recognition to finish.")
+            self._set_status(self._tr("settings.local_ocr_in_use"))
             return
         if self.local_ocr_session is not None:
             self.local_ocr_session.stop()
@@ -1245,7 +1402,7 @@ class SettingsWindow(QWidget):
         thread.started.connect(worker.run)
         worker.progress_changed.connect(self.local_ocr_progress.setValue)
         worker.manifest_loaded.connect(self._on_local_ocr_manifest_loaded)
-        worker.status_changed.connect(self.local_ocr_status_label.setText)
+        worker.status_changed.connect(self._set_local_ocr_worker_status)
         worker.succeeded.connect(self._on_local_ocr_download_succeeded)
         worker.failed.connect(self._on_local_ocr_download_failed)
         worker.cancelled.connect(self._on_local_ocr_download_cancelled)
@@ -1263,7 +1420,7 @@ class SettingsWindow(QWidget):
     def cancel_local_ocr_download(self) -> None:
         if self._download_worker is not None:
             self._download_worker.request_cancel()
-            self.local_ocr_status_label.setText("Cancelling...")
+            self.local_ocr_status_label.setText(self._tr("settings.cancelling"))
             self.cancel_download_button.setEnabled(False)
 
     @Slot(str)
@@ -1271,22 +1428,28 @@ class SettingsWindow(QWidget):
         self._local_ocr_download_terminal_status = None
         if self.local_ocr_session is not None:
             self.local_ocr_session.reset_capability()
-        self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version}")
+        self.local_ocr_status_label.setText(
+            self._tr("settings.local_ocr_installed", version=self.component_manager.version)
+        )
         self.local_ocr_size_label.setText("")
         self.local_ocr_component_changed.emit()
 
     @Slot(int)
     def _on_local_ocr_manifest_loaded(self, size: int) -> None:
-        self.local_ocr_size_label.setText(f"Download size: {size / (1024 * 1024):.1f} MB")
+        self.local_ocr_size_label.setText(
+            self._tr("settings.download_size", size=size / (1024 * 1024))
+        )
 
     @Slot(str)
     def _on_local_ocr_download_failed(self, message: str) -> None:
-        self._local_ocr_download_terminal_status = f"Error: {message}"
+        self._local_ocr_download_terminal_status = self._tr(
+            "settings.download_error", detail=message
+        )
         self.local_ocr_status_label.setText(self._local_ocr_download_terminal_status)
 
     @Slot()
     def _on_local_ocr_download_cancelled(self) -> None:
-        self._local_ocr_download_terminal_status = "Download cancelled"
+        self._local_ocr_download_terminal_status = self._tr("settings.download_cancelled")
         self.local_ocr_status_label.setText(self._local_ocr_download_terminal_status)
 
     @Slot()
@@ -1308,23 +1471,28 @@ class SettingsWindow(QWidget):
     def verify_local_ocr(self) -> None:
         if not self._local_ocr_supported:
             self.local_ocr_status_label.setText(
-                "Local OCR for macOS is not installed/supported in this build."
+                self._tr("settings.local_ocr_unsupported")
             )
             return
         if not self.component_manager.verify_installation():
-            self.local_ocr_status_label.setText("Local OCR installation is incomplete.")
+            self.local_ocr_status_label.setText(self._tr("settings.local_ocr_incomplete"))
             return
-        self.local_ocr_status_label.setText("Verifying...")
+        self.local_ocr_status_label.setText(self._tr("settings.local_ocr_verifying"))
         if self.component_manager.smoke_test():
-            self.local_ocr_status_label.setText(f"Installed · v{self.component_manager.version} · verified")
+            self.local_ocr_status_label.setText(
+                self._tr(
+                    "settings.local_ocr_verified",
+                    version=self.component_manager.version,
+                )
+            )
         else:
-            self.local_ocr_status_label.setText("Local OCR smoke test failed.")
+            self.local_ocr_status_label.setText(self._tr("settings.local_ocr_smoke_failed"))
 
     @Slot()
     def remove_local_ocr(self) -> None:
         if not self._local_ocr_supported:
             self.local_ocr_status_label.setText(
-                "Local OCR for macOS is not installed/supported in this build."
+                self._tr("settings.local_ocr_unsupported")
             )
             return
         if not self.component_manager.is_installed():
@@ -1335,13 +1503,13 @@ class SettingsWindow(QWidget):
             and getattr(self.local_ocr_session, "is_preparing", lambda: False)()
         ):
             self.local_ocr_status_label.setText(
-                "Local OCR is preparing. Please try again in a moment."
+                self._tr("settings.local_ocr_preparing")
             )
             return
         answer = QMessageBox.question(
             self,
-            "Remove Local OCR",
-            "Remove the installed Local OCR component?",
+            self._tr("settings.remove_local_ocr"),
+            self._tr("settings.remove_local_ocr_question"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1353,19 +1521,21 @@ class SettingsWindow(QWidget):
                     )
                     if session_preparing:
                         self.local_ocr_status_label.setText(
-                            "Local OCR is preparing. Please try again in a moment."
+                            self._tr("settings.local_ocr_preparing")
                         )
                         return
                     if self.local_ocr_session.is_busy() and not session_preparing:
                         self.local_ocr_status_label.setText(
-                            "Local OCR is currently in use. Please wait for recognition to finish."
+                            self._tr("settings.local_ocr_in_use")
                         )
                         return
                     self.local_ocr_session.stop()
                 self.component_manager.remove()
             except (OSError, ComponentError) as exc:
                 logger.warning("local OCR removal failed: %s", type(exc).__name__)
-                self.local_ocr_status_label.setText(f"Failed to remove Local OCR: {exc}")
+                self.local_ocr_status_label.setText(
+                    self._tr("settings.error_remove_local_ocr", detail=exc)
+                )
                 return
             if self.local_ocr_session is not None:
                 self.local_ocr_session.reset_capability()
@@ -1375,13 +1545,13 @@ class SettingsWindow(QWidget):
     def _read_config_from_fields(self) -> AppConfig:
         model = self.model_edit.text().strip()
         if not model:
-            raise ValueError("Model 不能为空")
+            raise ValueError(self._tr("settings.validation_model_empty"))
         try:
             request_timeout = float(self.timeout_edit.text().strip())
         except ValueError as exc:
-            raise ValueError("Request timeout 必须是正数") from exc
+            raise ValueError(self._tr("settings.validation_timeout")) from exc
         if request_timeout <= 0:
-            raise ValueError("Request timeout 必须是正数")
+            raise ValueError(self._tr("settings.validation_timeout"))
         sequence = self.shortcut_edit.keySequence()
         global_shortcut = self._parse_shortcut(sequence)
         vision_shortcut = self._parse_shortcut(self.vision_shortcut_edit.keySequence())
@@ -1399,7 +1569,7 @@ class SettingsWindow(QWidget):
                 )
             )
         except HotkeySpecError as exc:
-            raise ValueError("All shortcuts must be different.") from exc
+            raise ValueError(self._tr("settings.validation_shortcuts")) from exc
         current = self.config_manager.load(require_api_key=False)
         return AppConfig(
             api_key=self.api_key_edit.text().strip(),
@@ -1414,12 +1584,13 @@ class SettingsWindow(QWidget):
             ocr_provider=self._current_provider_from_ui(),
             google_vision_api_key=self.google_vision_api_key_edit.text().strip(),
             online_ocr_timeout=current.online_ocr_timeout,
+            interface_language=self.interface_language_combo.currentData(),
+            answer_language=self.answer_language_combo.currentData(),
         )
 
-    @staticmethod
-    def _parse_shortcut(sequence: QKeySequence) -> str:
+    def _parse_shortcut(self, sequence: QKeySequence) -> str:
         if sequence.count() != 1:
-            raise ValueError("快捷键只能包含一个组合")
+            raise ValueError(self._tr("settings.validation_one_shortcut"))
         try:
             return HotkeySpec.parse(
                 sequence.toString(QKeySequence.SequenceFormat.PortableText)
@@ -1432,7 +1603,7 @@ class SettingsWindow(QWidget):
         if self._connection_thread is not None and self._connection_thread.isRunning():
             return
         if self.is_download_running() or self.is_google_test_running():
-            self._set_status("Wait for the active OCR operation to finish before testing the connection.")
+            self._set_status(self._tr("settings.wait_ocr_before_connection"))
             return
         try:
             config = self._read_config_from_fields()
@@ -1440,7 +1611,7 @@ class SettingsWindow(QWidget):
             self._set_status(str(exc))
             return
         if not config.api_key:
-            self._set_status("请输入 API Key 后再测试连接")
+            self._set_status(self._tr("settings.enter_api_key"))
             return
 
         config = replace(config, request_timeout=min(config.request_timeout, CONNECTION_TEST_TIMEOUT))
@@ -1460,13 +1631,13 @@ class SettingsWindow(QWidget):
         self._connection_worker = worker
         self._connection_thread = thread
         self._refresh_operation_controls(connection_running=True)
-        self._set_status("正在测试连接...")
+        self._set_status(self._tr("settings.connection_testing"))
         thread.start()
 
     @Slot()
     def _on_connection_success(self) -> None:
         if not self._close_requested and not self._shutdown_requested:
-            self._set_status("连接成功")
+            self._set_status(self._tr("settings.connection_success"))
 
     @Slot(str)
     def _on_connection_failed(self, message: str) -> None:
@@ -1488,7 +1659,7 @@ class SettingsWindow(QWidget):
         if self.is_google_test_running():
             return
         if self.is_connection_running() or self.is_download_running():
-            self._set_status("Wait for the active operation to finish before testing Google Vision.")
+            self._set_status(self._tr("settings.wait_operation_before_google"))
             return
         try:
             config = self.config_manager.load(require_api_key=False)
@@ -1501,7 +1672,9 @@ class SettingsWindow(QWidget):
             else self.google_vision_api_key_edit.text().strip()
         )
         if not api_key:
-            self.google_vision_status_label.setText("Enter a Google Vision API Key first.")
+            self.google_vision_status_label.setText(
+                self._tr("settings.enter_google_api_key")
+            )
             return
 
         self._close_requested = False
@@ -1511,6 +1684,7 @@ class SettingsWindow(QWidget):
             language=config.ocr_language,
             timeout=min(config.online_ocr_timeout, CONNECTION_TEST_TIMEOUT),
             cancel_event=self._google_cancel_event,
+            interface_language=self._interface_language,
         )
         thread = QThread(self)
         thread.setObjectName("SettingsGoogleVisionTestThread")
@@ -1524,8 +1698,8 @@ class SettingsWindow(QWidget):
         thread.finished.connect(self._on_google_test_finished)
         self._google_worker = worker
         self._google_thread = thread
-        self.google_vision_test_button.setText("Testing...")
-        self.google_vision_status_label.setText("Testing...")
+        self.google_vision_test_button.setText(self._tr("settings.testing"))
+        self.google_vision_status_label.setText(self._tr("settings.testing"))
         self._refresh_operation_controls(google_running=True)
         thread.start()
 
@@ -1533,12 +1707,14 @@ class SettingsWindow(QWidget):
     def cancel_google_vision_test(self) -> None:
         if self._google_worker is not None:
             self._google_worker.request_cancel()
-            self.google_vision_status_label.setText("Cancelling...")
+            self.google_vision_status_label.setText(self._tr("settings.cancelling"))
 
     @Slot()
     def _on_google_test_success(self) -> None:
         if not self._close_requested and not self._shutdown_requested:
-            self.google_vision_status_label.setText("Google Vision connection successful.")
+            self.google_vision_status_label.setText(
+                self._tr("settings.google_connection_success")
+            )
 
     @Slot(str)
     def _on_google_test_failed(self, message: str) -> None:
@@ -1550,7 +1726,7 @@ class SettingsWindow(QWidget):
         self._google_thread = None
         self._google_worker = None
         self._google_cancel_event = None
-        self.google_vision_test_button.setText("Test Google Vision")
+        self.google_vision_test_button.setText(self._tr("settings.test_google_vision"))
         if self._close_requested or self._shutdown_requested:
             self.hide()
         self._refresh_operation_controls()
@@ -1579,7 +1755,7 @@ class SettingsWindow(QWidget):
                     )
                 )
             if not self._apply_shortcut_changes(changed_shortcuts):
-                self._set_status("快捷键注册失败，可能已被其他程序占用。")
+                self._set_status(self._tr("settings.shortcut_registration_failed"))
                 return
             provider_to_save = None
             if not self.config_manager.has_explicit_ocr_provider():
@@ -1602,6 +1778,16 @@ class SettingsWindow(QWidget):
                 ocr_provider=provider_to_save,
                 google_vision_api_key=google_key_to_save,
                 online_ocr_timeout=config.online_ocr_timeout,
+                interface_language=(
+                    config.interface_language
+                    if config.interface_language != self._loaded_interface_language
+                    else None
+                ),
+                answer_language=(
+                    config.answer_language
+                    if config.answer_language != self._loaded_answer_language
+                    else None
+                ),
             )
             changed_auto_watch = self._changed_auto_watch_values()
             if changed_auto_watch:
@@ -1610,7 +1796,7 @@ class SettingsWindow(QWidget):
             self._restore_shortcut_changes(changed_shortcuts)
             self._set_status(str(exc))
             return
-        self._set_status("设置已保存")
+        self._set_status(self._tr("settings.saved"))
         self._show_environment_override_warnings()
         self.settings_saved.emit()
         self.close()

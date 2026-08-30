@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.analysis import AnalysisMode
+from app.localization import DEFAULT_INTERFACE_LANGUAGE, normalize_language, tr
 from app.pipeline import ContextQuestionPipelineResult, PipelineResult
 from app.settings.repository import SettingsRepository
 from app.ui.answer_window_placement import place_answer_window_avoiding
@@ -47,6 +48,7 @@ class _TitleBar(QWidget):
         title: str,
         close_callback,
         mode: AnalysisMode = AnalysisMode.TEXT,
+        interface_language: str = DEFAULT_INTERFACE_LANGUAGE,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -68,11 +70,19 @@ class _TitleBar(QWidget):
         close_button.clicked.connect(close_callback)
         layout.addWidget(close_button)
         self.close_button = close_button
+        self._interface_language = normalize_language(
+            interface_language, default=DEFAULT_INTERFACE_LANGUAGE
+        )
         self.set_mode(mode)
 
     def set_mode(self, mode: AnalysisMode) -> None:
         is_vision = mode is AnalysisMode.VISION
-        self.title_label.setText("Vision Analysis" if is_vision else "Text / OCR Analysis")
+        self.title_label.setText(
+            tr(
+                "answer.title_vision" if is_vision else "answer.title_text",
+                self._interface_language,
+            )
+        )
         self.mode_icon.setPixmap(mode_icon("vision" if is_vision else "text", VISION_ACCENT if is_vision else TEXT_ACCENT))
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt API name
@@ -103,13 +113,31 @@ class AnswerWindow(QWidget):
     recapture_requested = Signal()
     closed = Signal()
 
+    def _tr(self, key: str, **values: object) -> str:
+        return tr(key, self._interface_language, **values)
+
     def __init__(
         self,
         settings_repository: SettingsRepository | None = None,
         parent: QWidget | None = None,
+        interface_language: str | None = None,
     ) -> None:
         super().__init__(parent)
         self._settings_repository = settings_repository or SettingsRepository()
+        repository_language_getter = getattr(
+            self._settings_repository, "interface_language", None
+        )
+        repository_language = (
+            repository_language_getter()
+            if callable(repository_language_getter)
+            else DEFAULT_INTERFACE_LANGUAGE
+        )
+        self._interface_language = normalize_language(
+            interface_language
+            if interface_language is not None
+            else repository_language,
+            default=DEFAULT_INTERFACE_LANGUAGE,
+        )
         self._geometry_restored = False
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -159,7 +187,12 @@ class AnswerWindow(QWidget):
         surface_layout.setContentsMargins(14, 12, 14, 12)
         surface_layout.setSpacing(10)
 
-        self.title_bar = _TitleBar("Text / OCR Analysis", self.close, parent=self)
+        self.title_bar = _TitleBar(
+            "Text / OCR Analysis",
+            self.close,
+            interface_language=self._interface_language,
+            parent=self,
+        )
         self.title_bar.moved.connect(self._mark_auto_watch_user_moved)
         surface_layout.addWidget(self.title_bar)
 
@@ -179,12 +212,16 @@ class AnswerWindow(QWidget):
         ocr_layout = QVBoxLayout(ocr_card)
         ocr_layout.setContentsMargins(14, 12, 14, 14)
         ocr_layout.setSpacing(8)
-        self.ocr_section_label = self._section_label("Recognized Question")
+        self.ocr_section_label = self._section_label(
+            tr("answer.recognized_question", self._interface_language)
+        )
         ocr_layout.addWidget(self.ocr_section_label)
         self.ocr_edit = QPlainTextEdit()
         self.ocr_edit.setObjectName("ocrEdit")
         self.ocr_edit.setReadOnly(True)
-        self.ocr_edit.setPlaceholderText("Recognized text will appear here.")
+        self.ocr_edit.setPlaceholderText(
+            tr("answer.recognized_text_placeholder", self._interface_language)
+        )
         self.ocr_edit.setMaximumHeight(145)
         ocr_layout.addWidget(self.ocr_edit)
         body_layout.addWidget(ocr_card)
@@ -203,7 +240,9 @@ class AnswerWindow(QWidget):
         self.context_ocr_edit.setObjectName("contextOcrEdit")
         self.context_edit = self.context_ocr_edit
         self.context_ocr_edit.setReadOnly(True)
-        self.context_ocr_edit.setPlaceholderText("Recognized context will appear here.")
+        self.context_ocr_edit.setPlaceholderText(
+            tr("answer.recognized_context_placeholder", self._interface_language)
+        )
         self.context_ocr_edit.setMaximumHeight(145)
         context_ocr_layout.addWidget(self.context_ocr_edit)
         body_layout.addWidget(context_ocr_card)
@@ -222,7 +261,9 @@ class AnswerWindow(QWidget):
         self.question_ocr_edit.setObjectName("questionOcrEdit")
         self.question_edit = self.question_ocr_edit
         self.question_ocr_edit.setReadOnly(True)
-        self.question_ocr_edit.setPlaceholderText("Recognized question will appear here.")
+        self.question_ocr_edit.setPlaceholderText(
+            tr("answer.recognized_question_placeholder", self._interface_language)
+        )
         self.question_ocr_edit.setMaximumHeight(145)
         question_ocr_layout.addWidget(self.question_ocr_edit)
         body_layout.addWidget(question_ocr_card)
@@ -239,7 +280,9 @@ class AnswerWindow(QWidget):
         self.answer_edit = QPlainTextEdit()
         self.answer_edit.setObjectName("answerEdit")
         self.answer_edit.setReadOnly(True)
-        self.answer_edit.setPlaceholderText("The analysis will appear here.")
+        self.answer_edit.setPlaceholderText(
+            tr("answer.analysis_placeholder", self._interface_language)
+        )
         self.answer_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         answer_layout.addWidget(self.answer_edit, 1)
         body_layout.addWidget(answer_card, 1)
@@ -250,15 +293,17 @@ class AnswerWindow(QWidget):
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(10, 8, 10, 8)
         footer_layout.setSpacing(7)
-        self.copy_button = QPushButton("Copy")
+        self.copy_button = QPushButton(tr("answer.copy", self._interface_language))
         self.copy_button.setObjectName("copyButton")
-        self.retry_button = QPushButton("Retry")
+        self.retry_button = QPushButton(tr("answer.retry", self._interface_language))
         self.retry_button.setObjectName("retryButton")
-        self.stop_button = QPushButton("Stop")
+        self.stop_button = QPushButton(tr("answer.stop", self._interface_language))
         self.stop_button.setObjectName("stopButton")
-        self.recapture_button = QPushButton("Recapture")
+        self.recapture_button = QPushButton(
+            tr("answer.recapture", self._interface_language)
+        )
         self.recapture_button.setObjectName("recaptureButton")
-        close_button = QPushButton("Close")
+        close_button = QPushButton(tr("answer.close", self._interface_language))
         close_button.setObjectName("closeActionButton")
         self.close_action_button = close_button
         self.copy_button.clicked.connect(self.copy_answer)
@@ -369,7 +414,11 @@ class AnswerWindow(QWidget):
             self._question_ocr_text = ""
             self._refresh_context_question_ocr()
         self._disable_auto_watch_job_controls()
-        self.set_status("New question detected · Analyzing…" if self._answer_text or self._ocr_text else "Auto Watch · Analyzing…")
+        self.set_status(
+            "New question detected · Analyzing…"
+            if self._answer_text or self._ocr_text
+            else "Auto Watch · Analyzing…"
+        )
         self._place_auto_watch_window()
 
     def show_auto_watch_ocr(self, generation: int, stage: str, text: str) -> None:
@@ -424,7 +473,9 @@ class AnswerWindow(QWidget):
             return
         self._auto_watch_generation = generation
         if not self._answer_text:
-            self.answer_edit.setPlainText(f"AI 解析失败。\n{message}")
+            self.answer_edit.setPlainText(
+                self._tr("answer.failure_body", message=message)
+            )
         self.set_status(f"失败：{message}")
         self._disable_auto_watch_job_controls()
 
@@ -568,19 +619,30 @@ class AnswerWindow(QWidget):
 
     def set_status(self, status: str) -> None:
         mapping = {
-            "等待处理": ("●  Ready", "ready"),
-            "正在识别题目...": ("◌  Recognizing text…", "busy"),
-            "正在请求 AI...": ("◌  Analyzing…", "busy"),
-            "正在分析截图...": ("◌  Analyzing image…", "busy"),
-            "正在取消...": ("◌  Cancelling…", "busy"),
-            "已取消": ("■  Cancelled", "cancelled"),
-            "完成": ("✓  Analysis completed", "complete"),
-            "答案已复制": ("✓  Copied", "complete"),
+            "等待处理": ("answer.status_ready", "ready"),
+            "正在识别题目...": ("answer.status_recognizing", "busy"),
+            "正在请求 AI...": ("answer.status_analyzing", "busy"),
+            "正在分析截图...": ("answer.status_analyzing_image", "busy"),
+            "正在取消...": ("answer.status_cancelling", "busy"),
+            "已取消": ("answer.status_cancelled", "cancelled"),
+            "完成": ("answer.status_completed", "complete"),
+            "答案已复制": ("answer.status_copied", "complete"),
+            "Auto Watch · Analyzing…": ("answer.auto_watch_analyzing", "busy"),
+            "New question detected · Analyzing…": (
+                "answer.new_question_analyzing",
+                "busy",
+            ),
+            "Analysis cancelled": ("answer.analysis_cancelled", "cancelled"),
         }
-        if status.startswith("失败："):
-            text, state = "!  Analysis failed", "error"
+        if status.startswith("失败：") or status.startswith("Analysis failed"):
+            text, state = self._tr("answer.status_failed"), "error"
         else:
-            text, state = mapping.get(status, (status, "busy"))
+            key_state = mapping.get(status)
+            if key_state is None:
+                text, state = status, "busy"
+            else:
+                key, state = key_state
+                text = self._tr(key)
         self.status_label.setText(text)
         self.status_label.setProperty("state", state)
         self.status_label.style().unpolish(self.status_label)
@@ -644,7 +706,7 @@ class AnswerWindow(QWidget):
 
     def show_cancelled(self) -> None:
         self._answer_text = ""
-        self.answer_edit.setPlainText("已取消，未生成 AI 答案。")
+        self.answer_edit.setPlainText(self._tr("answer.cancelled_body"))
         self.set_status("已取消")
         self.stop_button.setVisible(False)
         self.stop_button.setEnabled(False)
@@ -665,7 +727,9 @@ class AnswerWindow(QWidget):
 
     def show_error(self, message: str) -> None:
         self._answer_text = ""
-        self.answer_edit.setPlainText(f"AI 解析失败。\n{message}")
+        self.answer_edit.setPlainText(
+            self._tr("answer.failure_body", message=message)
+        )
         self.set_status(f"失败：{message}")
         self.stop_button.setVisible(False)
         self.stop_button.setEnabled(False)

@@ -8,6 +8,11 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from app.localization import (
+    DEFAULT_ANSWER_LANGUAGE,
+    DEFAULT_INTERFACE_LANGUAGE,
+    normalize_language,
+)
 from app.platform.hotkey import (
     DEFAULT_CONTEXT_WATCH_SHORTCUT,
     DEFAULT_SHORTCUT,
@@ -41,6 +46,8 @@ class AppConfig:
     ocr_provider: str = "local"
     google_vision_api_key: str = field(default="", repr=False)
     online_ocr_timeout: float = 15.0
+    interface_language: str = DEFAULT_INTERFACE_LANGUAGE
+    answer_language: str = DEFAULT_ANSWER_LANGUAGE
 
 
 class ConfigManager:
@@ -188,7 +195,28 @@ class ConfigManager:
             ocr_provider=ocr_provider,
             google_vision_api_key=google_vision_api_key,
             online_ocr_timeout=online_ocr_timeout,
+            interface_language=self._language_setting(
+                "interface_language",
+                DEFAULT_INTERFACE_LANGUAGE,
+                saved_settings,
+            ),
+            answer_language=self._language_setting(
+                "answer_language",
+                DEFAULT_ANSWER_LANGUAGE,
+                saved_settings,
+            ),
         )
+
+    def _language_setting(
+        self,
+        key: str,
+        default: str,
+        saved_settings: dict[str, object],
+    ) -> str:
+        getter = getattr(self.settings_repository, key, None)
+        if callable(getter):
+            return normalize_language(getter(), default=default)
+        return normalize_language(saved_settings.get(key), default=default)
 
     def _stored_google_vision_key(self) -> str:
         getter = getattr(self.secret_store, "get_google_vision_api_key", None)
@@ -258,6 +286,8 @@ class ConfigManager:
         ocr_provider: str | None = None,
         google_vision_api_key: str | None = None,
         online_ocr_timeout: float | None = None,
+        interface_language: str | None = None,
+        answer_language: str | None = None,
     ) -> None:
         """Save settings; a None secret value leaves that stored secret unchanged."""
 
@@ -307,6 +337,26 @@ class ConfigManager:
             if online_ocr_timeout <= 0 or online_ocr_timeout > 15:
                 raise ConfigError("ONLINE_OCR_TIMEOUT must be between 0 and 15 seconds")
             settings["online_ocr_timeout"] = float(online_ocr_timeout)
+        if interface_language is not None:
+            if not isinstance(interface_language, str):
+                raise ConfigError("Unsupported interface language")
+            normalized_interface_language = normalize_language(
+                interface_language,
+                default=DEFAULT_INTERFACE_LANGUAGE,
+            )
+            if normalized_interface_language != interface_language.strip():
+                raise ConfigError("Unsupported interface language")
+            settings["interface_language"] = normalized_interface_language
+        if answer_language is not None:
+            if not isinstance(answer_language, str):
+                raise ConfigError("Unsupported answer language")
+            normalized_answer_language = normalize_language(
+                answer_language,
+                default=DEFAULT_ANSWER_LANGUAGE,
+            )
+            if normalized_answer_language != answer_language.strip():
+                raise ConfigError("Unsupported answer language")
+            settings["answer_language"] = normalized_answer_language
         if google_vision_api_key is not None:
             if google_vision_api_key.strip():
                 setter = getattr(self.secret_store, "set_google_vision_api_key", None)

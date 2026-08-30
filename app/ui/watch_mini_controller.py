@@ -6,6 +6,7 @@ from PySide6.QtCore import QRect, Signal, Qt
 from PySide6.QtWidgets import QFrame, QWidget, QLabel, QPushButton, QHBoxLayout, QVBoxLayout
 from app.analysis import AnalysisMode
 from app.auto_watch.models import MonitorState
+from app.localization import DEFAULT_INTERFACE_LANGUAGE, normalize_language, tr
 from app.ui.theme import watch_mini_controller_stylesheet
 
 def _place_mini_controller_single(global_roi: QRect, available: QRect, size, margin=8) -> QRect:
@@ -82,8 +83,11 @@ def place_mini_controller(global_roi: QRect, available: QRect, size, margin=8) -
 
 class WatchMiniController(QWidget):
     analyze_now_requested = Signal(); pause_requested = Signal(); resume_requested = Signal(); stop_requested = Signal()
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, interface_language: str = DEFAULT_INTERFACE_LANGUAGE):
         super().__init__(parent); self.setObjectName("watchMiniController")
+        self._interface_language = normalize_language(
+            interface_language, default=DEFAULT_INTERFACE_LANGUAGE
+        )
         self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         if sys.platform == "darwin":
             self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
@@ -96,24 +100,27 @@ class WatchMiniController(QWidget):
         self.surface = QFrame(self); self.surface.setObjectName("watchMiniSurface")
         surface_layout = QVBoxLayout(self.surface); surface_layout.setContentsMargins(12, 9, 12, 9); surface_layout.setSpacing(6)
         self.status_dot = QLabel("●"); self.status_dot.setObjectName("watchMiniStatusDot")
-        self.status_label = QLabel("Arming"); self.status_label.setObjectName("watchMiniStatus")
+        self.status_label = QLabel(self._tr("watch.status_arming")); self.status_label.setObjectName("watchMiniStatus")
         self.mode_label = QLabel("Text / OCR"); self.mode_label.setObjectName("watchMiniMode")
         # Expose the existing compact mode label under a region-aware name so
         # pair mode can be inspected without adding another controller row.
         self.region_mode_label = self.mode_label
         self.generation_label = QLabel("G0"); self.generation_label.setObjectName("watchMiniGeneration")
-        self.analysis_label = QLabel("Ready for changes"); self.analysis_label.setObjectName("watchMiniAnalysis")
+        self.analysis_label = QLabel(self._tr("watch.analysis_ready")); self.analysis_label.setObjectName("watchMiniAnalysis")
         status_row = QHBoxLayout(); status_row.setSpacing(6)
         for label in (self.status_dot, self.status_label, self.mode_label, self.generation_label): status_row.addWidget(label)
         status_row.addStretch(1); surface_layout.addLayout(status_row); surface_layout.addWidget(self.analysis_label)
-        self.analyze_button = QPushButton("Analyze Now"); self.analyze_button.setObjectName("watchMiniAnalyze")
-        self.pause_button = QPushButton("Pause"); self.pause_button.setObjectName("watchMiniPause")
-        self.stop_button = QPushButton("Stop"); self.stop_button.setObjectName("watchMiniStop")
+        self.analyze_button = QPushButton(self._tr("watch.analyze_now")); self.analyze_button.setObjectName("watchMiniAnalyze")
+        self.pause_button = QPushButton(self._tr("watch.pause")); self.pause_button.setObjectName("watchMiniPause")
+        self.stop_button = QPushButton(self._tr("watch.stop")); self.stop_button.setObjectName("watchMiniStop")
         self.analyze_button.clicked.connect(self.analyze_now_requested); self.pause_button.clicked.connect(self._toggle_pause); self.stop_button.clicked.connect(self.stop_requested)
         button_row = QHBoxLayout(); button_row.setSpacing(6)
         for button in (self.analyze_button, self.pause_button, self.stop_button): button_row.addWidget(button)
         surface_layout.addLayout(button_row); layout.addWidget(self.surface)
         self.surface.adjustSize(); super().adjustSize(); self._sync_surface_geometry()
+
+    def _tr(self, key: str, **values: object) -> str:
+        return tr(key, self._interface_language, **values)
 
     def adjustSize(self):  # noqa: N802 - Qt API name
         super().adjustSize()
@@ -126,21 +133,41 @@ class WatchMiniController(QWidget):
         self.adjustSize(); available = screen.availableGeometry(); self.setGeometry(place_mini_controller(global_roi, available, self.size())); self.show()
     def set_monitor_state(self, state):
         name = getattr(state, "name", str(state)); self._paused = name == "PAUSED"
-        labels = {"WATCHING": "Watching", "PAUSED": "Paused", "CHANGING": "Changing", "ARMING": "Arming", "STOPPED": "Stopped"}
-        self.status_label.setText(labels.get(name, name.title())); self.pause_button.setText("Resume" if self._paused else "Pause")
+        labels = {
+            "WATCHING": self._tr("watch.status_watching"),
+            "PAUSED": self._tr("watch.status_paused"),
+            "CHANGING": self._tr("watch.status_changing"),
+            "ARMING": self._tr("watch.status_arming"),
+            "STOPPED": self._tr("watch.status_stopped"),
+        }
+        self.status_label.setText(labels.get(name, name.title()))
+        self.pause_button.setText(
+            self._tr("watch.resume" if self._paused else "watch.pause")
+        )
         self.status_dot.setProperty("monitorState", name)
         self.status_dot.style().unpolish(self.status_dot); self.status_dot.style().polish(self.status_dot)
     def set_analysis_state(self, state):
         name = getattr(state, "name", str(state)).lower()
-        labels = {"idle": "Ready for changes", "accepted": "Waiting to analyze", "delay_schedule": "Waiting to analyze",
-                  "started": "Analyzing…", "running": "Analyzing…", "context_ocr": "Recognizing Context…",
-                  "question_ocr": "Recognizing Question…", "finished": "Last analysis completed",
-                  "result": "Last analysis completed", "cancelled": "Analysis cancelled", "error": "Analysis failed"}
+        labels = {
+            "idle": self._tr("watch.analysis_ready"),
+            "accepted": self._tr("watch.analysis_waiting"),
+            "delay_schedule": self._tr("watch.analysis_waiting"),
+            "started": self._tr("watch.analysis_analyzing"),
+            "running": self._tr("watch.analysis_analyzing"),
+            "context_ocr": self._tr("watch.analysis_context"),
+            "question_ocr": self._tr("watch.analysis_question"),
+            "finished": self._tr("watch.analysis_completed"),
+            "result": self._tr("watch.analysis_completed"),
+            "cancelled": self._tr("watch.analysis_cancelled"),
+            "error": self._tr("watch.analysis_failed"),
+        }
         self.analysis_label.setText(labels.get(name, str(state)))
     def set_generation(self, generation):
         self._generation = generation
         if self._region_mode == "Context + Question":
-            self.generation_label.setText(f"Pair {generation}")
+            self.generation_label.setText(
+                self._tr("watch.generation_pair", generation=generation)
+            )
         else:
             self.generation_label.setText(f"G{generation}")
     def set_mode(self, mode, region_mode=None):

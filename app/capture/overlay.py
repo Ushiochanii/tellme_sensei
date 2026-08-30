@@ -10,6 +10,8 @@ from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QImage, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QWidget
 
+from app.localization import DEFAULT_INTERFACE_LANGUAGE, normalize_language, tr
+
 if sys.platform == "darwin":
     from app.platform.macos.window import configure_macos_overlay_window
 else:
@@ -26,12 +28,20 @@ class CaptureOverlay(QWidget):
     captured = Signal(QImage)
     cancelled = Signal()
 
-    def __init__(self, debug_path: Path | None = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        debug_path: Path | None = None,
+        parent: QWidget | None = None,
+        interface_language: str | None = None,
+    ) -> None:
         super().__init__(parent)
         self.debug_path = debug_path
+        self._interface_language = normalize_language(
+            interface_language, default=DEFAULT_INTERFACE_LANGUAGE
+        )
         self._screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         if self._screen is None:
-            raise RuntimeError("没有可用的显示器。")
+            raise RuntimeError(tr("capture.no_screen", self._interface_language))
         self._screen_geometry = self._screen.geometry()
         self._screen_image = (
             QImage() if sys.platform == "win32" else self._screen.grabWindow(0).toImage()

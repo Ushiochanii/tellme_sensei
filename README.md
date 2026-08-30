@@ -50,6 +50,15 @@ macOS builds are ad-hoc signed and not notarized. macOS may require **Open Anywa
 5. For automatic monitoring, choose **Watch** for one region or **Context Watch** for a context region plus a question region in the floating controller. Watch starts screen selection immediately; Context Watch automatically advances from Context to Question and starts monitoring after the second selection. Choose **Text / OCR** or **Vision** once in **Settings → Auto Watch**. `Ctrl+Shift+W` and `Ctrl+Shift+C` start the matching selection workflow directly.
 6. To change any global shortcut, open **Settings → Shortcuts** and save the four entries together.
 
+## Language preferences
+
+Open **Settings → Language** to choose the two language preferences independently:
+
+- **Interface language:** English (`en`) or Simplified Chinese (`zh-CN`). The interface keeps the established product vocabulary **TellMeSensei**, **Text / OCR**, **Vision**, **Watch**, **Context Watch**, **Ready**, **Context**, **Question**, **Answer**, **Local OCR**, **PaddleOCR**, **Google Cloud Vision**, **DeepSeek**, and **API Key** in English.
+- **Answer language:** controls the language and headings used by the next Text / OCR, Vision, Watch, or Context Watch answer. It does not change OCR recognition.
+
+Interface-language changes require restarting TellMeSensei. Answer-language changes apply to subsequent analyses. The initial defaults are an English interface and Simplified Chinese answers; OCR language remains a separate setting.
+
 ## Analysis modes
 
 | Mode | Shortcut | Pipeline | Best for |

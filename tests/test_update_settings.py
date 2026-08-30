@@ -94,9 +94,10 @@ def test_updates_page_checks_and_launches_new_release_off_gui_thread(
         local_ocr_supported=False,
     )
 
-    assert [button.text() for button in window._navigation_buttons][-2:] == [
+    assert [button.text() for button in window._navigation_buttons][-3:] == [
         "Updates",
         "Debug",
+        "Language",
     ]
     assert window.current_version_label.text() == __version__
     assert window.latest_version_label.text() == "Not checked"
@@ -163,7 +164,9 @@ def test_updates_page_surfaces_check_failure(qt_app, tmp_path) -> None:
     _wait_until(qt_app, lambda: not window.is_update_check_running())
 
     assert window.latest_version_label.text() == "Unavailable"
-    assert window.update_status_label.text() == "GitHub is unavailable"
+    assert window.update_status_label.text() == (
+        "Unable to complete the update operation: GitHub is unavailable"
+    )
     assert window.check_update_button.isEnabled() is True
     window.deleteLater()
     qt_app.processEvents()

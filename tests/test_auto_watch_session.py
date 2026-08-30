@@ -313,7 +313,7 @@ def test_session_dpr_fault_stops_polling_once_and_stop_remains_available(qt_app)
     session.region = replace(session.region, device_pixel_ratio=session.region.device_pixel_ratio + 0.25)
     session.tick(); session.tick()
     assert not timer.active and len(overlay.errors) == 1
-    assert "配置已改变" in overlay.errors[0]
+    assert "display configuration changed" in overlay.errors[0]
     assert len(states) == 2 and states[-1]["state"] is MonitorState.PAUSED
     dispatcher.active_request = None
     session.stop()

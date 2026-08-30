@@ -14,6 +14,7 @@ from app.auto_watch.models import ContextQuestionRegions, MonitorState, PairSnap
 from app.auto_watch.pair_coordinator import PairCoordinator
 from app.auto_watch.pair_sampler import ContextQuestionImages, ContextQuestionSampler
 from app.config import ConfigManager
+from app.localization import DEFAULT_INTERFACE_LANGUAGE, normalize_language, tr
 from app.ocr.local_session import LocalOCRSession
 
 from .watch_mini_controller import WatchMiniController
@@ -70,6 +71,10 @@ class ContextQuestionAutoWatchSession(QObject):
         self.context_ocr_cache = context_ocr_cache or ContextOCRCache()
 
         config = self.config_manager.load(require_api_key=False)
+        self._interface_language = normalize_language(
+            getattr(config, "interface_language", DEFAULT_INTERFACE_LANGUAGE),
+            default=DEFAULT_INTERFACE_LANGUAGE,
+        )
         self.dispatcher = dispatcher or AnalysisDispatcher(
             settings=self.settings,
             config=config,
@@ -128,7 +133,7 @@ class ContextQuestionAutoWatchSession(QObject):
 
     def start(self) -> bool:
         if not self.regions.is_valid():
-            self._fault("屏幕不可用或显示器配置已改变")
+            self._fault(tr("watch.error_screen_changed", self._interface_language))
             return False
         self._stopped = False
         self._faulted = False
@@ -157,7 +162,9 @@ class ContextQuestionAutoWatchSession(QObject):
                     self.regions.question.logical_roi,
                 ),
             )
-        self.mini = self.mini or WatchMiniController()
+        self.mini = self.mini or WatchMiniController(
+            interface_language=self._interface_language
+        )
         self.mini.set_mode(self.mode)
         if hasattr(self.mini, "set_region_mode"):
             self.mini.set_region_mode("Context + Question")
@@ -184,12 +191,14 @@ class ContextQuestionAutoWatchSession(QObject):
         if self._stopped or self._faulted:
             return
         if not self.regions.is_valid():
-            self._fault("屏幕不可用或显示器配置已改变")
+            self._fault(tr("watch.error_screen_changed", self._interface_language))
             return
         try:
             images = self.sampler.sample()
             if not isinstance(images, ContextQuestionImages):
-                raise RuntimeError("双区截图为空")
+                raise RuntimeError(
+                    tr("watch.error_empty_pair_capture", self._interface_language)
+                )
             self.latest_images = images
             event = self.coordinator.tick(images)
             self._emit_monitor()

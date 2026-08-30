@@ -540,7 +540,7 @@ def test_failed_shortcut_rebind_does_not_persist_new_value(qt_app, tmp_path) -> 
     window.shortcut_edit.setKeySequence(QKeySequence("Ctrl+Alt+A"))
     window.save()
     assert repository.load()["global_shortcut"] == "Ctrl+Shift+Q"
-    assert "注册失败" in window.status_label.text()
+    assert "Shortcut registration failed" in window.status_label.text()
     window.deleteLater()
     qt_app.processEvents()
 
@@ -600,7 +600,7 @@ def test_two_shortcut_rebinds_roll_back_when_vision_registration_fails(qt_app, t
     assert text_hotkey.registered is True
     assert vision_hotkey.registered is True
     assert window.config_manager.settings_repository.load() == {}
-    assert "注册失败" in window.status_label.text()
+    assert "Shortcut registration failed" in window.status_label.text()
     window.deleteLater()
     qt_app.processEvents()
 
@@ -717,7 +717,7 @@ def test_two_shortcut_rebind_restores_after_second_registration_fails(qt_app, tm
     assert vision_hotkey.registered is True
     assert owners == {"Ctrl+Shift+Q", "Ctrl+Shift+W"}
     assert window.config_manager.settings_repository.load() == {}
-    assert "注册失败" in window.status_label.text()
+    assert "Shortcut registration failed" in window.status_label.text()
     window.deleteLater()
     qt_app.processEvents()
 
@@ -830,7 +830,7 @@ def test_settings_warns_when_os_api_key_overrides_saved_key(qt_app, tmp_path, mo
     window.save()
 
     assert secret_store.set_values == ["new-saved-key"]
-    assert "不会改变当前实际使用" in window.api_key_override_label.text()
+    assert "will not change the key currently in use" in window.api_key_override_label.text()
     window.deleteLater()
     qt_app.processEvents()
 
@@ -852,9 +852,9 @@ def test_connection_success_runs_off_gui_thread(qt_app, tmp_path, monkeypatch) -
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("key")))
     window.test_connection()
     assert window.is_connection_running()
-    assert "正在测试" in window.status_label.text()
+    assert "Testing connection" in window.status_label.text()
     wait_for_connection(window, qt_app)
-    assert window.status_label.text() == "连接成功"
+    assert window.status_label.text() == "Connection successful."
     assert worker_threads and worker_threads[0] != main_thread
     window.deleteLater()
     qt_app.processEvents()
