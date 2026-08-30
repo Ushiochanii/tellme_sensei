@@ -17,8 +17,8 @@
 
 - 文字模式截图快捷键（默认 `Ctrl+Shift+A`）
 - 视觉模式截图快捷键（默认 `Ctrl+Shift+S`）
-- Watch 设置快捷键（默认 `Ctrl+Shift+W`）
-- Context Watch 设置快捷键（默认 `Ctrl+Shift+C`）
+- Watch 框选快捷键（默认 `Ctrl+Shift+W`）
+- Context Watch 框选快捷键（默认 `Ctrl+Shift+C`）
 - 鼠标拖拽框选屏幕区域，支持 macOS 全屏应用和多桌面
 - 悬浮窗口流式显示 DeepSeek 回答
 - 统一的悬浮控制器入口：**Text / OCR**、**Vision**、**Watch** 和 **Context Watch**
@@ -47,7 +47,7 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
    - **Local OCR：** 在 Settings 中点击 **Download Local OCR**。
    - **Google Cloud Vision：** 填写自己的 Google Vision API Key 并测试连接。
 4. 文字题按 `Ctrl+Shift+A`，图形题按 `Ctrl+Shift+S`，框选题目后等待答案窗口出现。
-5. 需要自动监控时，在悬浮控制器中选择 **Watch**（单个区域）或 **Context Watch**（上下文区域加题目区域），再选择 **Text / OCR** 或 **Vision** 作为分析模式。`Ctrl+Shift+W` 和 `Ctrl+Shift+C` 可以直接打开对应设置界面。
+5. 需要自动监控时，在悬浮控制器中选择 **Watch**（单个区域）或 **Context Watch**（上下文区域加题目区域）。Watch 会立即开始框选；Context Watch 在上下文框选完成后自动进入题目框选，第二次框选完成后自动开始监控。请在 **Settings → Auto Watch** 中统一选择 **Text / OCR** 或 **Vision**。`Ctrl+Shift+W` 和 `Ctrl+Shift+C` 会直接开始对应的框选流程。
 6. 如需修改全局快捷键，打开 **Settings → Shortcuts**，一次保存四项配置。
 
 ## 分析模式
@@ -56,12 +56,12 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
 |---|---|---|---|
 | 文字模式 | `Ctrl+Shift+A` | 截图 → 配置的 OCR → DeepSeek 文本分析 | 文字为主的题目 |
 | 视觉模式 | `Ctrl+Shift+S` | 截图 → DeepSeek Vision | 图表、几何图形、流程图、网络拓扑等图形题 |
-| Watch 设置 | `Ctrl+Shift+W` | 打开控制器并进入单区域设置 | 反复出现在同一区域的题目 |
-| Context Watch 设置 | `Ctrl+Shift+C` | 打开控制器并进入上下文 + 题目设置 | 带共享上下文区域的连续题目 |
+| Watch | `Ctrl+Shift+W` | 框选一个区域后自动开始监控 | 反复出现在同一区域的题目 |
+| Context Watch | `Ctrl+Shift+C` | 依次框选上下文和题目后自动开始监控 | 带共享上下文区域的连续题目 |
 
 视觉模式固定使用 `deepseek-v4-flash-vision-exp`，会把截图直接发送给 DeepSeek。模式由用户明确选择；TellMeSensei 不会在文字模式和视觉模式之间自动切换或回退。
 
-Watch 快捷键只会打开对应的设置界面；确认设置前不会开始框选或监控。
+Watch 快捷键会直接开始对应的框选流程，不再经过单独设置界面或手动 Start 操作；Text / OCR 与 Vision 请在 **Settings → Auto Watch** 中统一配置。
 
 ## OCR 模式
 
