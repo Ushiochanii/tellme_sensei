@@ -243,9 +243,8 @@ class AnswerWindow(QWidget):
         self.context_ocr_edit.setPlaceholderText(
             tr("answer.recognized_context_placeholder", self._interface_language)
         )
-        self.context_ocr_edit.setMaximumHeight(145)
         context_ocr_layout.addWidget(self.context_ocr_edit)
-        body_layout.addWidget(context_ocr_card)
+        body_layout.addWidget(context_ocr_card, 3)
 
         question_ocr_card = QFrame()
         question_ocr_card.setObjectName("questionOcrCard")
@@ -264,9 +263,8 @@ class AnswerWindow(QWidget):
         self.question_ocr_edit.setPlaceholderText(
             tr("answer.recognized_question_placeholder", self._interface_language)
         )
-        self.question_ocr_edit.setMaximumHeight(145)
         question_ocr_layout.addWidget(self.question_ocr_edit)
-        body_layout.addWidget(question_ocr_card)
+        body_layout.addWidget(question_ocr_card, 2)
 
         answer_card = QFrame()
         answer_card.setObjectName("answerCard")
@@ -285,7 +283,7 @@ class AnswerWindow(QWidget):
         )
         self.answer_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         answer_layout.addWidget(self.answer_edit, 1)
-        body_layout.addWidget(answer_card, 1)
+        body_layout.addWidget(answer_card, 5)
         surface_layout.addWidget(body, 1)
 
         footer = QWidget()
