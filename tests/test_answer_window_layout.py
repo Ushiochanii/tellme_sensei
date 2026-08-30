@@ -1,32 +1,66 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QRect
+
 from app.analysis import AnalysisMode
 from app.ui.answer_window import AnswerWindow
 
 
-def test_context_question_layout_prioritizes_rendered_answer_space(qt_app) -> None:
+class _FakeScreen:
+    def availableGeometry(self) -> QRect:  # noqa: N802 - Qt API name
+        return QRect(0, 0, 1400, 1000)
+
+
+def _assert_edit_fills_card(card, label, edit) -> None:
+    layout = card.layout()
+    margins = layout.contentsMargins()
+
+    assert edit.y() <= label.geometry().bottom() + layout.spacing() + 2
+    assert edit.geometry().bottom() >= card.height() - margins.bottom() - 2
+
+
+def test_context_question_layout_prioritizes_usable_text_space(qt_app) -> None:
     window = AnswerWindow()
+    window.setGeometry(0, 0, 560, 640)
     window.begin_auto_watch(
         AnalysisMode.TEXT,
         generation=1,
+        roi_hint=QRect(700, 100, 200, 150),
+        screen=_FakeScreen(),
         region_mode="context_question",
     )
+    qt_app.processEvents()
+
+    # Entering Context Watch must preserve the usable window size instead of
+    # shrinking to the widgets' content hints.
+    assert window.height() == 640
 
     for height in (640, 800):
         window.resize(560, height)
         qt_app.processEvents()
 
-        answer_height = window.answer_card.height()
-        context_height = window.context_ocr_card.height()
-        question_height = window.question_ocr_card.height()
-        visible_pair_height = answer_height + context_height + question_height
+        assert window.answer_edit.height() > window.context_ocr_edit.height()
+        assert window.context_ocr_edit.height() > window.question_ocr_edit.height()
+        assert window.question_ocr_edit.height() > 24
+        assert window.question_ocr_section_label.isVisible()
 
-        assert answer_height > context_height > question_height
-        assert answer_height / visible_pair_height >= 0.45
-        assert context_height / visible_pair_height >= 0.27
-        assert question_height / visible_pair_height <= 0.24
+        _assert_edit_fills_card(
+            window.context_ocr_card,
+            window.context_ocr_section_label,
+            window.context_ocr_edit,
+        )
+        _assert_edit_fills_card(
+            window.question_ocr_card,
+            window.question_ocr_section_label,
+            window.question_ocr_edit,
+        )
+        _assert_edit_fills_card(
+            window.answer_card,
+            window.answer_section_label,
+            window.answer_edit,
+        )
 
-    # The single-region OCR view remains intentionally compact.
+    # Single-region OCR remains intentionally compact.
     assert window.ocr_edit.maximumHeight() == 145
 
     window.deleteLater()
