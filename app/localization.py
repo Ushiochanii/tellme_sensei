@@ -100,7 +100,7 @@ _EN = {
     "settings.api_key": "API Key",
     "settings.text_model": "Text Model",
     "settings.request_timeout": "Request Timeout",
-    "settings.ocr_provider": "OCR Provider",
+    "settings.ocr_provider": "OCR Mode",
     "settings.manage": "Manage",
     "settings.download": "Download",
     "settings.cancel": "Cancel",
@@ -192,7 +192,7 @@ _EN = {
         "environment variable. Saving a different key will not change the key currently in use."
     ),
     "settings.ocr_provider_env_override": (
-        "OCR Provider is controlled by the OCR_PROVIDER environment variable."
+        "OCR mode is controlled by OCR_MODE or the legacy OCR_PROVIDER environment variable."
     ),
     "settings.validation_model_empty": "Model cannot be empty.",
     "settings.validation_endpoint_empty": "Endpoint cannot be empty.",
@@ -411,7 +411,7 @@ _ZH_CN = {
     "settings.api_key": "API Key",
     "settings.text_model": "Text Model",
     "settings.request_timeout": "Request Timeout",
-    "settings.ocr_provider": "OCR Provider",
+    "settings.ocr_provider": "OCR 模式",
     "settings.manage": "管理",
     "settings.download": "下载",
     "settings.cancel": "取消",
@@ -483,7 +483,7 @@ _ZH_CN = {
     "settings.google_api_key_env_override": (
         "当前 Google Vision API Key 由 GOOGLE_VISION_API_KEY 环境变量覆盖。在设置中保存新的 Key 不会改变当前实际使用的 Key。"
     ),
-    "settings.ocr_provider_env_override": "OCR Provider 由 OCR_PROVIDER 环境变量控制。",
+    "settings.ocr_provider_env_override": "OCR 模式由 OCR_MODE 或旧版 OCR_PROVIDER 环境变量控制。",
     "settings.validation_model_empty": "Model 不能为空。",
     "settings.validation_endpoint_empty": "Endpoint 不能为空。",
     "settings.validation_timeout": "Request timeout 必须是正数。",

@@ -84,6 +84,10 @@ Watch shortcuts start the matching screen-selection workflow directly. There is 
 
 Local OCR is distributed as a separate, platform-specific component. TellMeSensei does **not** silently switch between OCR providers.
 
+For `.env` configuration, use `OCR_MODE` with `LOCAL_OCR_ENGINE=paddleocr` or
+`ONLINE_OCR_PROVIDER=google_vision`. Existing `OCR_PROVIDER=local` or
+`OCR_PROVIDER=google_vision` values remain valid upgrade fallbacks.
+
 ## Privacy
 
 - With **Local OCR**, screenshots stay on the device during OCR.

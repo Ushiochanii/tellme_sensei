@@ -1452,7 +1452,7 @@ class MainWindow(QWidget):
             config = self.config_manager.load()
         except ConfigError:
             return
-        if config.ocr_provider != "local" or not self._component_manager.is_installed():
+        if config.ocr_mode != "local" or not self._component_manager.is_installed():
             return
 
         cancel_event = threading.Event()
@@ -1504,7 +1504,7 @@ class MainWindow(QWidget):
             config = self.config_manager.load()
         except ConfigError:
             return
-        if config.ocr_provider == "local":
+        if config.ocr_mode == "local":
             QTimer.singleShot(0, self.request_local_ocr_prewarm)
         else:
             self._cancel_local_ocr_prewarm()
@@ -1516,7 +1516,7 @@ class MainWindow(QWidget):
             config = self.config_manager.load()
         except ConfigError:
             return
-        if config.ocr_provider != "local":
+        if config.ocr_mode != "local":
             self._local_ocr_session.stop()
 
     def shutdown(self) -> None:

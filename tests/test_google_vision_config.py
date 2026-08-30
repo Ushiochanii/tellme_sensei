@@ -48,6 +48,9 @@ def _clear_env(monkeypatch) -> None:
     for name in (
         "DEEPSEEK_API_KEY",
         "GOOGLE_VISION_API_KEY",
+        "OCR_MODE",
+        "LOCAL_OCR_ENGINE",
+        "ONLINE_OCR_PROVIDER",
         "OCR_PROVIDER",
         "ONLINE_OCR_TIMEOUT",
     ):
@@ -69,22 +72,68 @@ def test_google_key_precedence_is_environment_then_secret_then_dotenv(tmp_path, 
 def test_provider_precedence_and_default(tmp_path, monkeypatch) -> None:
     _clear_env(monkeypatch)
     (tmp_path / ".env").write_text("OCR_PROVIDER=google_vision\n", encoding="utf-8")
-    assert _manager(tmp_path, _Secrets()).load().ocr_provider == "google_vision"
+    config = _manager(tmp_path, _Secrets()).load()
+    assert config.ocr_mode == "online"
+    assert config.local_ocr_engine == "paddleocr"
+    assert config.online_ocr_provider == "google_vision"
 
 
-def test_explicit_ocr_provider_only_means_os_environment(tmp_path, monkeypatch) -> None:
+def test_explicit_ocr_mode_only_means_os_environment(tmp_path, monkeypatch) -> None:
     _clear_env(monkeypatch)
     (tmp_path / ".env").write_text("OCR_PROVIDER=google_vision\n", encoding="utf-8")
     manager = _manager(tmp_path, _Secrets())
-    assert not manager.has_explicit_ocr_provider()
+    assert not manager.has_explicit_ocr_mode()
     monkeypatch.setenv("OCR_PROVIDER", "local")
-    assert manager.has_explicit_ocr_provider()
+    assert manager.has_explicit_ocr_mode()
 
     SettingsRepository(tmp_path / "settings.json").update({"ocr_provider": "local"})
-    assert _manager(tmp_path, _Secrets()).load().ocr_provider == "local"
+    assert _manager(tmp_path, _Secrets()).load().ocr_mode == "local"
 
     monkeypatch.setenv("OCR_PROVIDER", "google_vision")
-    assert _manager(tmp_path, _Secrets()).load().ocr_provider == "google_vision"
+    assert _manager(tmp_path, _Secrets()).load().ocr_mode == "online"
+
+
+def test_legacy_ocr_provider_upgrades_to_normalized_runtime_fields(tmp_path, monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.update({"ocr_provider": "local"})
+
+    config = _manager(tmp_path, _Secrets()).load()
+
+    assert config.ocr_mode == "local"
+    assert config.local_ocr_engine == "paddleocr"
+    assert config.online_ocr_provider == "google_vision"
+
+
+def test_ocr_mode_persists_without_forgetting_inactive_selections(tmp_path, monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    repository = SettingsRepository(tmp_path / "settings.json")
+    repository.update(
+        {
+            "ocr_mode": "local",
+            "local_ocr_engine": "paddleocr",
+            "online_ocr_provider": "google_vision",
+        }
+    )
+
+    repository.update({"ocr_mode": "online"})
+    config = _manager(tmp_path, _Secrets()).load()
+
+    assert config.ocr_mode == "online"
+    assert config.local_ocr_engine == "paddleocr"
+    assert config.online_ocr_provider == "google_vision"
+
+
+def test_normalized_ocr_environment_mode_overrides_saved_legacy_value(tmp_path, monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    SettingsRepository(tmp_path / "settings.json").update({"ocr_provider": "local"})
+    monkeypatch.setenv("OCR_MODE", "online")
+    monkeypatch.setenv("ONLINE_OCR_PROVIDER", "google_vision")
+
+    manager = _manager(tmp_path, _Secrets())
+
+    assert manager.has_explicit_ocr_mode()
+    assert manager.load().ocr_mode == "online"
 
 
 def test_online_timeout_precedence_and_dotenv_is_not_injected(tmp_path, monkeypatch) -> None:

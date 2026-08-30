@@ -85,6 +85,10 @@ class SettingsRepository:
         provider = raw.get("ocr_provider")
         if isinstance(provider, str) and provider.strip():
             settings["ocr_provider"] = provider.strip().lower()
+        for key in ("ocr_mode", "local_ocr_engine", "online_ocr_provider"):
+            value = raw.get(key)
+            if isinstance(value, str) and value.strip():
+                settings[key] = value.strip().lower()
         online_timeout = raw.get("online_ocr_timeout")
         if isinstance(online_timeout, (int, float)) and not isinstance(online_timeout, bool) and online_timeout > 0:
             settings["online_ocr_timeout"] = float(online_timeout)
@@ -259,6 +263,21 @@ class SettingsRepository:
             if provider not in {"local", "google_vision"}:
                 raise ValueError("unsupported ocr_provider")
             payload["ocr_provider"] = provider
+        if "ocr_mode" in settings:
+            mode = str(settings["ocr_mode"]).strip().lower()
+            if mode not in {"local", "online"}:
+                raise ValueError("unsupported ocr_mode")
+            payload["ocr_mode"] = mode
+        if "local_ocr_engine" in settings:
+            engine = str(settings["local_ocr_engine"]).strip().lower()
+            if engine != "paddleocr":
+                raise ValueError("unsupported local_ocr_engine")
+            payload["local_ocr_engine"] = engine
+        if "online_ocr_provider" in settings:
+            provider = str(settings["online_ocr_provider"]).strip().lower()
+            if provider != "google_vision":
+                raise ValueError("unsupported online_ocr_provider")
+            payload["online_ocr_provider"] = provider
         if "online_ocr_timeout" in settings:
             try:
                 online_timeout = float(settings["online_ocr_timeout"])

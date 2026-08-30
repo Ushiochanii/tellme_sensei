@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.config import AppConfig
+from app.config import AppConfig, ConfigError
 from app.ocr.base import OCRProvider
 from app.ocr.factory import create_ocr_provider
 from app.ocr.local_session import LocalOCRSession
@@ -37,13 +37,29 @@ def test_factory_injects_shared_local_session_without_starting_it(tmp_path) -> N
     session = LocalOCRSession(executable=executable)
 
     provider = create_ocr_provider(
-        AppConfig(ocr_provider="local"),
+        AppConfig(ocr_mode="local", local_ocr_engine="paddleocr"),
         local_ocr_session=session,
     )
 
     assert isinstance(provider, LocalOCRProvider)
     assert provider.session is session
     assert session.is_running() is False
+
+
+def test_factory_rejects_unknown_local_engine() -> None:
+    with pytest.raises(ConfigError, match="Unsupported Local OCR engine"):
+        create_ocr_provider(AppConfig(local_ocr_engine="unknown"))
+
+
+def test_factory_rejects_unknown_online_provider() -> None:
+    with pytest.raises(ConfigError, match="Unsupported Online OCR provider"):
+        create_ocr_provider(
+            AppConfig(
+                ocr_mode="online",
+                online_ocr_provider="unknown",
+                google_vision_api_key="google-key",
+            )
+        )
 
 
 def test_ocr_result_contract_is_provider_independent() -> None:

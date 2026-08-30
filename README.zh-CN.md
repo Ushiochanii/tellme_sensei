@@ -84,6 +84,10 @@ Watch 快捷键会直接开始对应的框选流程，不再经过单独设置�
 
 Local OCR 按平台作为独立组件分发。TellMeSensei **不会静默切换 OCR 服务**。
 
+如需通过 `.env` 配置，请使用 `OCR_MODE`，并配合
+`LOCAL_OCR_ENGINE=paddleocr` 或 `ONLINE_OCR_PROVIDER=google_vision`。
+已有的 `OCR_PROVIDER=local` 或 `OCR_PROVIDER=google_vision` 仍会作为升级回退继续生效。
+
 ## 隐私
 
 - 使用 **Local OCR** 时，截图只在本机进行 OCR。

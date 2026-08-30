@@ -40,6 +40,11 @@ class ConfigError(RuntimeError):
     """Raised when application configuration is invalid or incomplete."""
 
 
+DEFAULT_OCR_MODE = "local"
+DEFAULT_LOCAL_OCR_ENGINE = "paddleocr"
+DEFAULT_ONLINE_OCR_PROVIDER = "google_vision"
+
+
 def _default_text_ai_config() -> AIBackendConfig:
     return AIBackendConfig(
         provider_id=DEFAULT_DEEPSEEK_PROVIDER,
@@ -69,7 +74,9 @@ class AppConfig:
     vision_global_shortcut: str = DEFAULT_VISION_SHORTCUT
     watch_global_shortcut: str = DEFAULT_WATCH_SHORTCUT
     context_watch_global_shortcut: str = DEFAULT_CONTEXT_WATCH_SHORTCUT
-    ocr_provider: str = "local"
+    ocr_mode: str = DEFAULT_OCR_MODE
+    local_ocr_engine: str = DEFAULT_LOCAL_OCR_ENGINE
+    online_ocr_provider: str = DEFAULT_ONLINE_OCR_PROVIDER
     google_vision_api_key: str = field(default="", repr=False)
     online_ocr_timeout: float = 15.0
     interface_language: str = DEFAULT_INTERFACE_LANGUAGE
@@ -126,10 +133,12 @@ class ConfigManager:
     def has_explicit_google_vision_api_key(self) -> bool:
         return bool(os.environ.get("GOOGLE_VISION_API_KEY", "").strip())
 
-    def has_explicit_ocr_provider(self) -> bool:
-        """Return whether OCR_PROVIDER is set in the real OS environment."""
+    def has_explicit_ocr_mode(self) -> bool:
+        """Return whether an OS environment variable controls OCR mode."""
 
-        return bool(os.environ.get("OCR_PROVIDER", "").strip())
+        return bool(
+            self._os_value("OCR_MODE") or self._os_value("OCR_PROVIDER")
+        )
 
     def load(self) -> AppConfig:
         """Return one immutable runtime configuration without logging secrets."""
@@ -172,15 +181,10 @@ class ConfigManager:
         if not google_vision_api_key:
             google_vision_api_key = self._file_value(dotenv_config, "GOOGLE_VISION_API_KEY") or ""
 
-        ocr_provider = (
-            self._os_value("OCR_PROVIDER")
-            or saved_settings.get(
-                "ocr_provider",
-                self._file_value(dotenv_config, "OCR_PROVIDER") or "local",
-            )
-        ).strip().lower()
-        if ocr_provider not in {"local", "google_vision"}:
-            raise ConfigError(f"Unsupported OCR provider: {ocr_provider}")
+        ocr_mode, local_ocr_engine, online_ocr_provider = self._resolve_ocr_configuration(
+            dotenv_config,
+            saved_settings,
+        )
 
         shortcuts = self._normalized_shortcuts(
             (
@@ -269,7 +273,9 @@ class ConfigManager:
             vision_global_shortcut=shortcuts[1],
             watch_global_shortcut=shortcuts[2],
             context_watch_global_shortcut=shortcuts[3],
-            ocr_provider=ocr_provider,
+            ocr_mode=ocr_mode,
+            local_ocr_engine=local_ocr_engine,
+            online_ocr_provider=online_ocr_provider,
             google_vision_api_key=google_vision_api_key,
             online_ocr_timeout=online_ocr_timeout,
             interface_language=self._language_setting(
@@ -283,6 +289,64 @@ class ConfigManager:
                 saved_settings,
             ),
         )
+
+    def _resolve_ocr_configuration(
+        self,
+        dotenv_config: dict[str, str],
+        saved_settings: dict[str, object],
+    ) -> tuple[str, str, str]:
+        """Resolve normalized OCR selections while honoring legacy upgrades."""
+
+        # OCR_MODE is the normalized override. OCR_PROVIDER remains an OS-level
+        # compatibility override so existing installations keep their behavior.
+        mode_value = self._os_value("OCR_MODE")
+        if mode_value is None:
+            legacy_os_provider = self._os_value("OCR_PROVIDER")
+            if legacy_os_provider is not None:
+                mode_value = self._mode_from_legacy_provider(legacy_os_provider)
+        if mode_value is None:
+            mode_value = saved_settings.get("ocr_mode")
+        if mode_value is None and saved_settings.get("ocr_provider") is not None:
+            mode_value = self._mode_from_legacy_provider(saved_settings["ocr_provider"])
+        if mode_value is None:
+            mode_value = self._file_value(dotenv_config, "OCR_MODE")
+        if mode_value is None:
+            legacy_file_provider = self._file_value(dotenv_config, "OCR_PROVIDER")
+            if legacy_file_provider is not None:
+                mode_value = self._mode_from_legacy_provider(legacy_file_provider)
+        ocr_mode = str(mode_value or DEFAULT_OCR_MODE).strip().lower()
+        if ocr_mode not in {"local", "online"}:
+            raise ConfigError(f"Unsupported OCR mode: {ocr_mode}")
+
+        local_ocr_engine = str(
+            self._os_value("LOCAL_OCR_ENGINE")
+            or saved_settings.get("local_ocr_engine")
+            or self._file_value(dotenv_config, "LOCAL_OCR_ENGINE")
+            or DEFAULT_LOCAL_OCR_ENGINE
+        ).strip().lower()
+        if local_ocr_engine != DEFAULT_LOCAL_OCR_ENGINE:
+            raise ConfigError(f"Unsupported Local OCR engine: {local_ocr_engine}")
+
+        online_ocr_provider = str(
+            self._os_value("ONLINE_OCR_PROVIDER")
+            or saved_settings.get("online_ocr_provider")
+            or self._file_value(dotenv_config, "ONLINE_OCR_PROVIDER")
+            or DEFAULT_ONLINE_OCR_PROVIDER
+        ).strip().lower()
+        if online_ocr_provider != DEFAULT_ONLINE_OCR_PROVIDER:
+            raise ConfigError(
+                f"Unsupported Online OCR provider: {online_ocr_provider}"
+            )
+        return ocr_mode, local_ocr_engine, online_ocr_provider
+
+    @staticmethod
+    def _mode_from_legacy_provider(value: object) -> str:
+        normalized = str(value).strip().lower()
+        if normalized == "local":
+            return "local"
+        if normalized == "google_vision":
+            return "online"
+        raise ConfigError(f"Unsupported OCR provider: {normalized}")
 
     def _resolve_model(
         self,
@@ -497,7 +561,9 @@ class ConfigManager:
         vision_global_shortcut: str | None = None,
         watch_global_shortcut: str | None = None,
         context_watch_global_shortcut: str | None = None,
-        ocr_provider: str | None = None,
+        ocr_mode: str | None = None,
+        local_ocr_engine: str | None = None,
+        online_ocr_provider: str | None = None,
         google_vision_api_key: str | None = None,
         online_ocr_timeout: float | None = None,
         interface_language: str | None = None,
@@ -578,11 +644,23 @@ class ConfigManager:
             settings["watch_global_shortcut"] = requested_shortcuts[2]
         if context_watch_global_shortcut is not None:
             settings["context_watch_global_shortcut"] = requested_shortcuts[3]
-        if ocr_provider is not None:
-            normalized_provider = ocr_provider.strip().lower()
-            if normalized_provider not in {"local", "google_vision"}:
-                raise ConfigError(f"Unsupported OCR provider: {ocr_provider}")
-            settings["ocr_provider"] = normalized_provider
+        if ocr_mode is not None:
+            normalized_mode = ocr_mode.strip().lower()
+            if normalized_mode not in {"local", "online"}:
+                raise ConfigError(f"Unsupported OCR mode: {ocr_mode}")
+            settings["ocr_mode"] = normalized_mode
+        if local_ocr_engine is not None:
+            normalized_engine = local_ocr_engine.strip().lower()
+            if normalized_engine != DEFAULT_LOCAL_OCR_ENGINE:
+                raise ConfigError(f"Unsupported Local OCR engine: {local_ocr_engine}")
+            settings["local_ocr_engine"] = normalized_engine
+        if online_ocr_provider is not None:
+            normalized_online_provider = online_ocr_provider.strip().lower()
+            if normalized_online_provider != DEFAULT_ONLINE_OCR_PROVIDER:
+                raise ConfigError(
+                    f"Unsupported Online OCR provider: {online_ocr_provider}"
+                )
+            settings["online_ocr_provider"] = normalized_online_provider
         if online_ocr_timeout is not None:
             if online_ocr_timeout <= 0 or online_ocr_timeout > 15:
                 raise ConfigError("ONLINE_OCR_TIMEOUT must be between 0 and 15 seconds")

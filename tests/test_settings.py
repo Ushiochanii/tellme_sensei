@@ -764,9 +764,9 @@ def test_settings_navigation_switches_pages_without_changing_provider(qt_app, tm
 
     window._navigation_buttons[2].click()
     assert window.page_stack.currentIndex() == 2
-    assert window._current_provider_from_ui() == "local"
+    assert window._ocr_mode_from_ui() == "local"
     window.online_mode_radio.click()
-    assert window._current_provider_from_ui() == "google_vision"
+    assert window._ocr_mode_from_ui() == "online"
 
     window._navigation_buttons[3].click()
     assert window.page_stack.currentIndex() == 3
@@ -816,7 +816,9 @@ def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
         "vision_global_shortcut": "Ctrl+Shift+S",
         "watch_global_shortcut": "Ctrl+Shift+W",
         "context_watch_global_shortcut": "Ctrl+Shift+C",
-        "ocr_provider": "local",
+        "ocr_mode": "local",
+        "local_ocr_engine": "paddleocr",
+        "online_ocr_provider": "google_vision",
         "online_ocr_timeout": 15.0,
     }
     window.deleteLater()

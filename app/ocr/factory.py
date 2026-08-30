@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from app.config import AppConfig, ConfigError
+from app.config import (
+    AppConfig,
+    ConfigError,
+    DEFAULT_LOCAL_OCR_ENGINE,
+    DEFAULT_OCR_MODE,
+    DEFAULT_ONLINE_OCR_PROVIDER,
+)
 from app.ocr.base import OCRProvider
 from app.ocr.local_session import LocalOCRSession
 from app.ocr.providers.local_worker import LocalOCRProvider
@@ -19,12 +25,18 @@ def create_ocr_provider(
     coupling callers to a concrete implementation.
     """
 
-    if config.ocr_provider == "local":
+    if config.ocr_mode == DEFAULT_OCR_MODE:
+        if config.local_ocr_engine != DEFAULT_LOCAL_OCR_ENGINE:
+            raise ConfigError(f"Unsupported Local OCR engine: {config.local_ocr_engine}")
         return LocalOCRProvider(
             language=config.ocr_language,
             session=local_ocr_session,
         )
-    if config.ocr_provider == "google_vision":
+    if config.ocr_mode == "online":
+        if config.online_ocr_provider != DEFAULT_ONLINE_OCR_PROVIDER:
+            raise ConfigError(
+                f"Unsupported Online OCR provider: {config.online_ocr_provider}"
+            )
         from app.ocr.providers.google_vision import GoogleVisionOCRProvider
 
         return GoogleVisionOCRProvider(
@@ -32,7 +44,7 @@ def create_ocr_provider(
             language=config.ocr_language,
             timeout=config.online_ocr_timeout,
         )
-    raise ConfigError(f"Unsupported OCR provider: {config.ocr_provider}")
+    raise ConfigError(f"Unsupported OCR mode: {config.ocr_mode}")
 
 
 def create_local_ocr_provider(
