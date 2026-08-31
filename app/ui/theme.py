@@ -204,6 +204,9 @@ def settings_window_stylesheet() -> str:
         background: rgba(246, 249, 255, 175); border: 1px solid {CARD_BORDER};
         border-radius: {RADIUS_MD}px;
     }}
+    QFrame#providerSummaryCard[selected="true"] {{
+        background: rgba(225, 237, 255, 220); border-color: {FOCUS_BORDER};
+    }}
     QLabel#providerSummaryTitle {{ color: {TEXT}; font-size: 13px; font-weight: 700; }}
     QLabel#providerSummaryDetail {{ color: {SECONDARY_TEXT}; font-size: 11px; }}
     QPushButton#manageButton {{
@@ -211,6 +214,7 @@ def settings_window_stylesheet() -> str:
         border-radius: {RADIUS_SM}px; padding: 5px 8px; font-size: 12px;
     }}
     QPushButton#manageButton:hover {{ background: #e7f0ff; border-color: #b9d1f5; }}
+    QPushButton#manageButton:pressed {{ background: #d8e8ff; border-color: {TEXT_ACCENT}; }}
     QLabel#settingsStatusLabel {{
         color: {SECONDARY_TEXT}; background: rgba(255, 255, 255, 145);
         border: 1px solid rgba(201, 216, 247, 160); border-radius: {RADIUS_MD}px;
@@ -220,11 +224,18 @@ def settings_window_stylesheet() -> str:
         color: #876318; background: #fff7df; border: 1px solid #f0d58a;
         border-radius: {RADIUS_SM}px; padding: 7px 9px; font-size: 12px;
     }}
-    QLineEdit, QKeySequenceEdit, QComboBox {{
+    QLineEdit, QKeySequenceEdit, QComboBox, QDoubleSpinBox {{
         background: {CARD}; color: {TEXT}; border: 1px solid {CARD_BORDER};
         border-radius: {RADIUS_MD}px; padding: 7px 9px; min-height: 20px;
     }}
-    QLineEdit:focus, QKeySequenceEdit:focus, QComboBox:focus {{ border-color: {FOCUS_BORDER}; }}
+    QLineEdit:focus, QKeySequenceEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {{ border: 2px solid {FOCUS_BORDER}; }}
+    QLabel#credentialStatusLabel, QLabel#connectionStatusLabel {{
+        color: {SECONDARY_TEXT}; padding: 4px 0; font-size: 12px;
+    }}
+    QLabel#credentialStatusLabel[state="ready"], QLabel#connectionStatusLabel[state="ready"] {{ color: {SUCCESS}; }}
+    QLabel#credentialStatusLabel[state="warning"] {{ color: #876318; }}
+    QLabel#connectionStatusLabel[state="error"] {{ color: {DANGER}; }}
+    QLabel#connectionStatusLabel[state="busy"] {{ color: {TEXT_ACCENT}; }}
     QRadioButton {{ color: {TEXT}; spacing: 6px; padding: 6px 10px; }}
     QRadioButton::indicator {{ width: 14px; height: 14px; }}
     QComboBox::drop-down {{ border: none; width: 24px; }}

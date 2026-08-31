@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QDoubleSpinBox,
     QStackedWidget,
@@ -414,17 +415,19 @@ class SettingsWindow(QWidget):
             self.vision_provider_combo.addItem(descriptor.display_name, descriptor.provider_id)
         self.text_model_combo = ModelSelector()
         self.text_model_combo.setObjectName("textAIModelCombo")
-        self.text_model_combo.setEditable(True)
         self.text_ai_model_combo = self.text_model_combo
-        self.text_model_combo.currentIndexChanged.connect(
-            lambda _index: self._clear_custom_placeholder(self.text_model_combo)
+        self.text_custom_model_edit = QLineEdit()
+        self.text_custom_model_edit.setObjectName("textCustomModelEdit")
+        self.text_custom_model_edit.setPlaceholderText(
+            self._tr("settings.custom_model_id")
         )
         self.vision_model_combo = ModelSelector()
         self.vision_model_combo.setObjectName("visionAIModelCombo")
-        self.vision_model_combo.setEditable(True)
         self.vision_ai_model_combo = self.vision_model_combo
-        self.vision_model_combo.currentIndexChanged.connect(
-            lambda _index: self._clear_custom_placeholder(self.vision_model_combo)
+        self.vision_custom_model_edit = QLineEdit()
+        self.vision_custom_model_edit.setObjectName("visionCustomModelEdit")
+        self.vision_custom_model_edit.setPlaceholderText(
+            self._tr("settings.custom_model_id")
         )
         self.provider_credentials_combo = QComboBox()
         self.provider_credentials_combo.setObjectName("providerCredentialsCombo")
@@ -443,6 +446,12 @@ class SettingsWindow(QWidget):
         self.provider_credentials_combo.currentIndexChanged.connect(
             self._on_credentials_provider_changed
         )
+        self.text_model_combo.currentIndexChanged.connect(
+            lambda _index: self._refresh_custom_model_editors()
+        )
+        self.vision_model_combo.currentIndexChanged.connect(
+            lambda _index: self._refresh_custom_model_editors()
+        )
         self.provider_api_key_edit = QLineEdit()
         self.provider_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.provider_api_key_edit.setPlaceholderText(
@@ -450,7 +459,15 @@ class SettingsWindow(QWidget):
         )
         self.provider_endpoint_edit = QLineEdit()
         self.provider_endpoint_edit.setPlaceholderText("https://…/v1")
-        self.timeout_edit = QLineEdit()
+        self.provider_api_key_edit.textChanged.connect(
+            lambda _text: self._refresh_credential_statuses()
+        )
+        self.timeout_spin = QDoubleSpinBox()
+        self.timeout_spin.setObjectName("requestTimeoutSpin")
+        self.timeout_spin.setRange(1.0, 600.0)
+        self.timeout_spin.setDecimals(1)
+        self.timeout_spin.setSuffix(" s")
+        self.timeout_edit = self.timeout_spin
         self.shortcut_edit = QKeySequenceEdit()
         self.shortcut_edit.setObjectName("textShortcutEdit")
         self.shortcut_edit.setMaximumSequenceLength(1)
@@ -590,9 +607,13 @@ class SettingsWindow(QWidget):
         self.vision_cancel_button.clicked.connect(self.cancel_vision_connection)
         self.vision_cancel_button.setVisible(False)
         self.text_ai_status_label = QLabel()
+        self.text_ai_status_label.setObjectName("connectionStatusLabel")
         self.text_ai_status_label.setWordWrap(True)
+        self.text_ai_status_label.setVisible(False)
         self.vision_ai_status_label = QLabel()
+        self.vision_ai_status_label.setObjectName("connectionStatusLabel")
         self.vision_ai_status_label.setWordWrap(True)
+        self.vision_ai_status_label.setVisible(False)
 
         self.interface_language_combo = QComboBox()
         self.interface_language_combo.setObjectName("interfaceLanguageCombo")
@@ -665,6 +686,7 @@ class SettingsWindow(QWidget):
 
         text_card = QFrame()
         text_card.setObjectName("settingsCard")
+        text_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         text_card_layout = QVBoxLayout(text_card)
         text_card_layout.setContentsMargins(16, 14, 16, 16)
         text_card_layout.setSpacing(8)
@@ -675,9 +697,24 @@ class SettingsWindow(QWidget):
         text_form = QFormLayout()
         text_form.addRow(self._tr("settings.provider"), self.text_provider_combo)
         text_form.addRow(self._tr("settings.model"), self.text_model_combo)
+        text_form.addRow("", self.text_custom_model_edit)
         text_card_layout.addWidget(text_heading)
         text_card_layout.addWidget(text_description)
         text_card_layout.addLayout(text_form)
+        text_credentials = QHBoxLayout()
+        self.text_credential_status_label = QLabel()
+        self.text_credential_status_label.setObjectName("credentialStatusLabel")
+        self.text_manage_credentials_button = QPushButton(
+            self._tr("settings.manage_credentials")
+        )
+        self.text_manage_credentials_button.setObjectName("manageButton")
+        self.text_manage_credentials_button.clicked.connect(
+            lambda: self._manage_credentials_for(self.text_provider_combo)
+        )
+        text_credentials.addWidget(self.text_credential_status_label)
+        text_credentials.addStretch(1)
+        text_credentials.addWidget(self.text_manage_credentials_button)
+        text_card_layout.addLayout(text_credentials)
         text_buttons = QHBoxLayout()
         text_buttons.addWidget(self.text_test_button)
         text_buttons.addWidget(self.text_cancel_button)
@@ -687,6 +724,7 @@ class SettingsWindow(QWidget):
 
         vision_card = QFrame()
         vision_card.setObjectName("settingsCard")
+        vision_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         vision_card_layout = QVBoxLayout(vision_card)
         vision_card_layout.setContentsMargins(16, 14, 16, 16)
         vision_card_layout.setSpacing(8)
@@ -697,9 +735,24 @@ class SettingsWindow(QWidget):
         vision_form = QFormLayout()
         vision_form.addRow(self._tr("settings.provider"), self.vision_provider_combo)
         vision_form.addRow(self._tr("settings.model"), self.vision_model_combo)
+        vision_form.addRow("", self.vision_custom_model_edit)
         vision_card_layout.addWidget(vision_heading)
         vision_card_layout.addWidget(vision_description)
         vision_card_layout.addLayout(vision_form)
+        vision_credentials = QHBoxLayout()
+        self.vision_credential_status_label = QLabel()
+        self.vision_credential_status_label.setObjectName("credentialStatusLabel")
+        self.vision_manage_credentials_button = QPushButton(
+            self._tr("settings.manage_credentials")
+        )
+        self.vision_manage_credentials_button.setObjectName("manageButton")
+        self.vision_manage_credentials_button.clicked.connect(
+            lambda: self._manage_credentials_for(self.vision_provider_combo)
+        )
+        vision_credentials.addWidget(self.vision_credential_status_label)
+        vision_credentials.addStretch(1)
+        vision_credentials.addWidget(self.vision_manage_credentials_button)
+        vision_card_layout.addLayout(vision_credentials)
         vision_buttons = QHBoxLayout()
         vision_buttons.addWidget(self.vision_test_button)
         vision_buttons.addWidget(self.vision_cancel_button)
@@ -709,15 +762,17 @@ class SettingsWindow(QWidget):
 
         credentials_card = QFrame()
         credentials_card.setObjectName("settingsCard")
+        credentials_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         credentials_layout = QVBoxLayout(credentials_card)
         credentials_layout.setContentsMargins(16, 14, 16, 16)
         credentials_layout.setSpacing(8)
-        credentials_layout.addWidget(QLabel(self._tr("settings.provider_credentials")))
+        credentials_heading = QLabel(self._tr("settings.provider_credentials"))
+        credentials_heading.setObjectName("cardTitle")
+        credentials_layout.addWidget(credentials_heading)
         credentials_form = QFormLayout()
         credentials_form.addRow(self._tr("settings.provider"), self.provider_credentials_combo)
         credentials_form.addRow(self._tr("settings.api_key"), self.provider_api_key_edit)
         credentials_form.addRow(self._tr("settings.endpoint"), self.provider_endpoint_edit)
-        credentials_form.addRow(self._tr("settings.request_timeout"), self.timeout_edit)
         credentials_layout.addLayout(credentials_form)
         credentials_layout.addWidget(self.api_key_override_label)
         self.provider_endpoint_override_label = QLabel()
@@ -726,9 +781,19 @@ class SettingsWindow(QWidget):
         self.provider_endpoint_override_label.setVisible(False)
         credentials_layout.addWidget(self.provider_endpoint_override_label)
 
+        advanced_card = QFrame()
+        advanced_card.setObjectName("settingsCard")
+        advanced_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        advanced_layout = QFormLayout(advanced_card)
+        advanced_layout.setContentsMargins(16, 14, 16, 16)
+        advanced_layout.addRow(
+            self._tr("settings.request_timeout"), self.timeout_spin
+        )
+
         ai_layout.addWidget(text_card)
         ai_layout.addWidget(vision_card)
         ai_layout.addWidget(credentials_card)
+        ai_layout.addWidget(advanced_card)
         ai_layout.addStretch(1)
 
         shortcuts_page, shortcuts_layout = make_page(
@@ -1410,7 +1475,7 @@ class SettingsWindow(QWidget):
         )
         self.api_key_override_label.setVisible(api_env_override)
         request_timeout = config.text_ai.request_timeout
-        self.timeout_edit.setText(str(int(request_timeout) if request_timeout.is_integer() else request_timeout))
+        self.timeout_spin.setValue(request_timeout)
         self.shortcut_edit.setKeySequence(QKeySequence(config.global_shortcut))
         self.vision_shortcut_edit.setKeySequence(QKeySequence(config.vision_global_shortcut))
         self.watch_shortcut_edit.setKeySequence(QKeySequence(config.watch_global_shortcut))
@@ -1444,6 +1509,8 @@ class SettingsWindow(QWidget):
         self.ocr_provider_override_label.setVisible(provider_env_override)
         self._on_provider_changed()
         self._show_environment_override_warnings()
+        self._refresh_custom_model_editors()
+        self._refresh_credential_statuses()
         self._load_auto_watch_values()
 
     def _on_interface_language_changed(self, _index: int) -> None:
@@ -1477,30 +1544,64 @@ class SettingsWindow(QWidget):
         else:
             custom_index = selector.findData(CUSTOM_MODEL_ID)
             selector.setCurrentIndex(max(0, custom_index))
-            selector.setEditText(selected_model)
+        custom_editor = (
+            self.text_custom_model_edit
+            if selector is self.text_model_combo
+            else self.vision_custom_model_edit
+        )
+        custom_editor.setText(selected_model if known_index < 0 else "")
         selector.blockSignals(False)
+        self._refresh_custom_model_editors()
 
-    @staticmethod
-    def _selected_model(selector: ModelSelector) -> str:
+    def _selected_model(self, selector: ModelSelector) -> str:
         value = selector.currentData()
-        text = selector.currentText().strip()
         if value == CUSTOM_MODEL_ID or value is None:
-            return text
-        # QComboBox keeps the selected item's userData when a user edits the
-        # line edit directly. Treat a changed display value as a custom model
-        # so typing an unlisted ID does not silently save the old selection.
-        if selector.isEditable() and selector.currentIndex() >= 0:
-            if text != selector.itemText(selector.currentIndex()).strip():
-                return text
+            editor = (
+                self.text_custom_model_edit
+                if selector is self.text_model_combo
+                else self.vision_custom_model_edit
+            )
+            return editor.text().strip()
         return str(value).strip()
 
-    @staticmethod
-    def _clear_custom_placeholder(selector: ModelSelector) -> None:
-        if selector.currentData() == CUSTOM_MODEL_ID and selector.currentText() in {
-            CUSTOM_MODEL_LABEL,
-            "自定义模型 ID…",
-        }:
-            selector.setEditText("")
+    def _refresh_custom_model_editors(self) -> None:
+        self.text_custom_model_edit.setVisible(
+            self.text_model_combo.currentData() == CUSTOM_MODEL_ID
+        )
+        self.vision_custom_model_edit.setVisible(
+            self.vision_model_combo.currentData() == CUSTOM_MODEL_ID
+        )
+
+    def _refresh_credential_statuses(self) -> None:
+        active = getattr(self, "_active_credentials_provider", None)
+        values = dict(self._provider_key_values)
+        if active is not None:
+            values[active] = self.provider_api_key_edit.text().strip()
+        for provider_combo, label in (
+            (self.text_provider_combo, self.text_credential_status_label),
+            (self.vision_provider_combo, self.vision_credential_status_label),
+        ):
+            provider_id = self._provider_id(provider_combo)
+            configured = bool(values.get(provider_id)) or bool(
+                self.config_manager.has_explicit_provider_api_key(provider_id)
+            )
+            label.setText(
+                self._tr(
+                    "settings.credential_configured"
+                    if configured
+                    else "settings.credential_missing"
+                )
+            )
+            label.setProperty("state", "ready" if configured else "warning")
+            label.style().unpolish(label)
+            label.style().polish(label)
+
+    def _manage_credentials_for(self, provider_combo: QComboBox) -> None:
+        provider_id = self._provider_id(provider_combo)
+        self.provider_credentials_combo.setCurrentIndex(
+            max(0, self.provider_credentials_combo.findData(provider_id))
+        )
+        self.provider_api_key_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
 
     def _provider_id(self, combo: QComboBox) -> str:
         return str(combo.currentData() or "deepseek").strip().lower()
@@ -1517,6 +1618,7 @@ class SettingsWindow(QWidget):
             "text",
             selected,
         )
+        self._refresh_credential_statuses()
 
     @Slot(int)
     def _on_vision_provider_changed(self, _index: int) -> None:
@@ -1530,6 +1632,7 @@ class SettingsWindow(QWidget):
             "vision",
             selected,
         )
+        self._refresh_credential_statuses()
 
     def _capture_provider_editor(self) -> None:
         provider_id = self._provider_id(self.provider_credentials_combo)
@@ -1573,6 +1676,7 @@ class SettingsWindow(QWidget):
             )
         )
         self.provider_endpoint_override_label.setVisible(explicit_endpoint)
+        self._refresh_credential_statuses()
 
     def reload_values(self) -> None:
         """Reload persisted values when the window is shown again."""
@@ -1586,6 +1690,12 @@ class SettingsWindow(QWidget):
     def _on_provider_changed(self) -> None:
         # Navigation keeps both service pages available; the radios still
         # determine which provider is used by Text mode.
+        local_selected = self.local_mode_radio.isChecked()
+        self.ocr_local_summary.setProperty("selected", local_selected)
+        self.ocr_google_summary.setProperty("selected", not local_selected)
+        for card in (self.ocr_local_summary, self.ocr_google_summary):
+            card.style().unpolish(card)
+            card.style().polish(card)
         self._refresh_operation_controls()
 
     def _ocr_mode_from_ui(self) -> str:
@@ -1663,6 +1773,21 @@ class SettingsWindow(QWidget):
         )
         self.text_test_button.setEnabled(not busy)
         self.vision_test_button.setEnabled(not busy)
+        self.text_provider_combo.setEnabled(not connection_running)
+        self.text_model_combo.setEnabled(not connection_running)
+        self.text_custom_model_edit.setEnabled(not connection_running)
+        self.text_manage_credentials_button.setEnabled(not connection_running)
+        self.vision_provider_combo.setEnabled(not vision_connection_running)
+        self.vision_model_combo.setEnabled(not vision_connection_running)
+        self.vision_custom_model_edit.setEnabled(not vision_connection_running)
+        self.vision_manage_credentials_button.setEnabled(not vision_connection_running)
+        ai_test_running = connection_running or vision_connection_running
+        self.provider_credentials_combo.setEnabled(not ai_test_running)
+        if not self.provider_api_key_edit.isReadOnly():
+            self.provider_api_key_edit.setEnabled(not ai_test_running)
+        if not self.provider_endpoint_edit.isReadOnly():
+            self.provider_endpoint_edit.setEnabled(not ai_test_running)
+        self.timeout_spin.setEnabled(not ai_test_running)
         self.text_cancel_button.setVisible(connection_running)
         self.text_cancel_button.setEnabled(connection_running)
         self.vision_cancel_button.setVisible(vision_connection_running)
@@ -1883,12 +2008,7 @@ class SettingsWindow(QWidget):
         vision_model = self._selected_model(self.vision_model_combo)
         if not text_model or not vision_model:
             raise ValueError(self._tr("settings.validation_model_empty"))
-        try:
-            request_timeout = float(self.timeout_edit.text().strip())
-        except ValueError as exc:
-            raise ValueError(self._tr("settings.validation_timeout")) from exc
-        if request_timeout <= 0:
-            raise ValueError(self._tr("settings.validation_timeout"))
+        request_timeout = float(self.timeout_spin.value())
         sequence = self.shortcut_edit.keySequence()
         global_shortcut = self._parse_shortcut(sequence)
         vision_shortcut = self._parse_shortcut(self.vision_shortcut_edit.keySequence())
@@ -1976,10 +2096,23 @@ class SettingsWindow(QWidget):
             config = self._read_config_from_fields()
         except (ConfigError, ValueError) as exc:
             self._set_status(str(exc))
+            label = (
+                self.text_ai_status_label
+                if capability == "text"
+                else self.vision_ai_status_label
+            )
+            self._set_connection_status(label, str(exc), "error")
             return
         backend = config.text_ai if capability == "text" else config.vision_ai
         if not backend.api_key:
-            self._set_status(self._tr("settings.enter_provider_api_key"))
+            message = self._tr("settings.enter_provider_api_key")
+            self._set_status(message)
+            label = (
+                self.text_ai_status_label
+                if capability == "text"
+                else self.vision_ai_status_label
+            )
+            self._set_connection_status(label, message, "error")
             return
 
         config = replace(
@@ -2027,11 +2160,28 @@ class SettingsWindow(QWidget):
         )
         if capability == "vision":
             self.vision_test_button.setText(self._tr("settings.testing"))
-            self.vision_ai_status_label.setText(self._tr("settings.connection_testing"))
+            self._set_connection_status(
+                self.vision_ai_status_label,
+                self._tr("settings.connection_testing"),
+                "busy",
+            )
         else:
             self._set_status(self._tr("settings.connection_testing"))
             self.text_test_button.setText(self._tr("settings.testing"))
+            self._set_connection_status(
+                self.text_ai_status_label,
+                self._tr("settings.connection_testing"),
+                "busy",
+            )
         thread.start()
+
+    @staticmethod
+    def _set_connection_status(label: QLabel, text: str, state: str) -> None:
+        label.setText(text)
+        label.setVisible(bool(text))
+        label.setProperty("state", state)
+        label.style().unpolish(label)
+        label.style().polish(label)
 
     @Slot()
     def test_text_connection(self) -> None:
@@ -2045,13 +2195,17 @@ class SettingsWindow(QWidget):
     def _on_connection_success(self) -> None:
         if not self._close_requested and not self._shutdown_requested:
             self._set_status(self._tr("settings.connection_success"))
-            self.text_ai_status_label.setText(self._tr("settings.text_ai_connection_success"))
+            self._set_connection_status(
+                self.text_ai_status_label,
+                self._tr("settings.text_ai_connection_success"),
+                "ready",
+            )
 
     @Slot(str)
     def _on_connection_failed(self, message: str) -> None:
         if not self._close_requested and not self._shutdown_requested:
             self._set_status(message)
-            self.text_ai_status_label.setText(message)
+            self._set_connection_status(self.text_ai_status_label, message, "error")
 
     @Slot()
     def _on_connection_finished(self) -> None:
@@ -2068,13 +2222,13 @@ class SettingsWindow(QWidget):
     def _on_vision_connection_success(self) -> None:
         if not self._close_requested and not self._shutdown_requested:
             message = self._tr("settings.vision_ai_connection_success")
-            self.vision_ai_status_label.setText(message)
+            self._set_connection_status(self.vision_ai_status_label, message, "ready")
             self._set_status(message)
 
     @Slot(str)
     def _on_vision_connection_failed(self, message: str) -> None:
         if not self._close_requested and not self._shutdown_requested:
-            self.vision_ai_status_label.setText(message)
+            self._set_connection_status(self.vision_ai_status_label, message, "error")
             self._set_status(message)
 
     @Slot()
@@ -2093,12 +2247,19 @@ class SettingsWindow(QWidget):
         if self._connection_worker is not None:
             self._connection_worker.request_cancel()
             self._set_status(self._tr("settings.cancelling"))
+            self._set_connection_status(
+                self.text_ai_status_label, self._tr("settings.cancelling"), "busy"
+            )
 
     @Slot()
     def cancel_vision_connection(self) -> None:
         if self._vision_connection_worker is not None:
             self._vision_connection_worker.request_cancel()
-            self.vision_ai_status_label.setText(self._tr("settings.cancelling"))
+            self._set_connection_status(
+                self.vision_ai_status_label,
+                self._tr("settings.cancelling"),
+                "busy",
+            )
 
     @Slot()
     def test_google_vision(self) -> None:

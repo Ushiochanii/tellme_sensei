@@ -224,12 +224,12 @@ def test_settings_can_round_trip_custom_models_and_provider_credentials(
     window.text_model_combo.setCurrentIndex(
         window.text_model_combo.findData(CUSTOM_MODEL_ID)
     )
-    window.text_model_combo.setEditText("qwen-custom")
+    window.text_custom_model_edit.setText("qwen-custom")
     window.vision_provider_combo.setCurrentIndex(window.vision_provider_combo.findData("zai"))
     window.vision_model_combo.setCurrentIndex(
         window.vision_model_combo.findData(CUSTOM_MODEL_ID)
     )
-    window.vision_model_combo.setEditText("glm-custom-vision")
+    window.vision_custom_model_edit.setText("glm-custom-vision")
     window.provider_credentials_combo.setCurrentIndex(
         window.provider_credentials_combo.findData("qwen")
     )
@@ -242,5 +242,27 @@ def test_settings_can_round_trip_custom_models_and_provider_credentials(
     assert saved["vision_ai_model"] == "glm-custom-vision"
     assert secrets.values["qwen"] == "q-key"
     assert window.text_model_combo.currentData() == CUSTOM_MODEL_ID
+    window.deleteLater()
+    qt_app.processEvents()
+
+
+def test_settings_exposes_explicit_custom_model_and_provider_credential_status(
+    qt_app,
+    tmp_path: Path,
+) -> None:
+    secrets = FakeProviderSecrets({"qwen": "q-key"})
+    window = SettingsWindow(manager(tmp_path, secrets), local_ocr_supported=False)
+    window.text_provider_combo.setCurrentIndex(window.text_provider_combo.findData("qwen"))
+    assert "configured" in window.text_credential_status_label.text().lower()
+
+    window.text_provider_combo.setCurrentIndex(window.text_provider_combo.findData("zai"))
+    assert "required" in window.text_credential_status_label.text().lower()
+    window.text_model_combo.setCurrentIndex(window.text_model_combo.findData(CUSTOM_MODEL_ID))
+    assert not window.text_custom_model_edit.isHidden()
+    window.text_custom_model_edit.setText("glm-private")
+    assert window._selected_model(window.text_model_combo) == "glm-private"
+
+    window.text_manage_credentials_button.click()
+    assert window.provider_credentials_combo.currentData() == "zai"
     window.deleteLater()
     qt_app.processEvents()
