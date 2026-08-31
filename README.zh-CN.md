@@ -68,7 +68,7 @@ macOS 版本为 ad-hoc 签名且未公证。macOS 可能需要在“隐私与安
 | Watch | `Ctrl+Shift+W` | 框选一个区域后自动开始监控 | 反复出现在同一区域的题目 |
 | Context Watch | `Ctrl+Shift+C` | 依次框选上下文和题目后自动开始监控 | 带共享上下文区域的连续题目 |
 
-Text AI 和 Vision AI 在 **Settings → AI Models** 中分别选择服务商和模型。内置模型列表会按能力过滤；列表外的模型可以使用**自定义模型 ID…**，并会原样保存。选定的 Vision 模型会直接接收题目截图。模式由用户明确选择；TellMeSensei 不会在文字模式和视觉模式之间自动切换或回退。
+Text AI 和 Vision AI 在 **Settings → AI Models** 中分别选择服务商和模型。每个能力卡片会直接显示相应服务商凭据是否已经配置，并可跳转到共用的服务商凭据编辑区。内置模型列表会按能力过滤；选择**自定义模型 ID…**后才会显示专用输入框，内容会原样保存。选定的 Vision 模型会直接接收题目截图。模式由用户明确选择；TellMeSensei 不会在文字模式和视觉模式之间自动切换或回退。
 
 Watch 快捷键会直接开始对应的框选流程，不再经过单独设置界面或手动 Start 操作；Text / OCR 与 Vision 请在 **Settings → Auto Watch** 中统一配置。
 

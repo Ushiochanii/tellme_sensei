@@ -801,8 +801,8 @@ def test_settings_window_loads_and_saves_values(qt_app, tmp_path) -> None:
     assert window.provider_api_key_edit.text() == "stored-key"
     window.provider_api_key_edit.setText("new-key")
     window.text_model_combo.setCurrentIndex(window.text_model_combo.findData("__custom__"))
-    window.text_model_combo.setEditText("new-model")
-    window.timeout_edit.setText("33")
+    window.text_custom_model_edit.setText("new-model")
+    window.timeout_spin.setValue(33)
     window.save()
 
     assert secret_store.set_values == ["new-key"]
@@ -859,8 +859,13 @@ def test_connection_success_runs_off_gui_thread(qt_app, tmp_path, monkeypatch) -
     window.test_text_connection()
     assert window.is_connection_running()
     assert "Testing connection" in window.status_label.text()
+    assert window.text_ai_status_label.property("state") == "busy"
+    assert not window.text_provider_combo.isEnabled()
+    assert window.vision_provider_combo.isEnabled()
     wait_for_connection(window, qt_app)
     assert window.status_label.text() == "Connection successful."
+    assert window.text_ai_status_label.property("state") == "ready"
+    assert window.text_provider_combo.isEnabled()
     assert worker_threads and worker_threads[0] != main_thread
     window.deleteLater()
     qt_app.processEvents()
@@ -880,7 +885,7 @@ def test_connection_uses_current_input_key_and_bounded_timeout(qt_app, tmp_path,
     monkeypatch.setattr(settings_window_module, "AnalysisService", FakeService)
     window = SettingsWindow(make_manager(tmp_path, FakeSecretStore("stored-key")))
     window.provider_api_key_edit.setText("input-key")
-    window.timeout_edit.setText("60")
+    window.timeout_spin.setValue(60)
     window.test_text_connection()
     wait_for_connection(window, qt_app)
 
@@ -903,6 +908,8 @@ def test_connection_401_is_shown_in_window(qt_app, tmp_path, monkeypatch) -> Non
     window.test_text_connection()
     wait_for_connection(window, qt_app)
     assert "401" in window.status_label.text()
+    assert "401" in window.text_ai_status_label.text()
+    assert window.text_ai_status_label.property("state") == "error"
     window.deleteLater()
     qt_app.processEvents()
 

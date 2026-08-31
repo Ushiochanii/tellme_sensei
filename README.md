@@ -68,7 +68,7 @@ Interface-language changes require restarting TellMeSensei. Answer-language chan
 | Watch | `Ctrl+Shift+W` | Select one region, then start monitoring automatically | Repeated questions in one region |
 | Context Watch | `Ctrl+Shift+C` | Select Context, then Question, then start monitoring automatically | Repeated questions with shared context |
 
-Text AI and Vision AI have independent provider/model selections under **Settings → AI Models**. Bundled model lists are filtered by capability; choose **Custom model ID...** when a provider model is not listed. The selected Vision model receives the captured screenshot directly. The user explicitly chooses the mode; TellMeSensei does not automatically switch or fall back between Text and Vision.
+Text AI and Vision AI have independent provider/model selections under **Settings → AI Models**. Each capability card shows whether its provider credential is configured and links directly to the shared provider credential editor. Bundled model lists are filtered by capability; choose **Custom model ID...** to reveal a dedicated field when a provider model is not listed. The selected Vision model receives the captured screenshot directly. The user explicitly chooses the mode; TellMeSensei does not automatically switch or fall back between Text and Vision.
 
 Watch shortcuts start the matching screen-selection workflow directly. There is no separate setup or manual Start action; configure the shared Text / OCR vs Vision preference under **Settings → Auto Watch**.
 
